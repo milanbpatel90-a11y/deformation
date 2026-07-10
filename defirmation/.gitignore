@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+.env
+runs/
+*.pt
+*.onnx
+dataset/images/
+dataset/masks/
+output/
+.venv/

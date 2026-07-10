@@ -1,0 +1,16 @@
+{
+  "frame_width": 145,
+  "lens_width": 54,
+  "lens_height": 50,
+  "bridge_width": 18,
+  "temple_length": 140,
+  "rim_thickness": 1.2,
+  "material": "metal",
+  "shape": "geometric",
+  "nose_pads": true,
+  "temple_curve_angle": 28,
+  "nose_pad_distance": 10.8,
+  "nose_pad_angle": 15,
+  "nose_pad_height": 3,
+  "color": "#d9a7a2"
+}

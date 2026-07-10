@@ -1,0 +1,70 @@
+{
+  "bridge": {
+    "confidence": 1.0,
+    "part": "Bridge",
+    "type": "pad",
+    "width_mm": 16.0
+  },
+  "deformation_regions": {
+    "bridge": {
+      "type": "pad"
+    },
+    "frame": {
+      "family": "geometric"
+    },
+    "temples": {
+      "average_length_mm": 135.0
+    }
+  },
+  "hinges": {
+    "left": {
+      "confidence": 1.0,
+      "part": "LeftTemple"
+    },
+    "right": {
+      "confidence": 1.0,
+      "part": "RightTemple"
+    }
+  },
+  "lens_planes": {
+    "left": {
+      "aspect_height_mm": 46.0,
+      "aspect_width_mm": 50.0,
+      "part": "LeftLens"
+    },
+    "right": {
+      "aspect_height_mm": 46.0,
+      "aspect_width_mm": 50.0,
+      "part": "RightLens"
+    }
+  },
+  "rim_loops": {
+    "frame": {
+      "confidence": 1.0,
+      "part": "Frame"
+    },
+    "left_lens": {
+      "confidence": 1.0,
+      "part": "LeftRim"
+    },
+    "right_lens": {
+      "confidence": 1.0,
+      "part": "RightRim"
+    }
+  },
+  "symmetry_plane": {
+    "axis": "X",
+    "frame_width_mm": 135.0,
+    "score": 1.0
+  },
+  "temple_pivots": {
+    "left": {
+      "estimated_length_mm": 135.0,
+      "part": "LeftTemple"
+    },
+    "right": {
+      "estimated_length_mm": 135.0,
+      "part": "RightTemple"
+    }
+  }
+}

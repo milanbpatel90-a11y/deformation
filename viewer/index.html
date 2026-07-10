@@ -1,0 +1,400 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Defirmation VTO Viewer</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: system-ui, sans-serif; background: #1a1a2e; color: #eee; display: flex; height: 100vh; overflow: hidden; }
+
+    /* ── Pipeline stages table ── */
+    #pipeline-stages { display: none; margin-top: 4px; }
+    #pipeline-stages table { width: 100%; border-collapse: collapse; font-size: 11px; }
+    #pipeline-stages th { text-align: left; color: #8888aa; font-weight: 500; padding: 3px 4px; border-bottom: 1px solid #2a2a4a; }
+    #pipeline-stages td { padding: 3px 4px; border-bottom: 1px solid #1e1e3a; vertical-align: top; color: #ccc; }
+    #pipeline-stages td.name { color: #fff; font-weight: 600; white-space: nowrap; }
+    #pipeline-stages td.ms { color: #8be9fd; text-align: right; white-space: nowrap; }
+    #pipeline-stages td.status-done  { color: #50fa7b; }
+    #pipeline-stages td.status-error { color: #ff5555; }
+    #pipeline-stages td.detail { color: #888; font-size: 10px; max-width: 120px; word-break: break-all; }
+
+    /* ── Sidebar Layout ── */
+    #sidebar {
+      width: 300px; min-width: 300px; max-width: 300px; background: #12122a; border-right: 1px solid #2a2a4a;
+      display: flex; flex-direction: column; padding: 16px; gap: 14px; overflow-y: auto; height: 100vh;
+    }
+    #sidebar h2 { font-size: 15px; font-weight: 700; color: #fff; border-bottom: 1px solid #2a2a4a; padding-bottom: 10px; }
+
+    .section-title { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: #8888aa; margin-bottom: 8px; font-weight: 600; }
+
+    /* ── Image upload cards ── */
+    .section {
+      display: flex; flex-direction: column; gap: 8px;
+    }
+
+    .img-card {
+      background: #1e1e3a; border: 1px dashed #3a3a5a; border-radius: 6px;
+      padding: 10px; cursor: pointer; transition: border-color .2s, background-color .2s;
+    }
+    .img-card:hover { border-color: #8be9fd; background-color: #2a2a4a; }
+    .img-card input[type=file] { display: none; }
+    .img-card .label { font-size: 12px; color: #aaa; margin-bottom: 6px; display: flex; align-items: center; gap: 6px; font-weight: 500; }
+    .img-card .badge { font-size: 10px; padding: 2px 6px; border-radius: 10px; background: #2a2a4a; color: #8888cc; font-weight: 600; }
+    .img-card .badge.required { background: #3a1a2a; color: #ff6b9d; }
+    .img-card .badge.optional { background: #2a3a4a; color: #88aacc; }
+    .img-card .preview {
+      width: 100%; height: 70px; object-fit: contain; border-radius: 4px;
+      background: #12122a; display: none;
+    }
+    .img-card .placeholder { font-size: 11px; color: #666; text-align: center; padding: 12px 0; }
+
+    /* ── Form inputs ── */
+    label.field { display: block; font-size: 12px; color: #aaa; margin-bottom: 4px; font-weight: 500; }
+    input[type=color] { width: 100%; height: 32px; border: none; border-radius: 4px; cursor: pointer; padding: 2px; background: #1e1e3a; }
+    input[type=text], input[type=file] {
+      width: 100%; padding: 7px 10px; border-radius: 4px; border: 1px solid #3a3a5a;
+      background: #1e1e3a; color: #eee; font-size: 13px;
+    }
+    input[type=text]:focus, input[type=color]:focus { outline: none; border-color: #8be9fd; box-shadow: 0 0 4px rgba(139, 233, 253, 0.2); }
+
+    /* ── Generate button ── */
+    #generate-btn {
+      width: 100%; padding: 10px; border-radius: 6px; border: none;
+      background: #e94560; color: #fff; font-weight: 700; font-size: 14px;
+      cursor: pointer; transition: background .2s, opacity .2s;
+    }
+    #generate-btn:hover:not(:disabled) { background: #ff6b81; }
+    #generate-btn:disabled { background: #555; cursor: not-allowed; opacity: 0.6; }
+
+    /* ── Status box ── */
+    #status-box {
+      background: #1e1e3a; border-radius: 6px; padding: 10px;
+      font-size: 12px; color: #8be9fd; line-height: 1.6; min-height: 48px;
+      white-space: pre-wrap; word-wrap: break-word;
+    }
+    #status-box.error { color: #ff6b9d; }
+
+    /* ── Download button ── */
+    #download-btn {
+      display: none; width: 100%; padding: 8px; border-radius: 6px; border: none;
+      background: #2a6a4a; color: #eee; font-size: 13px; cursor: pointer; font-weight: 600;
+    }
+    #download-btn:hover { background: #3a9a6a; }
+
+    /* ── Manual GLB load section ── */
+    .divider { border: none; border-top: 1px solid #2a2a4a; margin: 8px 0; }
+    #glb-url { width: 100%; padding: 7px 10px; border-radius: 4px; border: 1px solid #3a3a5a; background: #1e1e3a; color: #eee; font-size: 12px; }
+    #glb-file { width: 100%; padding: 6px; border-radius: 4px; border: 1px solid #3a3a5a; background: #1e1e3a; color: #aaa; font-size: 12px; margin-top: 6px; }
+    #load-btn {
+      width: 100%; padding: 8px; border-radius: 6px; border: none;
+      background: #2a3a6a; color: #eee; font-size: 13px; cursor: pointer; margin-top: 6px; font-weight: 600;
+    }
+    #load-btn:hover { background: #3a4a8a; }
+
+    /* ── Canvas container ── */
+    #canvas-container { 
+      flex: 1; position: relative; display: flex; align-items: center; justify-content: center;
+    }
+    #canvas-container canvas { display: block; width: 100%; height: 100%; }
+
+    /* ── Overlay status ── */
+    #overlay-status {
+      position: absolute; bottom: 16px; left: 50%; transform: translateX(-50%);
+      background: rgba(0, 0, 0, 0.7); color: #8be9fd; font-size: 12px;
+      padding: 8px 16px; border-radius: 20px; pointer-events: none; white-space: nowrap;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+    }
+    #overlay-status.error { color: #ff6b9d; }
+  </style>
+</head>
+<body>
+
+<div id="sidebar">
+  <h2>Defirmation VTO</h2>
+
+  <!-- Image uploads -->
+  <div class="section">
+    <div class="section-title">Upload Images</div>
+
+    <div class="img-card" id="card-front" onclick="document.getElementById('input-front').click()">
+      <input type="file" id="input-front" accept="image/*" />
+      <div class="label">Front view <span class="badge required">required</span></div>
+      <img class="preview" id="prev-front" />
+      <div class="placeholder" id="ph-front">Click to choose</div>
+    </div>
+
+    <div class="img-card" id="card-side" onclick="document.getElementById('input-side').click()">
+      <input type="file" id="input-side" accept="image/*" />
+      <div class="label">Side view <span class="badge optional">optional</span></div>
+      <img class="preview" id="prev-side" />
+      <div class="placeholder" id="ph-side">Click to choose</div>
+    </div>
+
+    <div class="img-card" id="card-top" onclick="document.getElementById('input-top').click()">
+      <input type="file" id="input-top" accept="image/*" />
+      <div class="label">Top view <span class="badge optional">optional — rim thickness</span></div>
+      <img class="preview" id="prev-top" />
+      <div class="placeholder" id="ph-top">Click to choose</div>
+    </div>
+  </div>
+
+  <!-- Options -->
+  <div class="section">
+    <div class="section-title">Options</div>
+    <label class="field">Frame colour</label>
+    <input type="color" id="color-pick" value="#d9a7a2" />
+    <label class="field">Template</label>
+    <input type="text" id="template-input" placeholder="auto-detect" />
+  </div>
+
+  <button id="generate-btn" disabled>Generate 3D Mesh</button>
+
+  <div id="status-box">Upload a front image to begin.</div>
+  <button id="download-btn">⬇ Download GLB</button>
+
+  <!-- Pipeline stages appear here after generation -->
+  <div id="pipeline-stages">
+    <div class="section-title">Pipeline Stages</div>
+    <table>
+      <thead><tr><th>#</th><th>Stage</th><th>ms</th><th>Detail</th></tr></thead>
+      <tbody id="stages-body"></tbody>
+    </table>
+  </div>
+
+  <!-- Manual load -->
+  <hr class="divider" />
+  <div class="section">
+    <div class="section-title">Or load existing GLB</div>
+    <input type="text" id="glb-url" placeholder="/api/output/job.glb" />
+    <input type="file" id="glb-file" accept=".glb" />
+    <button id="load-btn">Load Model</button>
+  </div>
+</div>
+
+<div id="canvas-container">
+  <div id="overlay-status">Drag to rotate · Scroll to zoom</div>
+</div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.162.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.162.0/examples/jsm/"
+  }
+}
+</script>
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+
+// ── Three.js scene setup ──────────────────────────────────────────────────────
+const container = document.getElementById('canvas-container');
+const overlayStatus = document.getElementById('overlay-status');
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x1a1a2e);
+
+const camera = new THREE.PerspectiveCamera(45, container.clientWidth / container.clientHeight, 0.1, 1000);
+camera.position.set(0, 0, 200);
+
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setSize(container.clientWidth, container.clientHeight);
+renderer.setPixelRatio(window.devicePixelRatio);
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+container.appendChild(renderer.domElement);
+
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+controls.dampingFactor = 0.05;
+
+scene.add(new THREE.AmbientLight(0xffffff, 0.6));
+const key = new THREE.DirectionalLight(0xffffff, 1.2);
+key.position.set(50, 80, 100);
+scene.add(key);
+const fill = new THREE.DirectionalLight(0x8be9fd, 0.4);
+fill.position.set(-60, -20, 50);
+scene.add(fill);
+
+let currentModel = null;
+
+function fitCamera(obj) {
+  const box = new THREE.Box3().setFromObject(obj);
+  const size = box.getSize(new THREE.Vector3());
+  const center = box.getCenter(new THREE.Vector3());
+  const maxDim = Math.max(size.x, size.y, size.z);
+  camera.position.set(center.x, center.y, center.z + maxDim * 2.5);
+  controls.target.copy(center);
+  controls.update();
+}
+
+function loadGLB(url) {
+  const loader = new GLTFLoader();
+  overlayStatus.textContent = 'Loading model…';
+  loader.load(url, (gltf) => {
+    if (currentModel) scene.remove(currentModel);
+    currentModel = gltf.scene;
+    scene.add(currentModel);
+    fitCamera(currentModel);
+    overlayStatus.textContent = 'Loaded · Drag to rotate · Scroll to zoom';
+  }, undefined, (err) => {
+    overlayStatus.textContent = 'Error loading model: ' + err.message;
+  });
+}
+
+(function animate() { requestAnimationFrame(animate); controls.update(); renderer.render(scene, camera); })();
+
+window.addEventListener('resize', () => {
+  camera.aspect = container.clientWidth / container.clientHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(container.clientWidth, container.clientHeight);
+});
+
+// ── Image preview helpers with memory management ────────────────────────────
+function wirePreview(inputId, prevId, phId, cardId) {
+  const input = document.getElementById(inputId);
+  const preview = document.getElementById(prevId);
+  const placeholder = document.getElementById(phId);
+  
+  input.addEventListener('change', (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    
+    // Revoke old URL if exists to prevent memory leak
+    if (preview.src && preview.src.startsWith('blob:')) {
+      URL.revokeObjectURL(preview.src);
+    }
+    
+    // Load new preview
+    const url = URL.createObjectURL(file);
+    preview.src = url;
+    preview.style.display = 'block';
+    placeholder.style.display = 'none';
+    updateGenerateBtn();
+  });
+}
+
+wirePreview('input-front', 'prev-front', 'ph-front', 'card-front');
+wirePreview('input-side',  'prev-side',  'ph-side', 'card-side');
+wirePreview('input-top',   'prev-top',   'ph-top', 'card-top');
+
+function updateGenerateBtn() {
+  const hasFront = document.getElementById('input-front').files.length > 0;
+  document.getElementById('generate-btn').disabled = !hasFront;
+}
+
+// ── Pipeline stages renderer ──────────────────────────────────────────────────
+function renderPipelineStages(stages) {
+  if (!stages || !stages.length) return;
+  const wrap = document.getElementById('pipeline-stages');
+  const tbody = document.getElementById('stages-body');
+  tbody.innerHTML = '';
+  const STAGE_ICONS = {
+    'YOLO Segmentation':    '🔍',
+    'Shape Classification': '🔷',
+    'Measurement Extraction':'📐',
+    'Template Selection':   '📋',
+    'Template Deformation': '🔧',
+    'Texture Mapping':      '🎨',
+    'GLB Export':           '📦',
+  };
+  stages.forEach((s, i) => {
+    // Summarise detail as key: val pairs, skip large arrays
+    const detailStr = Object.entries(s.detail || {})
+      .filter(([, v]) => !Array.isArray(v) || v.length <= 4)
+      .map(([k, v]) => {
+        if (Array.isArray(v)) return `${k}: [${v.join(', ')}]`;
+        if (typeof v === 'object' && v !== null) return `${k}: {…}`;
+        return `${k}: ${v}`;
+      })
+      .join('  ·  ');
+    const icon = STAGE_ICONS[s.name] || '▸';
+    const tr = document.createElement('tr');
+    tr.innerHTML =
+      `<td>${i + 1}</td>` +
+      `<td class="name">${icon} ${s.name}</td>` +
+      `<td class="ms">${s.duration_ms}</td>` +
+      `<td class="detail status-${s.status}">${detailStr || '—'}</td>`;
+    tbody.appendChild(tr);
+  });
+  wrap.style.display = 'block';
+}
+
+// ── Generate 3D mesh ──────────────────────────────────────────────────────────
+const statusBox = document.getElementById('status-box');
+const downloadBtn = document.getElementById('download-btn');
+
+document.getElementById('generate-btn').addEventListener('click', async () => {
+  const frontFile = document.getElementById('input-front').files[0];
+  if (!frontFile) return;
+
+  const btn = document.getElementById('generate-btn');
+  btn.disabled = true;
+  btn.textContent = 'Generating…';
+  statusBox.className = '';
+  statusBox.textContent = 'Running pipeline…';
+  downloadBtn.style.display = 'none';
+  document.getElementById('pipeline-stages').style.display = 'none';
+
+  const form = new FormData();
+  form.append('front', frontFile);
+
+  const sideFile = document.getElementById('input-side').files[0];
+  if (sideFile) form.append('side', sideFile);
+
+  const topFile = document.getElementById('input-top').files[0];
+  if (topFile) form.append('top', topFile);
+
+  form.append('color', document.getElementById('color-pick').value);
+  const tpl = document.getElementById('template-input').value.trim();
+  if (tpl) form.append('template', tpl);
+
+  try {
+    const resp = await fetch('/api/deform', { method: 'POST', body: form });
+    const data = await resp.json();
+
+    if (!resp.ok) {
+      statusBox.className = 'error';
+      statusBox.textContent = 'Error: ' + (data.detail || resp.statusText);
+      return;
+    }
+
+    const m = data.measurements || {};
+    statusBox.textContent =
+      `✓ Done  ·  Template: ${data.template}\n` +
+      `Frame ${m.frame_width}mm  ·  Lens ${m.lens_width}×${m.lens_height}mm\n` +
+      `Bridge ${m.bridge_width}mm  ·  Temple ${m.temple_length}mm  ·  Rim ${m.rim_thickness}mm`;
+
+    renderPipelineStages(data.pipeline);
+
+    downloadBtn.style.display = 'block';
+    downloadBtn.onclick = () => { window.location.href = data.download_url; };
+
+    loadGLB(data.download_url);
+  } catch (err) {
+    statusBox.className = 'error';
+    statusBox.textContent = 'Network error: ' + err.message;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Generate 3D Mesh';
+    updateGenerateBtn();
+  }
+});
+
+// ── Manual GLB load ───────────────────────────────────────────────────────────
+document.getElementById('load-btn').addEventListener('click', () => {
+  const fileInput = document.getElementById('glb-file');
+  const urlVal = document.getElementById('glb-url').value.trim();
+  if (fileInput.files.length > 0) {
+    loadGLB(URL.createObjectURL(fileInput.files[0]));
+  } else if (urlVal) {
+    loadGLB(urlVal);
+  }
+});
+
+const params = new URLSearchParams(window.location.search);
+if (params.get('glb')) loadGLB(params.get('glb'));
+</script>
+</body>
+</html>

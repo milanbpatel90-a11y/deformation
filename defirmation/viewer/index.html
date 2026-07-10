@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Defirmation VTO Viewer</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: system-ui, sans-serif; background: #1a1a2e; color: #eee; }
+    #canvas-container { width: 100vw; height: 100vh; }
+    #controls {
+      position: fixed; top: 16px; left: 16px; background: rgba(0,0,0,0.7);
+      padding: 16px; border-radius: 8px; max-width: 320px;
+    }
+    label { display: block; margin: 8px 0 4px; font-size: 13px; color: #aaa; }
+    input, button { width: 100%; padding: 8px; border-radius: 4px; border: 1px solid #444; background: #2a2a4a; color: #fff; }
+    button { margin-top: 12px; cursor: pointer; background: #e94560; border: none; font-weight: 600; }
+    button:hover { background: #ff6b81; }
+    #status { margin-top: 8px; font-size: 12px; color: #8be9fd; }
+  </style>
+</head>
+<body>
+  <div id="controls">
+    <h3>Glasses VTO Viewer</h3>
+    <label>GLB URL or upload</label>
+    <input type="text" id="glb-url" placeholder="/api/output/your-job.glb" />
+    <input type="file" id="glb-file" accept=".glb" style="margin-top:8px" />
+    <button id="load-btn">Load Model</button>
+    <div id="status">Drag to rotate · Scroll to zoom</div>
+  </div>
+  <div id="canvas-container"></div>
+
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.162.0/build/three.module.js",
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.162.0/examples/jsm/"
+    }
+  }
+  </script>
+  <script type="module">
+    import * as THREE from 'three';
+    import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+    import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+
+    const container = document.getElementById('canvas-container');
+    const status = document.getElementById('status');
+
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x1a1a2e);
+
+    const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
+    camera.position.set(0, 0, 200);
+
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.setPixelRatio(window.devicePixelRatio);
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    container.appendChild(renderer.domElement);
+
+    const controls = new OrbitControls(camera, renderer.domElement);
+    controls.enableDamping = true;
+
+    scene.add(new THREE.AmbientLight(0xffffff, 0.6));
+    const key = new THREE.DirectionalLight(0xffffff, 1.2);
+    key.position.set(50, 80, 100);
+    scene.add(key);
+    const fill = new THREE.DirectionalLight(0x8be9fd, 0.4);
+    fill.position.set(-60, -20, 50);
+    scene.add(fill);
+
+    let currentModel = null;
+
+    function fitCamera(obj) {
+      const box = new THREE.Box3().setFromObject(obj);
+      const size = box.getSize(new THREE.Vector3());
+      const center = box.getCenter(new THREE.Vector3());
+      const maxDim = Math.max(size.x, size.y, size.z);
+      camera.position.set(center.x, center.y, center.z + maxDim * 2.5);
+      controls.target.copy(center);
+      controls.update();
+    }
+
+    function loadGLB(url) {
+      const loader = new GLTFLoader();
+      status.textContent = 'Loading...';
+      loader.load(url, (gltf) => {
+        if (currentModel) scene.remove(currentModel);
+        currentModel = gltf.scene;
+        scene.add(currentModel);
+        fitCamera(currentModel);
+        status.textContent = 'Loaded: ' + url.split('/').pop();
+      }, undefined, (err) => {
+        status.textContent = 'Error: ' + err.message;
+      });
+    }
+
+    document.getElementById('load-btn').addEventListener('click', () => {
+      const fileInput = document.getElementById('glb-file');
+      const urlInput = document.getElementById('glb-url').value.trim();
+      if (fileInput.files.length > 0) {
+        loadGLB(URL.createObjectURL(fileInput.files[0]));
+      } else if (urlInput) {
+        loadGLB(urlInput);
+      }
+    });
+
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('glb')) loadGLB(params.get('glb'));
+
+    function animate() {
+      requestAnimationFrame(animate);
+      controls.update();
+      renderer.render(scene, camera);
+    }
+    animate();
+
+    window.addEventListener('resize', () => {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+  </script>
+</body>
+</html>

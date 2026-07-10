@@ -1,0 +1,32 @@
+{
+  "name": "acetate_black",
+  "shape": "rectangle",
+  "material": "acetate",
+  "glb_file": "geometric_metal.glb",
+  "dimensions": {
+    "frame_width": 135,
+    "lens_width": 50,
+    "lens_height": 46,
+    "bridge_width": 15.47,
+    "temple_length": 135.0,
+    "rim_thickness": 1.0,
+    "temple_curve_angle": 28,
+    "nose_pad_distance": 16,
+    "nose_pad_angle": 15,
+    "nose_pad_height": 3
+  },
+  "parts": [
+    "Frame",
+    "LeftLens",
+    "RightLens",
+    "Bridge",
+    "LeftRim",
+    "RightRim",
+    "LeftTemple",
+    "RightTemple",
+    "NosePads",
+    "TempleTips"
+  ],
+  "rim_pull_strength": 0.65,
+  "toolkit_style": "acetate"
+}

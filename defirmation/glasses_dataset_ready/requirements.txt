@@ -1,0 +1,17 @@
+# Core Dependencies for Auto-3D Glasses Pipeline
+
+# Computer Vision & ML
+ultralytics>=8.1.0          # YOLOv8 segmentation
+opencv-python>=4.9.0        # Image processing
+numpy>=1.26.0               # Numerical operations
+
+# 3D Modeling & Geometry
+trimesh>=4.2.0              # 3D mesh processing
+pygltflib>=1.16.0           # GLB file export
+shapely>=2.0.0              # 2D geometry operations
+
+# Optional (for API deployment)
+fastapi>=0.110.0            # REST API framework
+uvicorn[standard]>=0.27.0   # ASGI server
+python-multipart>=0.0.9     # File upload support
+pydantic>=2.6.0             # Data validation

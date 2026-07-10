@@ -1,0 +1,6 @@
+path: C:\Users\Petpooja-607\Desktop\defirmation\dataset
+train: images/train
+val: images/val
+
+names:
+  0: eyewear
