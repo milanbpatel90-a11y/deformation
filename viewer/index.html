@@ -4,6 +4,8 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Defirmation VTO Viewer</title>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js" crossorigin="anonymous"></script>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body { font-family: system-ui, sans-serif; background: #1a1a2e; color: #eee; display: flex; height: 100vh; overflow: hidden; }
@@ -137,6 +139,13 @@
       <img class="preview" id="prev-top" />
       <div class="placeholder" id="ph-top">Click to choose</div>
     </div>
+
+    <div class="img-card" id="card-multi" onclick="document.getElementById('input-multi').click()">
+      <input type="file" id="input-multi" accept="image/*" multiple />
+      <div class="label">Multi-View (4-6 images) <span class="badge optional">multi-fusion</span></div>
+      <div class="placeholder" id="ph-multi">Click to choose multiple files</div>
+      <div id="multi-preview-list" style="display: flex; gap: 4px; flex-wrap: wrap; margin-top: 6px;"></div>
+    </div>
   </div>
 
   <!-- Options -->
@@ -149,6 +158,7 @@
   </div>
 
   <button id="generate-btn" disabled>Generate 3D Mesh</button>
+  <button id="tryon-btn" style="margin-top: 8px; width: 100%; padding: 10px; border-radius: 6px; border: none; background: #8be9fd; color: #1a1a2e; font-weight: 700; font-size: 14px; cursor: pointer; transition: background .2s;">Enable Webcam Try-On</button>
 
   <div id="status-box">Upload a front image to begin.</div>
   <button id="download-btn">⬇ Download GLB</button>
@@ -218,6 +228,18 @@ fill.position.set(-60, -20, 50);
 scene.add(fill);
 
 let currentModel = null;
+let isTryOnActive = false;
+let tryOnCamera = null;
+let tryOnVideo = null;
+let faceMesh = null;
+
+// Dynamically create webcam element
+tryOnVideo = document.createElement('video');
+tryOnVideo.id = 'webcam';
+tryOnVideo.autoplay = true;
+tryOnVideo.playsInline = true;
+tryOnVideo.style.display = 'none';
+document.body.appendChild(tryOnVideo);
 
 function fitCamera(obj) {
   const box = new THREE.Box3().setFromObject(obj);
@@ -236,14 +258,22 @@ function loadGLB(url) {
     if (currentModel) scene.remove(currentModel);
     currentModel = gltf.scene;
     scene.add(currentModel);
-    fitCamera(currentModel);
+    if (!isTryOnActive) {
+      fitCamera(currentModel);
+    }
     overlayStatus.textContent = 'Loaded · Drag to rotate · Scroll to zoom';
   }, undefined, (err) => {
     overlayStatus.textContent = 'Error loading model: ' + err.message;
   });
 }
 
-(function animate() { requestAnimationFrame(animate); controls.update(); renderer.render(scene, camera); })();
+(function animate() { 
+  requestAnimationFrame(animate); 
+  if (!isTryOnActive) {
+    controls.update(); 
+  }
+  renderer.render(scene, camera); 
+})();
 
 window.addEventListener('resize', () => {
   camera.aspect = container.clientWidth / container.clientHeight;
@@ -279,9 +309,38 @@ wirePreview('input-front', 'prev-front', 'ph-front', 'card-front');
 wirePreview('input-side',  'prev-side',  'ph-side', 'card-side');
 wirePreview('input-top',   'prev-top',   'ph-top', 'card-top');
 
+// Wire up multi-view selection
+const inputMulti = document.getElementById('input-multi');
+const multiPreviewList = document.getElementById('multi-preview-list');
+
+inputMulti.addEventListener('change', (e) => {
+  const files = e.target.files;
+  multiPreviewList.innerHTML = '';
+  if (!files || files.length === 0) return;
+  
+  for (let file of files) {
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const img = document.createElement('img');
+      img.src = event.target.result;
+      img.style.width = '45px';
+      img.style.height = '45px';
+      img.style.objectFit = 'contain';
+      img.style.borderRadius = '4px';
+      img.style.background = '#12122a';
+      img.style.border = '1px solid #3a3a5a';
+      multiPreviewList.appendChild(img);
+    };
+    reader.readAsDataURL(file);
+  }
+  
+  updateGenerateBtn();
+});
+
 function updateGenerateBtn() {
   const hasFront = document.getElementById('input-front').files.length > 0;
-  document.getElementById('generate-btn').disabled = !hasFront;
+  const hasMulti = document.getElementById('input-multi').files.length > 0;
+  document.getElementById('generate-btn').disabled = !(hasFront || hasMulti);
 }
 
 // ── Pipeline stages renderer ──────────────────────────────────────────────────
@@ -298,11 +357,14 @@ function renderPipelineStages(stages) {
     'Template Deformation': '🔧',
     'Texture Mapping':      '🎨',
     'GLB Export':           '📦',
+    'Multi-View Classification and Extraction': '🖼️',
+    'Template Scoring': '📋',
+    'Mesh Quality Optimization': '🧼'
   };
   stages.forEach((s, i) => {
     // Summarise detail as key: val pairs, skip large arrays
     const detailStr = Object.entries(s.detail || {})
-      .filter(([, v]) => !Array.isArray(v) || v.length <= 4)
+      .filter(([, v]) => !Array.isArray(v) || v.length <= 6)
       .map(([k, v]) => {
         if (Array.isArray(v)) return `${k}: [${v.join(', ')}]`;
         if (typeof v === 'object' && v !== null) return `${k}: {…}`;
@@ -327,7 +389,8 @@ const downloadBtn = document.getElementById('download-btn');
 
 document.getElementById('generate-btn').addEventListener('click', async () => {
   const frontFile = document.getElementById('input-front').files[0];
-  if (!frontFile) return;
+  const multiFiles = document.getElementById('input-multi').files;
+  if (!frontFile && (!multiFiles || multiFiles.length === 0)) return;
 
   const btn = document.getElementById('generate-btn');
   btn.disabled = true;
@@ -338,20 +401,28 @@ document.getElementById('generate-btn').addEventListener('click', async () => {
   document.getElementById('pipeline-stages').style.display = 'none';
 
   const form = new FormData();
-  form.append('front', frontFile);
+  const API_BASE = 'http://localhost:8000';
+  let endpoint = `${API_BASE}/api/deform`;
 
-  const sideFile = document.getElementById('input-side').files[0];
-  if (sideFile) form.append('side', sideFile);
-
-  const topFile = document.getElementById('input-top').files[0];
-  if (topFile) form.append('top', topFile);
+  if (multiFiles && multiFiles.length > 0) {
+    endpoint = `${API_BASE}/api/deform/multi-view`;
+    for (let file of multiFiles) {
+      form.append('images', file);
+    }
+  } else {
+    form.append('front', frontFile);
+    const sideFile = document.getElementById('input-side').files[0];
+    if (sideFile) form.append('side', sideFile);
+    const topFile = document.getElementById('input-top').files[0];
+    if (topFile) form.append('top', topFile);
+  }
 
   form.append('color', document.getElementById('color-pick').value);
   const tpl = document.getElementById('template-input').value.trim();
   if (tpl) form.append('template', tpl);
 
   try {
-    const resp = await fetch('/api/deform', { method: 'POST', body: form });
+    const resp = await fetch(endpoint, { method: 'POST', body: form });
     const data = await resp.json();
 
     if (!resp.ok) {
@@ -368,10 +439,14 @@ document.getElementById('generate-btn').addEventListener('click', async () => {
 
     renderPipelineStages(data.pipeline);
 
-    downloadBtn.style.display = 'block';
-    downloadBtn.onclick = () => { window.location.href = data.download_url; };
+    const fullDownloadUrl = data.download_url.startsWith('http') 
+      ? data.download_url 
+      : `${API_BASE}${data.download_url}`;
 
-    loadGLB(data.download_url);
+    downloadBtn.style.display = 'block';
+    downloadBtn.onclick = () => { window.location.href = fullDownloadUrl; };
+
+    loadGLB(fullDownloadUrl);
   } catch (err) {
     statusBox.className = 'error';
     statusBox.textContent = 'Network error: ' + err.message;
@@ -390,6 +465,153 @@ document.getElementById('load-btn').addEventListener('click', () => {
     loadGLB(URL.createObjectURL(fileInput.files[0]));
   } else if (urlVal) {
     loadGLB(urlVal);
+  }
+});
+
+// ── Webcam Try-On MediaPipe Face Mesh Logic ────────────────────────────────────
+function onResults(results) {
+  if (!isTryOnActive) return;
+  
+  if (results.multiFaceLandmarks && results.multiFaceLandmarks.length > 0) {
+    const landmarks = results.multiFaceLandmarks[0];
+    
+    // Landmark 168: Nose Bridge
+    // Landmark 234: Left Temple; Landmark 454: Right Temple
+    // Landmark 10: Forehead; Landmark 152: Chin
+    const p_nose = mapLandmark(landmarks[168]);
+    const p_left = mapLandmark(landmarks[234]);
+    const p_right = mapLandmark(landmarks[454]);
+    const p_forehead = mapLandmark(landmarks[10]);
+    const p_chin = mapLandmark(landmarks[152]);
+    
+    if (currentModel) {
+      // 1. Position the model at the nose bridge
+      currentModel.position.copy(p_nose);
+      
+      // Calculate rotation
+      const v_width = p_right.clone().sub(p_left);
+      const face_width = v_width.length();
+      v_width.normalize();
+      
+      const v_up = p_forehead.clone().sub(p_chin).normalize();
+      const v_dir = new THREE.Vector3().crossVectors(v_width, v_up).normalize();
+      const v_orthogonal_up = new THREE.Vector3().crossVectors(v_dir, v_width).normalize();
+      
+      const m_rot = new THREE.Matrix4().makeBasis(v_width, v_orthogonal_up, v_dir);
+      currentModel.rotation.setFromRotationMatrix(m_rot);
+      
+      // Offset slightly forward along the look direction so glasses sit on the nose
+      currentModel.position.addScaledVector(v_dir, face_width * 0.15);
+      
+      // 2. Scale the model dynamically based on face width
+      const base_scale = face_width * 0.72;
+      currentModel.scale.set(base_scale, base_scale, base_scale);
+      
+      overlayStatus.textContent = 'Webcam Try-On active · Face tracked';
+    }
+  } else {
+    overlayStatus.textContent = 'Webcam Try-On active · Searching for face…';
+  }
+}
+
+function mapLandmark(lm) {
+  const x = (lm.x - 0.5) * 2;
+  const y = -(lm.y - 0.5) * 2;
+  const z = -lm.z * 2;
+  
+  const fov_rad = (camera.fov * Math.PI) / 180;
+  const height_at_z = 2 * Math.tan(fov_rad / 2) * 200;
+  const width_at_z = height_at_z * camera.aspect;
+  
+  return new THREE.Vector3(
+    x * (width_at_z / 2),
+    y * (height_at_z / 2),
+    z * 120
+  );
+}
+
+async function startTryOn() {
+  if (faceMesh === null) {
+    faceMesh = new FaceMesh({
+      locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`
+    });
+    faceMesh.setOptions({
+      maxNumFaces: 1,
+      refineLandmarks: true,
+      minDetectionConfidence: 0.5,
+      minTrackingConfidence: 0.5
+    });
+    faceMesh.onResults(onResults);
+  }
+  
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: { width: 640, height: 480, facingMode: 'user' }
+    });
+    tryOnVideo.srcObject = stream;
+    await tryOnVideo.play();
+    
+    const videoTexture = new THREE.VideoTexture(tryOnVideo);
+    videoTexture.colorSpace = THREE.SRGBColorSpace;
+    scene.background = videoTexture;
+    
+    camera.position.set(0, 0, 200);
+    controls.enabled = false;
+    
+    tryOnCamera = new Camera(tryOnVideo, {
+      onFrame: async () => {
+        if (isTryOnActive) {
+          await faceMesh.send({ image: tryOnVideo });
+        }
+      },
+      width: 640,
+      height: 480
+    });
+    tryOnCamera.start();
+    
+    isTryOnActive = true;
+    const tryonBtn = document.getElementById('tryon-btn');
+    tryonBtn.textContent = 'Disable Webcam Try-On';
+    tryonBtn.style.background = '#ff5555';
+    tryonBtn.style.color = '#fff';
+    overlayStatus.textContent = 'Webcam Try-On active · Searching for face…';
+  } catch (err) {
+    alert('Webcam VTO error: ' + err.message);
+    stopTryOn();
+  }
+}
+
+function stopTryOn() {
+  isTryOnActive = false;
+  const tryonBtn = document.getElementById('tryon-btn');
+  tryonBtn.textContent = 'Enable Webcam Try-On';
+  tryonBtn.style.background = '#8be9fd';
+  tryonBtn.style.color = '#1a1a2e';
+  
+  if (tryOnCamera) {
+    tryOnCamera.stop();
+  }
+  if (tryOnVideo.srcObject) {
+    tryOnVideo.srcObject.getTracks().forEach(track => track.stop());
+    tryOnVideo.srcObject = null;
+  }
+  
+  scene.background = new THREE.Color(0x1a1a2e);
+  controls.enabled = true;
+  if (currentModel) {
+    currentModel.position.set(0, 0, 0);
+    currentModel.rotation.set(0, 0, 0);
+    currentModel.scale.set(1, 1, 1);
+    fitCamera(currentModel);
+  }
+  overlayStatus.textContent = 'Drag to rotate · Scroll to zoom';
+}
+
+document.getElementById('tryon-btn').addEventListener('click', () => {
+  if (isTryOnActive) {
+    stopTryOn();
+  } else {
+    startTryOn();
   }
 });
 

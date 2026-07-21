@@ -1,2 +1,9 @@
-[]
+[
+  {
+    "name": "geometric_metal",
+    "glb_path": "geometric_metal.glb",
+    "descriptor_path": "descriptors/geometric_metal.json",
+    "thumbnail_path": "thumbnails/geometric_metal.png"
+  }
+]
 

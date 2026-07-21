@@ -48,6 +48,7 @@ def root():
         "version": "1.0.0",
         "endpoints": {
             "deform_from_images": "POST /api/deform",
+            "deform_from_multi_view": "POST /api/deform/multi-view",
             "deform_from_measurements": "POST /api/deform/measurements",
             "templates": "GET /api/templates",
             "download": "GET /api/output/{filename}",
@@ -113,6 +114,52 @@ async def deform_from_images(
             color=color,
             template_override=template,
             top_path=top_path,
+        )
+        result["job_id"] = job_id
+        result["download_url"] = f"/api/output/{job_id}.glb"
+        return result
+    except Exception as exc:
+        import traceback
+        tb = traceback.format_exc()
+        raise HTTPException(status_code=500, detail=f"{exc}\n\nTraceback:\n{tb}") from exc
+    finally:
+        import shutil as _shutil
+        _shutil.rmtree(work_dir, ignore_errors=True)
+
+
+@app.post("/api/deform/multi-view")
+async def deform_from_multiple_images(
+    images: list[UploadFile] = File(..., description="List of 4-6 product images from multiple view angles"),
+    color: str = Form("#d9a7a2"),
+    template: str | None = Form(None),
+):
+    """Upload multiple product images, classify views, fuse measurements, deform template, and export GLB."""
+    job_id = uuid.uuid4().hex[:12]
+    work_dir = OUTPUT_DIR / f"_upload_multi_{job_id}"
+    work_dir.mkdir(parents=True, exist_ok=True)
+
+    try:
+        image_paths = []
+        for i, file in enumerate(images):
+            if not file.filename:
+                continue
+            file_bytes = await file.read()
+            if not file_bytes:
+                continue
+            suffix = Path(file.filename).suffix or ".jpg"
+            file_path = work_dir / f"image_{i}{suffix}"
+            file_path.write_bytes(file_bytes)
+            image_paths.append(file_path)
+
+        if not image_paths:
+            raise ValueError("No non-empty images uploaded")
+
+        out_path = OUTPUT_DIR / f"{job_id}.glb"
+        result = pipeline.run_from_multiple_images(
+            image_paths,
+            out_path,
+            color=color,
+            template_override=template,
         )
         result["job_id"] = job_id
         result["download_url"] = f"/api/output/{job_id}.glb"

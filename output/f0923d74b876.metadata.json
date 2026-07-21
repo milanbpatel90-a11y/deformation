@@ -1,0 +1,28 @@
+{
+  "shape": "geometric",
+  "material": "metal",
+  "frame_width": 140.0,
+  "bridge_width": 17.1,
+  "temple_length": 135.8,
+  "template_used": "geometric_metal",
+  "color": "#1d1b1b",
+  "lens_color": "#ffffff",
+  "lens_opacity": 0.31,
+  "anchors": {
+    "NoseBridge": [
+      -1.3877787807814457e-17,
+      -6.938893903907228e-17,
+      -1.3877787807814457e-17
+    ],
+    "LeftHinge": [
+      -190.4609295776298,
+      -2.75844746010504,
+      -5.502223942897915
+    ],
+    "RightHinge": [
+      190.46092412650373,
+      -2.758446405382239,
+      -5.382853281645582
+    ]
+  }
+}

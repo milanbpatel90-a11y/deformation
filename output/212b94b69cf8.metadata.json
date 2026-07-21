@@ -1,0 +1,26 @@
+{
+  "shape": "rectangle",
+  "material": "plastic",
+  "frame_width": 135.0,
+  "bridge_width": 43.2,
+  "temple_length": 11691.3,
+  "template_used": "geometric_metal",
+  "color": "#d9a7a2",
+  "anchors": {
+    "NoseBridge": [
+      -8.881784197001252e-16,
+      0.0,
+      0.0
+    ],
+    "LeftHinge": [
+      -15896.851602978115,
+      -47.92834841729237,
+      5159.710622582027
+    ],
+    "RightHinge": [
+      15896.851602978115,
+      -47.92834841729237,
+      5159.710622582027
+    ]
+  }
+}

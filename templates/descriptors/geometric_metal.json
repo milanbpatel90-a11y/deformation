@@ -1,70 +1,104 @@
 {
-  "bridge": {
-    "confidence": 1.0,
-    "part": "Bridge",
-    "type": "pad",
-    "width_mm": 16.0
-  },
-  "deformation_regions": {
-    "bridge": {
-      "type": "pad"
-    },
-    "frame": {
-      "family": "geometric"
-    },
-    "temples": {
-      "average_length_mm": 135.0
-    }
-  },
+  "version": "1.0",
+  "template_name": "geometric_metal",
   "hinges": {
     "left": {
-      "confidence": 1.0,
+      "part": "LeftTemple",
+      "confidence": 1.0
+    },
+    "right": {
+      "part": "RightTemple",
+      "confidence": 1.0
+    }
+  },
+  "bridge": {
+    "part": "Bridge",
+    "type": "straight"
+  },
+  "rim_loops": {
+    "frame": {
+      "part": "Frame",
+      "confidence": 1.0
+    },
+    "left_rim": {
+      "part": "LeftRim",
+      "confidence": 1.0
+    },
+    "right_rim": {
+      "part": "RightRim",
+      "confidence": 1.0
+    }
+  },
+  "temple_pivots": {
+    "left": {
       "part": "LeftTemple"
     },
     "right": {
-      "confidence": 1.0,
       "part": "RightTemple"
     }
   },
   "lens_planes": {
     "left": {
-      "aspect_height_mm": 46.0,
-      "aspect_width_mm": 50.0,
       "part": "LeftLens"
     },
     "right": {
-      "aspect_height_mm": 46.0,
-      "aspect_width_mm": 50.0,
       "part": "RightLens"
-    }
-  },
-  "rim_loops": {
-    "frame": {
-      "confidence": 1.0,
-      "part": "Frame"
-    },
-    "left_lens": {
-      "confidence": 1.0,
-      "part": "LeftRim"
-    },
-    "right_lens": {
-      "confidence": 1.0,
-      "part": "RightRim"
     }
   },
   "symmetry_plane": {
     "axis": "X",
-    "frame_width_mm": 135.0,
-    "score": 1.0
+    "point": [0, 0, 0],
+    "normal": [1, 0, 0]
   },
-  "temple_pivots": {
-    "left": {
-      "estimated_length_mm": 135.0,
+  "deformation_regions": {
+    "bridge_region": {
+      "part": "Bridge",
+      "type": "straight"
+    },
+    "left_rim_region": {
+      "part": "LeftRim"
+    },
+    "right_rim_region": {
+      "part": "RightRim"
+    },
+    "left_temple_region": {
       "part": "LeftTemple"
     },
-    "right": {
-      "estimated_length_mm": 135.0,
+    "right_temple_region": {
       "part": "RightTemple"
     }
+  },
+  "vertex_groups": {
+    "frame": ["Frame"],
+    "bridge": ["Bridge"],
+    "left_temple": ["LeftTemple"],
+    "right_temple": ["RightTemple"],
+    "left_lens": ["LeftLens"],
+    "right_lens": ["RightLens"],
+    "left_rim": ["LeftRim"],
+    "right_rim": ["RightRim"]
+  },
+  "constraints": {
+    "bridge_width": {
+      "min": 14.0,
+      "max": 24.0
+    },
+    "temple_length": {
+      "min": 120.0,
+      "max": 155.0
+    },
+    "minimum_wall_thickness": 0.8
+  },
+  "template_dims": {
+    "frame_width": 145.0,
+    "lens_width": 54.0,
+    "lens_height": 50.0,
+    "bridge_width": 18.0,
+    "temple_length": 140.0,
+    "rim_thickness": 1.2,
+    "nose_pad_distance": 15.0,
+    "nose_pad_height": 18.0,
+    "nose_pad_angle": 15.0,
+    "temple_curve_angle": 28.0
   }
 }

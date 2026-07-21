@@ -21,6 +21,9 @@ from backend.template_library.loader import TemplateLibrary
 from backend.template_matching import FeatureExtractor, TemplateMatcher
 from backend.deformer.descriptor_loader import DescriptorLoader
 from backend.deformer.deformation_context import DeformationContext
+from backend.fusion.view_classifier import ViewClassifier
+from backend.fusion.measurement_fuser import MeasurementFuser
+from backend.fusion.opacity_detector import OpacityDetector
 
 
 class DeformationPipeline:
@@ -117,17 +120,29 @@ class DeformationPipeline:
         template_name = template_info.name
 
         scene = trimesh.load(template_info.glb_path, force="scene")
-        descriptor = self.descriptor_loader.load(template_name, measurements=measurements, template_info=template_info)
-        ctx = DeformationContext(
-            template_info=template_info,
-            template_scene=scene,
-            descriptor=descriptor,
-            measurements=measurements,
-        )
-        rim_pull = self.library.rim_pull_strength(template_name)
-        deformer = MeshDeformer(scene, template_info.dimensions, rim_pull_strength=rim_pull)
-        deformed_ctx, quality = deformer.deform(ctx)
-        deformed = deformed_ctx.template_scene
+        
+        # Try to load descriptor, fall back to simple deformation if template not properly prepared
+        try:
+            descriptor = self.descriptor_loader.load(template_name, measurements=measurements, template_info=template_info)
+            ctx = DeformationContext(
+                template_info=template_info,
+                template_scene=scene,
+                descriptor=descriptor,
+                measurements=measurements,
+            )
+            rim_pull = self.library.rim_pull_strength(template_name)
+            deformer = MeshDeformer(scene, template_info.dimensions, rim_pull_strength=rim_pull)
+            deformed_ctx, quality = deformer.deform(ctx)
+            deformed = deformed_ctx.template_scene
+        except (ValueError, KeyError) as e:
+            # Fallback to old simple deformation without descriptors
+            import warnings
+            warnings.warn(f"Template {template_name} not properly prepared (descriptor error: {e}). Using simple deformation fallback.")
+            from backend.deformer.engine import MeshDeformer as OldDeformer
+            rim_pull = self.library.rim_pull_strength(template_name)
+            deformer = OldDeformer(scene, template_info.dimensions, rim_pull_strength=rim_pull)
+            deformed = deformer.deform(measurements)
+        
         deformed = apply_materials(deformed, measurements)
 
         out = Path(output_path)
@@ -317,6 +332,176 @@ class DeformationPipeline:
             },
             "scale_factors": self._scale_summary(measurements, template_info.dimensions),
             "lens_contour": lens_contour.model_dump(),
+            "pipeline": report.to_dict(),
+        }
+
+    def run_from_multiple_images(
+        self,
+        image_paths: list[Path | str],
+        output_path: Path | str | None = None,
+        color: str = "#d9a7a2",
+        template_override: str | None = None,
+    ) -> dict:
+        """
+        Run the full pipeline on 4-6 images:
+        1. Read and segment all images.
+        2. Classify each view (front, side, top, perspective).
+        3. Extract measurements and contours from each view.
+        4. Fuse the measurements.
+        5. Detect lens opacity & dominant color from the front view's lens region.
+        6. Apply template deformation and material mapping using the fused measurements.
+        """
+        report = PipelineReport()
+        s1 = report.add("Multi-View Classification and Extraction")
+        t = s1.start()
+        
+        view_classifier = ViewClassifier()
+        fuser = MeasurementFuser()
+        opacity_detector = OpacityDetector()
+        
+        extracted_views = []
+        front_image = None
+        front_lens_contour = None
+        
+        for path in image_paths:
+            img = self._imread(path)
+            if img is None:
+                continue
+            
+            masks = self.segmenter.segment(img)
+            view_type = view_classifier.classify_view(img, masks["front"])
+            
+            style = self.classifier.classify_style(img, masks["front"])
+            measurements, lens_contour = self.measurer.extract_from_images(
+                img,
+                side=None,
+                mask=masks["front"],
+                shape=style.shape,
+                material=style.material,
+                nose_pads=style.nose_pads,
+                color=color,
+            )
+            
+            extracted_views.append((view_type, measurements))
+            
+            if view_type == "front" and front_image is None:
+                front_image = img
+                front_lens_contour = lens_contour
+                
+        if not extracted_views:
+            raise ValueError("No valid images could be processed")
+            
+        # If no front view was classified, pick the first view as front fallback
+        if front_image is None:
+            first_view_type, first_ms = extracted_views[0]
+            front_image = self._imread(image_paths[0])
+            extracted_views[0] = ("front", first_ms)
+            masks = self.segmenter.segment(front_image)
+            front_lens_contour = self.measurer.extract_lens_contour(front_image, masks["front"])
+            
+        # Fuse measurements
+        fused_measurements = fuser.fuse(extracted_views)
+        
+        # Detect lens opacity and dominant color
+        lens_opacity, lens_color = opacity_detector.detect(front_image, front_lens_contour)
+        fused_measurements.lens_color = lens_color
+        fused_measurements.lens_opacity = lens_opacity
+        
+        s1.finish(t, views=[v[0] for v in extracted_views])
+        
+        # Run template selection, deformation, material mapping, and export
+        s2 = report.add("Template Scoring")
+        t = s2.start()
+        
+        style = self._style_from_measurements(fused_measurements)
+        features = self.feature_extractor.from_measurements(fused_measurements, style)
+        match = self.matcher.match(features, template_override)
+        template_info = match.best.template
+        template_name = template_info.name
+        s2.finish(
+            t,
+            template=template_name,
+            score=match.best.score,
+            reason=match.best.reason,
+            breakdown=match.best.breakdown,
+            top_candidates=[
+                {"template": candidate.template.name, "score": candidate.score, "reason": candidate.reason}
+                for candidate in match.candidates[:3]
+            ],
+        )
+
+        s3 = report.add("Template Deformation")
+        t = s3.start()
+        scene = trimesh.load(template_info.glb_path, force="scene")
+        descriptor = self.descriptor_loader.load(template_name, measurements=fused_measurements, template_info=template_info)
+        ctx = DeformationContext(
+            template_info=template_info,
+            template_scene=scene,
+            descriptor=descriptor,
+            measurements=fused_measurements,
+        )
+        rim_pull = self.library.rim_pull_strength(template_name)
+        deformer = MeshDeformer(scene, template_info.dimensions, rim_pull_strength=rim_pull)
+        deformed_ctx, quality = deformer.deform(ctx, front_lens_contour)
+        deformed = deformed_ctx.template_scene
+        s3.finish(
+            t,
+            rim_pull_strength=rim_pull,
+            deformation_mode="template_vertex_groups",
+            scale_factors=self._scale_summary(fused_measurements, template_info.dimensions),
+        )
+
+        s4 = report.add("Texture Mapping")
+        t = s4.start()
+        deformed = apply_materials(deformed, fused_measurements)
+        frame_parts = [name for name in deformed.geometry if name not in {"LeftLens", "RightLens"}]
+        s4.finish(
+            t,
+            material=fused_measurements.material.value,
+            color=fused_measurements.color,
+            lens_color=fused_measurements.lens_color,
+            lens_opacity=fused_measurements.lens_opacity,
+            frame_parts=frame_parts,
+            lens_parts=["LeftLens", "RightLens"],
+        )
+
+        s5 = report.add("Mesh Quality Optimization")
+        t = s5.start()
+        deformed = self._optimize_scene(deformed)
+        s5.finish(t, preserved_topology=True, preserved_materials=True)
+
+        s6 = report.add("GLB Export")
+        t = s6.start()
+        if output_path is None:
+            output_path = Path("output") / f"{template_name}_deformed.glb"
+        out = Path(output_path)
+
+        self.exporter.export(deformed, out, fused_measurements, template_name)
+        meta_path = out.with_suffix(".metadata.json")
+        anchors = self.exporter._compute_anchors(deformed, fused_measurements)
+
+        metadata = ExportMetadata(
+            shape=fused_measurements.shape.value,
+            material=fused_measurements.material.value,
+            frame_width=fused_measurements.frame_width,
+            bridge_width=fused_measurements.bridge_width,
+            temple_length=fused_measurements.temple_length,
+            template_used=template_name,
+            color=fused_measurements.color,
+            lens_color=fused_measurements.lens_color,
+            lens_opacity=fused_measurements.lens_opacity,
+        )
+        self.exporter.export_metadata_json(metadata, anchors, meta_path)
+        s6.finish(t, output=str(out), size_kb=round(out.stat().st_size / 1024, 1))
+
+        return {
+            "output_glb": str(out),
+            "metadata_json": str(meta_path),
+            "measurements": fused_measurements.model_dump(),
+            "template": template_name,
+            "features": features.model_dump(mode="json"),
+            "scale_factors": self._scale_summary(fused_measurements, template_info.dimensions),
+            "lens_contour": front_lens_contour.model_dump(),
             "pipeline": report.to_dict(),
         }
 

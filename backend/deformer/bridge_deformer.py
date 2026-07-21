@@ -174,21 +174,34 @@ class BridgeDeformer(BaseDeformer):
         current_half_width = target["current_width"] * 0.5
         half_height = max(target["current_height"] * 0.5, 1e-6)
 
-        for source, destination in zip(original_bridge, updated_bridge, strict=False):
-            delta = destination - source
-            distances = np.linalg.norm(frame_vertices - source, axis=1)
-            matching = np.where(distances < 1e-5)[0]
-            if len(matching) > 0:
-                frame_vertices[matching] = destination
+        # 1. Use cKDTree to build lookup maps once and find exact matching indices
+        from scipy.spatial import cKDTree
+        tree = cKDTree(frame_vertices)
+        distances, indices = tree.query(original_bridge, distance_upper_bound=1e-5)
+        valid_matches = distances < 1e-5
+        
+        # 2. Vectorized deformation: compute influence for all frame vertices
+        influence = self._bridge_region_influence(frame_vertices, bridge_center, current_half_width, half_height)
+        
+        # Scale factors
+        width_scale = target["target_width"] / max(target["current_width"], 1e-6)
+        height_scale = target["target_height"] / max(target["current_height"], 1e-6)
+        depth_scale = target["target_depth"] / max(selection.bridge_bounds[1, 2] - selection.bridge_bounds[0, 2], 1e-6)
 
-            influence = self._bridge_region_influence(frame_vertices, bridge_center, current_half_width, half_height)
-            frame_vertices += delta * influence[:, None] * 0.12
+        # Scale frame vertices relative to bridge center, weighted by influence
+        frame_vertices[:, 0] += (frame_vertices[:, 0] - bridge_center[0]) * (width_scale - 1.0) * influence
+        frame_vertices[:, 1] += (frame_vertices[:, 1] - bridge_center[1]) * (height_scale - 1.0) * influence
+        frame_vertices[:, 2] += (frame_vertices[:, 2] - bridge_center[2]) * (depth_scale - 1.0) * influence
 
+        # 3. Smooth expansion/translation if bridge is wider
         if target_half_width > current_half_width:
             expansion = target_half_width - current_half_width
             x_offsets = np.sign(frame_vertices[:, 0]) * expansion
-            influence = self._bridge_region_influence(frame_vertices, bridge_center, current_half_width, half_height)
             frame_vertices[:, 0] += x_offsets * influence * 0.18
+
+        # 4. Enforce exact boundary matching
+        if np.any(valid_matches):
+            frame_vertices[indices[valid_matches]] = updated_bridge[valid_matches]
 
         frame_vertices[:, 0] -= frame_vertices[:, 0].mean()
         frame_mesh.vertices = frame_vertices

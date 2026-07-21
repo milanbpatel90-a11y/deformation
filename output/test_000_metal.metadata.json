@@ -1,0 +1,20 @@
+{
+  "measurements": {
+    "frame_width": 140.0,
+    "lens_width": 53.2,
+    "lens_height": 49.0,
+    "bridge_width": 18.2,
+    "temple_length": 140.0,
+    "rim_thickness": 2.0,
+    "material": "plastic",
+    "shape": "geometric",
+    "nose_pads": false,
+    "temple_curve_angle": 28.0,
+    "nose_pad_distance": null,
+    "nose_pad_angle": null,
+    "nose_pad_height": null,
+    "color": "#000000"
+  },
+  "generator": "ParametricGLBGenerator",
+  "version": "1.0"
+}

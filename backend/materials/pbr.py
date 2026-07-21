@@ -49,12 +49,19 @@ def frame_material(measurements: Measurements) -> PBRMaterial:
     )
 
 
-def lens_material() -> PBRMaterial:
-    """Thin transparent lens material."""
+def lens_material(measurements: Measurements) -> PBRMaterial:
+    """Thin transparent/tinted lens material."""
+    color_hex = measurements.lens_color or "#ffffff"
+    opacity = measurements.lens_opacity if measurements.lens_opacity is not None else 0.31
+    rgba = hex_to_rgba(color_hex, alpha=opacity)
+    
+    # For higher opacity (sunglasses), make it slightly more reflective/metallic
+    metallic = 0.15 if opacity > 0.5 else 0.0
+    
     return PBRMaterial(
         name="Lens",
-        baseColorFactor=[255, 255, 255, 80],
-        metallicFactor=0.0,
+        baseColorFactor=rgba,
+        metallicFactor=metallic,
         roughnessFactor=0.05,
     )
 
@@ -62,7 +69,7 @@ def lens_material() -> PBRMaterial:
 def apply_materials(scene: trimesh.Scene, measurements: Measurements) -> trimesh.Scene:
     """Assign PBR materials to named parts in the scene."""
     frame_mat = frame_material(measurements)
-    lens_mat = lens_material()
+    lens_mat = lens_material(measurements)
 
     lens_parts = {"LeftLens", "RightLens"}
 

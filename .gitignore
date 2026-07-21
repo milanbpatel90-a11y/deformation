@@ -1,10 +1,27 @@
+# Python
 __pycache__/
 *.pyc
-.env
-runs/
-*.pt
-*.onnx
-dataset/images/
-dataset/masks/
-output/
+*.pyo
+
+# Virtual Environment
+venv/
 .venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+
+# Python packages
+*.egg-info/
+
+# Build
+build/
+dist/
+
+# Logs
+*.log
+
+# Dataset (optional)
+*.zip
+*.tmp

@@ -70,6 +70,8 @@ class Measurements(BaseModel):
     nose_pad_angle: float | None = None
     nose_pad_height: float | None = None
     color: str = "#d9a7a2"
+    lens_color: str | None = Field(default=None, description="Hex color code for the lenses")
+    lens_opacity: float | None = Field(default=None, description="Opacity of the lenses (0.0 to 1.0)")
 
 
 class TemplateDimensions(BaseModel):
@@ -160,6 +162,8 @@ class ExportMetadata(BaseModel):
     temple_length: float
     template_used: str
     color: str
+    lens_color: str | None = None
+    lens_opacity: float | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return self.model_dump()

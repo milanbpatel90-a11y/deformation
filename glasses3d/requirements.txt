@@ -1,0 +1,8 @@
+numpy>=1.26
+opencv-python>=4.9
+Pillow>=10.2
+trimesh>=4.2
+pygltflib>=1.16
+rembg>=2.0
+torch>=2.2
+mediapipe>=0.10

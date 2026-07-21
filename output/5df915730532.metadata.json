@@ -1,0 +1,26 @@
+{
+  "shape": "geometric",
+  "material": "acetate",
+  "frame_width": 135.0,
+  "bridge_width": 16.2,
+  "temple_length": 160.0,
+  "template_used": "geometric_metal",
+  "color": "#d9a7a2",
+  "anchors": {
+    "NoseBridge": [
+      4.440892098500626e-16,
+      0.0,
+      0.0
+    ],
+    "LeftHinge": [
+      -217.98639673136157,
+      -2.5386831664967486,
+      65.33850249164769
+    ],
+    "RightHinge": [
+      217.98639673136157,
+      -2.5386831664967486,
+      65.33850249164769
+    ]
+  }
+}
