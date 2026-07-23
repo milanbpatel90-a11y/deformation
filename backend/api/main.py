@@ -62,7 +62,7 @@ def root():
 @app.get("/api/templates")
 def list_templates():
     available = library.list_templates()
-    active = "geometric_metal" if "geometric_metal" in available else (available[0] if available else None)
+    active = "rectangle_plastic" if "rectangle_plastic" in available else (available[0] if available else None)
     return {
         "templates": available,
         "planned": available,
@@ -186,7 +186,7 @@ async def deform_from_measurements(
     nose_pads: bool = Form(True),
     temple_curve_angle: float = Form(28),
     color: str = Form("#d9a7a2"),
-    template: str = Form("geometric_metal"),
+    template: str = Form("rectangle_plastic"),
 ):
     """Deform template directly from known measurements (no images required)."""
     try:

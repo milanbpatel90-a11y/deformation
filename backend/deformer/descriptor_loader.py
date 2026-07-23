@@ -59,6 +59,7 @@ class TemplateDescriptor:
     hinges: dict[str, HingeDescriptor]
     rim_loops: dict[str, RimLoopDescriptor]
     bridge_center: np.ndarray
+    empty_anchors: dict[str, np.ndarray]
     temple_axis: dict[str, np.ndarray]
     lens_planes: dict[str, LensPlaneDescriptor]
     vertex_groups: dict[str, list[str]]
@@ -128,9 +129,10 @@ class DescriptorLoader:
         if not geometry:
             raise ValueError(f"No mesh geometry found in template scene: {resolved_template}")
 
-        hinges = self._load_hinges(payload["hinges"], geometry)
+        empty_anchors = self._load_empty_anchors(payload, scene)
+        hinges = self._load_hinges(payload["hinges"], geometry, empty_anchors)
         rim_loops = self._load_rim_loops(payload["rim_loops"], geometry)
-        bridge_center = self._load_bridge_center(payload["bridge"], geometry)
+        bridge_center = self._load_bridge_center(payload["bridge"], geometry, empty_anchors)
         temple_axis = {side: descriptor.axis for side, descriptor in hinges.items()}
         lens_planes = self._load_lens_planes(payload["lens_planes"], geometry)
         vertex_groups = self._build_vertex_groups(payload, geometry)
@@ -159,6 +161,7 @@ class DescriptorLoader:
             hinges=hinges,
             rim_loops=rim_loops,
             bridge_center=bridge_center,
+            empty_anchors=empty_anchors,
             temple_axis=temple_axis,
             lens_planes=lens_planes,
             vertex_groups=vertex_groups,
@@ -218,6 +221,7 @@ class DescriptorLoader:
         self,
         hinge_payload: dict[str, Any],
         geometry: dict[str, trimesh.Trimesh],
+        empty_anchors: dict[str, np.ndarray],
     ) -> dict[str, HingeDescriptor]:
         hinges: dict[str, HingeDescriptor] = {}
         for side in ("left", "right"):
@@ -226,7 +230,10 @@ class DescriptorLoader:
                 raise ValueError(f"Descriptor hinge entry missing for side '{side}'")
             part = str(payload.get("part") or ("LeftTemple" if side == "left" else "RightTemple"))
             geom = self._get_geometry(geometry, part, f"hinge:{side}")
-            pivot = self._infer_hinge_pivot(geom, side)
+            empty_name = payload.get("empty")
+            pivot = empty_anchors.get(str(empty_name)) if empty_name else None
+            if pivot is None:
+                pivot = self._infer_hinge_pivot(geom, side)
             axis = self._infer_temple_axis(geom, pivot, side)
             hinges[side] = HingeDescriptor(
                 part=part,
@@ -273,12 +280,34 @@ class DescriptorLoader:
         self,
         bridge_payload: dict[str, Any],
         geometry: dict[str, trimesh.Trimesh],
+        empty_anchors: dict[str, np.ndarray],
     ) -> np.ndarray:
         if not isinstance(bridge_payload, dict):
             raise ValueError("Descriptor bridge entry missing or invalid")
         part = str(bridge_payload.get("part") or "Bridge")
         geom = self._get_geometry(geometry, part, "bridge")
+        empty_name = bridge_payload.get("empty")
+        if empty_name and str(empty_name) in empty_anchors:
+            return empty_anchors[str(empty_name)]
         return geom.vertices.mean(axis=0).astype(np.float64)
+
+    @staticmethod
+    def _load_empty_anchors(payload: dict[str, Any], scene: trimesh.Scene) -> dict[str, np.ndarray]:
+        """Resolve descriptor-declared Blender empties to world-space control points."""
+        declared = payload.get("empties", {})
+        if not isinstance(declared, dict):
+            return {}
+
+        anchors: dict[str, np.ndarray] = {}
+        nodes = set(scene.graph.nodes)
+        for role, node_name in declared.items():
+            if not isinstance(node_name, str):
+                raise ValueError(f"Empty '{role}' must name a scene node")
+            if node_name not in nodes:
+                raise ValueError(f"Descriptor empty '{role}' references missing scene node '{node_name}'")
+            transform, _ = scene.graph.get(node_name)
+            anchors[node_name] = np.asarray(transform[:3, 3], dtype=np.float64)
+        return anchors
 
     def _load_lens_planes(
         self,

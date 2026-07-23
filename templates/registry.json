@@ -1,9 +1,51 @@
-[
-  {
-    "name": "geometric_metal",
-    "glb_path": "geometric_metal.glb",
-    "descriptor_path": "descriptors/geometric_metal.json",
-    "thumbnail_path": "thumbnails/geometric_metal.png"
+{
+  "rectangle_plastic": {
+    "name": "rectangle_plastic",
+    "style": "plastic_rectangle",
+    "glb_path": "C:\\Users\\Petpooja-607\\Desktop\\defirmation\\templates\\rectangle_plastic.glb",
+    "bridge_width_mm": 17.2,
+    "temple_length_mm": 145.0,
+    "nose_bridge_landmark": 6,
+    "left_hinge_landmark": 234,
+    "right_hinge_landmark": 454,
+    "ffd_grid_dims": [
+      4,
+      4,
+      4
+    ],
+    "lens_edge_vertices": [
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15,
+      16,
+      17,
+      18,
+      19,
+      20,
+      21,
+      22,
+      23,
+      24,
+      25,
+      26,
+      27,
+      28,
+      29,
+      30,
+      31,
+      32,
+      33,
+      34,
+      35
+    ],
+    "rim_pull_strength": 0.45,
+    "fallback_glb": "rectangle_plastic.glb",
+    "created_at": "2026-07-21T00:00:00",
+    "last_calibrated": null
   }
-]
-
+}

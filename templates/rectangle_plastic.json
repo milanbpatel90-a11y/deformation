@@ -1,0 +1,31 @@
+{
+  "name": "rectangle_plastic",
+  "shape": "rectangle",
+  "material": "plastic",
+  "style": "plastic_rectangle",
+  "glb_file": "rectangle_plastic.glb",
+  "fallback_glb": "rectangle_plastic.glb",
+  "dimensions": {
+    "frame_width": 140.0,
+    "lens_width": 53.0,
+    "lens_height": 42.0,
+    "bridge_width": 17.2,
+    "temple_length": 145.0,
+    "rim_thickness": 1.2,
+    "temple_curve_angle": 28.0,
+    "nose_pad_distance": 18.0,
+    "nose_pad_angle": 15.0,
+    "nose_pad_height": 3.0
+  },
+  "parts": [
+    "Frame",
+    "Bridge",
+    "LeftTemple",
+    "RightTemple",
+    "LeftLens",
+    "RightLens",
+    "LeftRim",
+    "RightRim"
+  ],
+  "rim_pull_strength": 0.45
+}

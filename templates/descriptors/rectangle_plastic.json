@@ -1,0 +1,80 @@
+{
+  "version": "1.0",
+  "template_name": "rectangle_plastic",
+  "template": "rectangle_plastic",
+  "style": "plastic_rectangle",
+  "parts": {
+    "frame": "Frame",
+    "bridge": "Bridge",
+    "left_temple": "LeftTemple",
+    "right_temple": "RightTemple",
+    "left_lens": "LeftLens",
+    "right_lens": "RightLens",
+    "left_rim": "LeftRim",
+    "right_rim": "RightRim"
+  },
+  "empties": {
+    "bridge": "Bridge_Center",
+    "left_hinge": "Left_Hinge",
+    "right_hinge": "Right_Hinge",
+    "left_temple_tip": "Left_Temple_End",
+    "right_temple_tip": "Right_Temple_End"
+  },
+  "bridge_width_mm": 17.2,
+  "lens_width_mm": 53,
+  "lens_height_mm": 42,
+  "frame_width_mm": 140,
+  "temple_length_mm": 145,
+  "allow_bridge_scaling": true,
+  "allow_frame_scaling": true,
+  "allow_lens_scaling": true,
+  "allow_temple_rotation": true,
+  "allow_temple_translation": true,
+  "allow_temple_scaling": false,
+  "mirror_symmetry": true,
+  "preserve_materials": true,
+  "preserve_uvs": true,
+  "deformation": {
+    "bridge_weight": 1.0,
+    "frame_weight": 0.8,
+    "lens_weight": 0.7,
+    "temple_weight": 1.0,
+    "smooth_iterations": 10
+  },
+  "hinges": {
+    "left": { "part": "LeftTemple", "empty": "Left_Hinge", "confidence": 1.0 },
+    "right": { "part": "RightTemple", "empty": "Right_Hinge", "confidence": 1.0 }
+  },
+  "bridge": { "part": "Bridge", "empty": "Bridge_Center", "type": "keyhole" },
+  "rim_loops": {
+    "frame": { "part": "Frame", "confidence": 1.0 },
+    "left_rim": { "part": "LeftRim", "confidence": 1.0 },
+    "right_rim": { "part": "RightRim", "confidence": 1.0 }
+  },
+  "temple_pivots": {
+    "left": { "part": "LeftTemple", "empty": "Left_Hinge" },
+    "right": { "part": "RightTemple", "empty": "Right_Hinge" }
+  },
+  "lens_planes": {
+    "left": { "part": "LeftLens" },
+    "right": { "part": "RightLens" }
+  },
+  "symmetry_plane": { "axis": "X", "point": [0, 0, 0], "normal": [1, 0, 0] },
+  "deformation_regions": {
+    "bridge_region": { "part": "Bridge", "type": "keyhole" },
+    "left_rim_region": { "part": "LeftRim" },
+    "right_rim_region": { "part": "RightRim" },
+    "left_temple_region": { "part": "LeftTemple" },
+    "right_temple_region": { "part": "RightTemple" }
+  },
+  "vertex_groups": {
+    "frame": ["Frame"],
+    "bridge": ["Bridge"],
+    "left_temple": ["LeftTemple"],
+    "right_temple": ["RightTemple"],
+    "left_lens": ["LeftLens"],
+    "right_lens": ["RightLens"],
+    "left_rim": ["LeftRim"],
+    "right_rim": ["RightRim"]
+  }
+}
