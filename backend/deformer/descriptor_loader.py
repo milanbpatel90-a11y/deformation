@@ -123,11 +123,17 @@ class DescriptorLoader:
         self._validate_payload(payload, resolved_descriptor)
 
         scene = trimesh.load(resolved_template, force="scene")
-        geometry = {
+        raw_geometry = {
             name: mesh for name, mesh in scene.geometry.items() if isinstance(mesh, trimesh.Trimesh) and len(mesh.vertices) > 0
         }
-        if not geometry:
+        if not raw_geometry:
             raise ValueError(f"No mesh geometry found in template scene: {resolved_template}")
+
+        # Apply mesh aliases: remap actual GLB mesh names → logical part names.
+        # Supports two sources:
+        #   1. "mesh_aliases" key in descriptor JSON  (explicit mapping)
+        #   2. Auto-inference when GLB has no structured names (fallback heuristic)
+        geometry = self._resolve_geometry_aliases(raw_geometry, payload)
 
         empty_anchors = self._load_empty_anchors(payload, scene)
         hinges = self._load_hinges(payload["hinges"], geometry, empty_anchors)
@@ -423,6 +429,111 @@ class DescriptorLoader:
             for part in name:
                 if part not in geometry:
                     raise ValueError(f"Descriptor references missing geometry part '{part}' in {template_path}")
+
+    @staticmethod
+    def _resolve_geometry_aliases(
+        raw_geometry: dict[str, trimesh.Trimesh],
+        payload: dict[str, Any],
+    ) -> dict[str, trimesh.Trimesh]:
+        """Map actual GLB mesh names to logical part names expected by deformers.
+
+        Resolution order:
+        1. Explicit ``mesh_aliases`` block in the descriptor JSON.
+        2. If no structured names are found, auto-infer from vertex counts / geometry.
+        3. Pass-through: if GLB already has the correct names they are kept.
+        """
+        # Step 1 – explicit aliases declared in descriptor
+        aliases: dict[str, str] = {}  # logical_name -> actual_glb_name
+        declared = payload.get("mesh_aliases", {})
+        if isinstance(declared, dict):
+            for logical, actual in declared.items():
+                if isinstance(actual, str) and actual in raw_geometry:
+                    aliases[logical] = actual
+
+        # Step 2 – if all required logical names already exist, nothing to do
+        required = {"Frame", "Bridge", "LeftTemple", "RightTemple",
+                    "LeftLens", "RightLens", "LeftRim", "RightRim"}
+        already_correct = required.issubset(raw_geometry.keys())
+        if already_correct and not aliases:
+            return raw_geometry
+
+        # Step 3 – auto-infer when GLB has generic Blender export names
+        #   Heuristic based on vertex count and X-centroid for side detection:
+        #   - Largest mesh  → combined frame region (Frame + Rims + Bridge)
+        #   - Cube-like mesh with many verts, split around X=0 → Lenses
+        #   - Two small meshes → Temples (left/right by X centroid sign)
+        if not aliases:
+            by_verts = sorted(raw_geometry.items(), key=lambda kv: len(kv[1].vertices), reverse=True)
+            n = len(by_verts)
+
+            if n == 4:
+                # Pattern confirmed for geometric_metal.glb:
+                #   by_verts[0] → Plane_glasses_mat_0  (61k) = Frame/Rim combined
+                #   by_verts[1] → Cube.002_glass_mat_0 (6k)  = Lenses combined
+                #   by_verts[2] → Plane.001_glasses_mat_0 (2385) = a temple
+                #   by_verts[3] → Plane.002_glasses_mat_0 (2385) = a temple
+                frame_name = by_verts[0][0]
+                lens_name  = by_verts[1][0]
+                # Determine left/right for temples by X centroid
+                t1_name, t1_mesh = by_verts[2]
+                t2_name, t2_mesh = by_verts[3]
+                t1_cx = float(t1_mesh.vertices[:, 0].mean())
+                t2_cx = float(t2_mesh.vertices[:, 0].mean())
+                if t1_cx <= t2_cx:
+                    left_temple_name, right_temple_name = t1_name, t2_name
+                else:
+                    left_temple_name, right_temple_name = t2_name, t1_name
+
+                aliases = {
+                    "Frame":        frame_name,
+                    "Bridge":       frame_name,  # bridge is part of the big mesh
+                    "LeftRim":      frame_name,
+                    "RightRim":     frame_name,
+                    "LeftLens":     lens_name,
+                    "RightLens":    lens_name,
+                    "LeftTemple":   left_temple_name,
+                    "RightTemple":  right_temple_name,
+                }
+            elif n >= 2:
+                # Generic fallback: largest → Frame/Bridge/Rims, smallest two → Temples
+                frame_name = by_verts[0][0]
+                aliases["Frame"]  = frame_name
+                aliases["Bridge"] = frame_name
+                aliases["LeftRim"]  = frame_name
+                aliases["RightRim"] = frame_name
+                # Lenses: second largest if available
+                aliases["LeftLens"]  = by_verts[min(1, n - 1)][0]
+                aliases["RightLens"] = by_verts[min(1, n - 1)][0]
+                # Temples by X centroid among remaining meshes
+                remaining = by_verts[2:] if n > 2 else by_verts[1:]
+                if len(remaining) >= 2:
+                    r0_cx = float(remaining[0][1].vertices[:, 0].mean())
+                    r1_cx = float(remaining[1][1].vertices[:, 0].mean())
+                    if r0_cx <= r1_cx:
+                        aliases["LeftTemple"]  = remaining[0][0]
+                        aliases["RightTemple"] = remaining[1][0]
+                    else:
+                        aliases["LeftTemple"]  = remaining[1][0]
+                        aliases["RightTemple"] = remaining[0][0]
+                elif len(remaining) == 1:
+                    aliases["LeftTemple"]  = remaining[0][0]
+                    aliases["RightTemple"] = remaining[0][0]
+                else:
+                    aliases["LeftTemple"]  = frame_name
+                    aliases["RightTemple"] = frame_name
+            else:
+                # Only one mesh – map everything to it
+                only = by_verts[0][0]
+                for name in required:
+                    aliases[name] = only
+
+        # Build resolved geometry: start with raw, then overlay logical names
+        resolved = dict(raw_geometry)
+        for logical_name, actual_name in aliases.items():
+            if actual_name in raw_geometry:
+                resolved[logical_name] = raw_geometry[actual_name]
+
+        return resolved
 
     @staticmethod
     def _get_geometry(
