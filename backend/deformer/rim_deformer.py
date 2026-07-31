@@ -245,16 +245,38 @@ class RimDeformer(BaseDeformer):
 
     @staticmethod
     def _align_contour_to_template(template_points: np.ndarray, target_points: np.ndarray) -> np.ndarray:
+        """Find the best cyclic shift + optional reversal using FFT cross-correlation (O(n log n))."""
+        n = len(template_points)
+        if n == 0:
+            return target_points
+
         best = target_points
         best_score = float("inf")
-        candidates = [target_points, target_points[::-1]]
-        for candidate in candidates:
-            for shift in range(len(candidate)):
-                rolled = np.roll(candidate, shift, axis=0)
+
+        for candidate in (target_points, target_points[::-1]):
+            # Use x-coordinate cross-correlation to find best cyclic shift cheaply
+            t_x = template_points[:, 0] - template_points[:, 0].mean()
+            c_x = candidate[:, 0] - candidate[:, 0].mean()
+            if len(t_x) != len(c_x):
+                # Fallback to direct if sizes mismatch
+                score = float(np.sum(np.linalg.norm(template_points - candidate, axis=1)))
+                if score < best_score:
+                    best_score = score
+                    best = candidate
+                continue
+
+            # FFT cross-correlation on x-coords to find best shift cheaply
+            corr = np.real(np.fft.ifft(np.fft.fft(t_x) * np.conj(np.fft.fft(c_x))))
+            best_shift = int(np.argmax(corr))
+
+            # Check best_shift and its neighbours (±1) for robustness
+            for shift in (best_shift - 1, best_shift, best_shift + 1):
+                rolled = np.roll(candidate, shift % n, axis=0)
                 score = float(np.sum(np.linalg.norm(template_points - rolled, axis=1)))
                 if score < best_score:
                     best_score = score
                     best = rolled
+
         return best
 
     @staticmethod
@@ -269,15 +291,40 @@ class RimDeformer(BaseDeformer):
 
     @staticmethod
     def _propagate_to_frame(frame_mesh, original_rim_vertices: np.ndarray, deformed_rim_vertices: np.ndarray) -> None:
-        frame_vertices = frame_mesh.vertices.copy()
-        deltas = deformed_rim_vertices - original_rim_vertices
-        for source, delta in zip(original_rim_vertices, deltas, strict=False):
-            distances = np.linalg.norm(frame_vertices - source, axis=1)
-            matching = np.where(distances < 1e-5)[0]
-            if len(matching) > 0:
-                frame_vertices[matching] += delta
-                continue
+        """Propagate rim deformation into frame mesh — vectorised with spatial index."""
+        from scipy.spatial import cKDTree
 
-            influence = BaseDeformer.apply_falloff(np.clip(1.0 - distances / 12.0, 0.0, 1.0))
-            frame_vertices += delta * influence[:, None] * 0.2
+        frame_vertices = frame_mesh.vertices.copy()
+        deltas = deformed_rim_vertices - original_rim_vertices  # (R, 3)
+
+        tree = cKDTree(frame_vertices)
+
+        # --- Exact matches (within 1e-5) ---
+        exact_indices = tree.query_ball_point(original_rim_vertices, r=1e-5)
+        for r_idx, f_indices in enumerate(exact_indices):
+            if f_indices:
+                frame_vertices[f_indices] += deltas[r_idx]
+
+        # --- Soft falloff within radius 12 mm ---
+        # Only query rim verts that had no exact match
+        no_exact_mask = np.array([len(fi) == 0 for fi in exact_indices])
+        if not no_exact_mask.any():
+            frame_mesh.vertices = frame_vertices
+            return
+
+        soft_rim = original_rim_vertices[no_exact_mask]
+        soft_deltas = deltas[no_exact_mask]
+
+        # Query neighbours within 12 mm
+        neighbours = tree.query_ball_point(soft_rim, r=12.0)
+        weighted = np.zeros_like(frame_vertices)
+        for r_idx, f_indices in enumerate(neighbours):
+            if not f_indices:
+                continue
+            f_idx = np.array(f_indices, dtype=np.int32)
+            dist = np.linalg.norm(frame_vertices[f_idx] - soft_rim[r_idx], axis=1)
+            influence = BaseDeformer.apply_falloff(np.clip(1.0 - dist / 12.0, 0.0, 1.0))
+            weighted[f_idx] += soft_deltas[r_idx] * influence[:, None] * 0.2
+
+        frame_vertices += weighted
         frame_mesh.vertices = frame_vertices

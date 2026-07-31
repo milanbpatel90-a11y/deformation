@@ -208,13 +208,32 @@ class LensDeformer(BaseDeformer):
 
     @staticmethod
     def _align_boundary(template_points: np.ndarray, target_points: np.ndarray) -> np.ndarray:
+        """Find best cyclic shift + optional reversal using FFT cross-correlation (O(n log n))."""
+        n = len(template_points)
+        if n == 0:
+            return target_points
+
         best = target_points
         best_score = float("inf")
+
         for candidate in (target_points, target_points[::-1]):
-            for shift in range(len(candidate)):
-                rolled = np.roll(candidate, shift, axis=0)
+            if len(candidate) != n:
+                score = float(np.sum(np.linalg.norm(template_points - candidate, axis=1)))
+                if score < best_score:
+                    best_score = score
+                    best = candidate
+                continue
+
+            t_x = template_points[:, 0] - template_points[:, 0].mean()
+            c_x = candidate[:, 0] - candidate[:, 0].mean()
+            corr = np.real(np.fft.ifft(np.fft.fft(t_x) * np.conj(np.fft.fft(c_x))))
+            best_shift = int(np.argmax(corr))
+
+            for shift in (best_shift - 1, best_shift, best_shift + 1):
+                rolled = np.roll(candidate, shift % n, axis=0)
                 score = float(np.sum(np.linalg.norm(template_points - rolled, axis=1)))
                 if score < best_score:
                     best_score = score
                     best = rolled
+
         return best

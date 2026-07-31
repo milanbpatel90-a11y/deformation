@@ -70,63 +70,62 @@ class MeshSmoother(BaseDeformer):
         return self.update_context(context, **report.to_dict())
 
     def _smooth_mesh(self, mesh: trimesh.Trimesh) -> int:
-        """Apply Taubin smoothing to the mesh's junction vertices."""
-        # For this implementation, we will identify boundary/junction vertices
-        # as vertices that are close to the mesh edges or have high curvature,
-        # or rely on predefined vertex groups if available.
-        # Since we don't have explicit junction masks in the general case,
-        # we will smooth vertices that are "boundary-like" or the entire part 
-        # if it's a small bridging component.
-        
-        # To strictly follow "never smooth the entire frame", we will use a heuristic:
-        # We smooth vertices that are on open edges, or have high vertex degree, 
-        # or we just smooth the boundary regions.
-        
-        if not hasattr(mesh, "vertex_neighbors") or not mesh.vertex_neighbors:
-            return 0
-
-        # Heuristic: Smooth boundary vertices and their immediate neighbors
-        # In a watertight mesh, this might be empty.
-        # So we also consider regions of high curvature.
-        # For simplicity in this implementation, we apply smoothing with a spatial weight
-        # focused near the bounding box edges (junctions).
-        
+        """Apply Taubin smoothing to boundary vertices — fully vectorised."""
         vertices = mesh.vertices.copy()
         bounds = mesh.bounds
         center = vertices.mean(axis=0)
         extents = bounds[1] - bounds[0]
-        
-        # Identify "junction" regions (e.g., ends of the part)
-        # We weight vertices closer to the ends higher.
-        # Distance from center normalized
+
+        # Only smooth outer 20% of bounding box (junction regions)
         dist = np.abs(vertices - center) / (extents / 2.0 + 1e-6)
-        # Max normalized distance across any axis
-        max_dist = np.max(dist, axis=1)
-        
-        # Only smooth vertices in the outer 20% of the bounding box
-        mask = max_dist > 0.8
-        
+        mask = np.max(dist, axis=1) > 0.8
         if not np.any(mask):
             return 0
-            
-        n_vertices = np.sum(mask)
-        
+
+        n_verts = len(vertices)
+        if not hasattr(mesh, 'vertex_neighbors') or not mesh.vertex_neighbors:
+            return 0
+
+        # Build a sparse adjacency sum matrix once for vectorised Laplacian
+        # neighbor_counts[i] = number of neighbours of vertex i
+        neighbor_counts = np.array([len(nb) for nb in mesh.vertex_neighbors], dtype=np.float64)
+        neighbor_counts = np.maximum(neighbor_counts, 1.0)  # avoid /0
+
+        mask_idx = np.where(mask)[0]
+
         for _ in range(self.iterations):
             # Lambda step (shrink)
-            laplacian = self._compute_laplacian(vertices, mesh.vertex_neighbors)
-            vertices[mask] += self.lam * laplacian[mask]
-            
+            lap = self._compute_laplacian_vectorised(vertices, mesh.vertex_neighbors, neighbor_counts)
+            vertices[mask_idx] += self.lam * lap[mask_idx]
+
             # Mu step (inflate)
-            laplacian = self._compute_laplacian(vertices, mesh.vertex_neighbors)
-            vertices[mask] += self.mu * laplacian[mask]
+            lap = self._compute_laplacian_vectorised(vertices, mesh.vertex_neighbors, neighbor_counts)
+            vertices[mask_idx] += self.mu * lap[mask_idx]
 
         mesh.vertices = vertices
-        return int(n_vertices)
+        return int(np.sum(mask))
 
-    def _compute_laplacian(self, vertices: np.ndarray, neighbors: list[list[int]]) -> np.ndarray:
-        """Compute the uniform umbrella Laplacian."""
+    @staticmethod
+    def _compute_laplacian_vectorised(
+        vertices: np.ndarray,
+        neighbors: list,
+        neighbor_counts: np.ndarray,
+    ) -> np.ndarray:
+        """Vectorised umbrella Laplacian using index arrays."""
+        n = len(vertices)
         laplacian = np.zeros_like(vertices)
-        for i, n_indices in enumerate(neighbors):
-            if n_indices:
-                laplacian[i] = np.mean(vertices[n_indices], axis=0) - vertices[i]
+        # Accumulate neighbour positions via flat index arrays
+        row_idx = []
+        col_idx = []
+        for i, nb in enumerate(neighbors):
+            if nb:
+                row_idx.extend([i] * len(nb))
+                col_idx.extend(nb)
+        if not row_idx:
+            return laplacian
+        row_idx = np.array(row_idx, dtype=np.int32)
+        col_idx = np.array(col_idx, dtype=np.int32)
+        np.add.at(laplacian, row_idx, vertices[col_idx])
+        laplacian /= neighbor_counts[:, None]
+        laplacian -= vertices
         return laplacian
