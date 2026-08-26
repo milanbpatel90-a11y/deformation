@@ -1,0 +1,12 @@
+{
+  "frame_width_mm": 140.0,
+  "frame_height_mm": 41.26,
+  "bridge_width_mm": 17.9,
+  "lens_width_left_mm": 55.79,
+  "lens_width_right_mm": 55.79,
+  "lens_height_left_mm": 36.92,
+  "lens_height_right_mm": 36.92,
+  "lens_center_distance_mm": 71.74,
+  "temple_length_left_mm": 155.02,
+  "temple_length_right_mm": 155.02
+}
