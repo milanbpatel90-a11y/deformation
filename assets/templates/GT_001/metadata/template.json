@@ -8,6 +8,7 @@
     "z": "up_down"
   },
   "origin": "LM_BridgeCenter",
+  "scale_note": "Scaled from source Rhino file using scale_config.json (no authoritative reference dimension existed in source; see scale_config.json for the labeled default used).",
   "objects": {
     "frame": "Frame",
     "left_lens": "LeftLens",
