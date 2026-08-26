@@ -1,0 +1,25 @@
+{
+  "landmarks": {
+    "LM_BridgeCenter": [0.0, 0.0, 0.0],
+    "LM_BridgeLeftAttach": [28.0, 0.0, 3.0],
+    "LM_BridgeRightAttach": [-28.0, 0.0, 3.0],
+    "LM_LeftLensCenter": [35.87, 0.0, 0.0],
+    "LM_RightLensCenter": [-35.87, 0.0, 0.0],
+    "LM_LeftLensTop": [35.87, 0.0, 18.46],
+    "LM_LeftLensBottom": [35.87, 0.0, -18.46],
+    "LM_LeftLensNasal": [8.0, 0.0, 0.0],
+    "LM_LeftLensTemporal": [63.74, 0.0, 0.0],
+    "LM_RightLensTop": [-35.87, 0.0, 18.46],
+    "LM_RightLensBottom": [-35.87, 0.0, -18.46],
+    "LM_RightLensNasal": [-8.0, 0.0, 0.0],
+    "LM_RightLensTemporal": [-63.74, 0.0, 0.0],
+    "LM_LeftHinge": [69.999268, 0.0, 2.97169],
+    "LM_RightHinge": [-69.999268, 0.0, 2.97169],
+    "LM_LeftHingeAxis": [64.999868, 0.298507, 2.902354],
+    "LM_RightHingeAxis": [-64.999868, 0.298507, 2.902354],
+    "LM_LeftTempleRoot": [69.999268, 0.0, 2.97169],
+    "LM_RightTempleRoot": [-69.999268, 0.0, 2.97169],
+    "LM_LeftTempleTip": [155.02, 0.0, 2.97169],
+    "LM_RightTempleTip": [-155.02, 0.0, 2.97169]
+  }
+}

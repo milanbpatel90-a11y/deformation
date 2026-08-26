@@ -1,0 +1,8 @@
+{
+  "units": "mm",
+  "reference_dimension": "frame_width_mm",
+  "reference_value": 140.0,
+  "source_reference_available": false,
+  "scale_factor_applied_to_source": 0.375,
+  "note": "No authoritative physical dimension existed in the source asset. 140 mm is an explicitly labeled engineering default and must be replaced when true product dimensions are available. All geometry and dependent metadata were scaled together."
+}

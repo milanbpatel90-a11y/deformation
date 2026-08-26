@@ -1,0 +1,26 @@
+{
+  "template_id": "GT_001",
+  "schema_version": "1.1",
+  "units": "mm",
+  "coordinate_system": {
+    "x": "left_right",
+    "y": "front_back",
+    "z": "up_down"
+  },
+  "origin": "LM_BridgeCenter",
+  "objects": {
+    "frame": "Frame",
+    "left_lens": "LeftLens",
+    "right_lens": "RightLens",
+    "left_temple": "LeftTemple",
+    "right_temple": "RightTemple",
+    "left_hinge": "LeftHinge",
+    "right_hinge": "RightHinge",
+    "left_temple_joint": "LeftTempleJoint",
+    "right_temple_joint": "RightTempleJoint",
+    "left_frame_insert": "LeftFrameInsert",
+    "right_frame_insert": "RightFrameInsert",
+    "left_decoration": "LeftDecoration",
+    "right_decoration": "RightDecoration"
+  }
+}
