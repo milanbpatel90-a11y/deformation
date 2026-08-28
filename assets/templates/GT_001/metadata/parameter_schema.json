@@ -1,0 +1,46 @@
+{
+  "schema_version": "1.0",
+  "parameters": {
+    "frame_width": {
+      "type": "float",
+      "unit": "mm",
+      "min": 120,
+      "max": 160,
+      "default": 140,
+      "description": "Total frame width"
+    },
+    "lens_width": {
+      "type": "float",
+      "unit": "mm",
+      "min": 45,
+      "max": 65,
+      "default": 55,
+      "description": "Width of each lens"
+    },
+    "lens_height": {
+      "type": "float",
+      "unit": "mm",
+      "min": 30,
+      "max": 50,
+      "default": 40,
+      "description": "Height of each lens"
+    },
+    "bridge_width": {
+      "type": "float",
+      "unit": "mm",
+      "min": 14,
+      "max": 24,
+      "default": 18,
+      "description": "Bridge width between lenses"
+    },
+    "temple_length": {
+      "type": "float",
+      "unit": "mm",
+      "min": 135,
+      "max": 155,
+      "default": 145,
+      "description": "Length of temple arms"
+    }
+  },
+  "notes": "Placeholder schema. Replace with actual Gold Template parameter schema."
+}

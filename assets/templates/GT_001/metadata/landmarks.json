@@ -1,0 +1,25 @@
+{
+  "version": "1.0",
+  "landmarks": {
+    "frame_top_left": {"index": 0, "position": [0, 0, 0]},
+    "frame_top_right": {"index": 1, "position": [0, 0, 0]},
+    "frame_bottom_left": {"index": 2, "position": [0, 0, 0]},
+    "frame_bottom_right": {"index": 3, "position": [0, 0, 0]},
+    "bridge_center": {"index": 4, "position": [0, 0, 0]},
+    "bridge_left": {"index": 5, "position": [0, 0, 0]},
+    "bridge_right": {"index": 6, "position": [0, 0, 0]},
+    "lens_left_center": {"index": 7, "position": [0, 0, 0]},
+    "lens_right_center": {"index": 8, "position": [0, 0, 0]},
+    "temple_left_hinge": {"index": 9, "position": [0, 0, 0]},
+    "temple_right_hinge": {"index": 10, "position": [0, 0, 0]},
+    "temple_left_tip": {"index": 11, "position": [0, 0, 0]},
+    "temple_right_tip": {"index": 12, "position": [0, 0, 0]},
+    "rim_left_top": {"index": 13, "position": [0, 0, 0]},
+    "rim_left_bottom": {"index": 14, "position": [0, 0, 0]},
+    "rim_right_top": {"index": 15, "position": [0, 0, 0]},
+    "rim_right_bottom": {"index": 16, "position": [0, 0, 0]},
+    "nose_pad_left": {"index": 17, "position": [0, 0, 0]},
+    "nose_pad_right": {"index": 18, "position": [0, 0, 0]}
+  },
+  "notes": "Placeholder landmarks. Replace with actual Gold Template landmarks."
+}

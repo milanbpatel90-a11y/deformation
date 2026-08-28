@@ -1,0 +1,54 @@
+{
+  "template_id": "GT_001",
+  "template_version": "1.1.0",
+  "topology_version": "1",
+  "basis_version": "1.1",
+  "metadata_version": "1",
+  "description": "Gold Template - Rectangle frame design with parametric deformation",
+  "shape_category": "rectangular",
+  "objects": {
+    "Frame": {
+      "description": "Main eyeglass frame",
+      "vertex_count": null,
+      "face_count": null
+    },
+    "Lens_L": {
+      "description": "Left lens",
+      "vertex_count": null,
+      "face_count": null
+    },
+    "Lens_R": {
+      "description": "Right lens",
+      "vertex_count": null,
+      "face_count": null
+    },
+    "Rim_L": {
+      "description": "Left rim",
+      "vertex_count": null,
+      "face_count": null
+    },
+    "Rim_R": {
+      "description": "Right rim",
+      "vertex_count": null,
+      "face_count": null
+    },
+    "Bridge": {
+      "description": "Bridge connecting left and right frames",
+      "vertex_count": null,
+      "face_count": null
+    },
+    "Temple_L": {
+      "description": "Left temple arm",
+      "vertex_count": null,
+      "face_count": null
+    },
+    "Temple_R": {
+      "description": "Right temple arm",
+      "vertex_count": null,
+      "face_count": null
+    }
+  },
+  "created_date": "2026-08-26",
+  "author": "Deformation Engine Team",
+  "notes": "This is a placeholder. Extract and place actual Gold_Template.zip contents here."
+}

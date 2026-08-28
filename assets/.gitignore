@@ -1,0 +1,12 @@
+# Large binary files - use Git LFS or object storage
+*.glb
+*.npz
+*.npy
+*.3dm
+
+# Temporary extraction
+temp_gold_template/
+
+# But DO commit JSON metadata
+!*.json
+!*.md

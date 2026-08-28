@@ -1,0 +1,14 @@
+{
+  "version": "1.0",
+  "masks": {
+    "Frame": {"indices": []},
+    "Lens_L": {"indices": []},
+    "Lens_R": {"indices": []},
+    "Rim_L": {"indices": []},
+    "Rim_R": {"indices": []},
+    "Bridge": {"indices": []},
+    "Temple_L": {"indices": []},
+    "Temple_R": {"indices": []}
+  },
+  "notes": "Placeholder masks. Replace with actual Gold Template segmentation masks."
+}
