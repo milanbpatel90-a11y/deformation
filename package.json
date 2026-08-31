@@ -1,0 +1,10 @@
+{
+  "name": "defirmation-vto",
+  "version": "1.0.0",
+  "private": true,
+  "packageManager": "pnpm@10.34.3",
+  "scripts": {
+    "dev": ".venv/bin/python -m uvicorn backend.api.main:app --host 0.0.0.0 --port 8000",
+    "start": ".venv/bin/python -m uvicorn backend.api.main:app --host 0.0.0.0 --port 8000"
+  }
+}
