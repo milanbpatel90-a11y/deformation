@@ -10,5 +10,11 @@
     "glb_path": "rectangle_plastic.glb",
     "descriptor_path": "descriptors/rectangle_plastic.json",
     "thumbnail_path": "thumbnails/rectangle_plastic.png"
+  },
+  {
+    "name": "gold_template",
+    "glb_path": "gold_template.glb",
+    "descriptor_path": "descriptors/gold_template.json",
+    "thumbnail_path": "thumbnails/gold_template.png"
   }
 ]
