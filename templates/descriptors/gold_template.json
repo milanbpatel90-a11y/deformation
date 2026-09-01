@@ -1,0 +1,157 @@
+{
+  "version": "1.0",
+  "template_name": "gold_template_v1",
+  "mesh_aliases": {},
+  "empties": {
+    "bridge": "Bridge_Center",
+    "left_hinge": "Left_Hinge",
+    "right_hinge": "Right_Hinge",
+    "left_temple_tip": "Left_Temple_End",
+    "right_temple_tip": "Right_Temple_End"
+  },
+  "hinges": {
+    "left": {
+      "part": "LeftTemple",
+      "empty": "Left_Hinge",
+      "confidence": 1.0
+    },
+    "right": {
+      "part": "RightTemple",
+      "empty": "Right_Hinge",
+      "confidence": 1.0
+    }
+  },
+  "bridge": {
+    "part": "Bridge",
+    "empty": "Bridge_Center",
+    "type": "straight"
+  },
+  "rim_loops": {
+    "frame": {
+      "part": "Frame",
+      "confidence": 1.0
+    },
+    "left_rim": {
+      "part": "LeftRim",
+      "confidence": 1.0
+    },
+    "right_rim": {
+      "part": "RightRim",
+      "confidence": 1.0
+    }
+  },
+  "temple_pivots": {
+    "left": {
+      "part": "LeftTemple",
+      "empty": "Left_Hinge"
+    },
+    "right": {
+      "part": "RightTemple",
+      "empty": "Right_Hinge"
+    }
+  },
+  "lens_planes": {
+    "left": {
+      "part": "LeftLens",
+      "aspect_width_mm": 55.79,
+      "aspect_height_mm": 36.92
+    },
+    "right": {
+      "part": "RightLens",
+      "aspect_width_mm": 55.79,
+      "aspect_height_mm": 36.92
+    }
+  },
+  "symmetry_plane": {
+    "axis": "X",
+    "point": [
+      0,
+      0,
+      0
+    ],
+    "normal": [
+      1,
+      0,
+      0
+    ]
+  },
+  "deformation_regions": {
+    "bridge_region": {
+      "part": "Bridge",
+      "type": "straight"
+    },
+    "left_rim_region": {
+      "part": "LeftRim"
+    },
+    "right_rim_region": {
+      "part": "RightRim"
+    },
+    "left_temple_region": {
+      "part": "LeftTemple"
+    },
+    "right_temple_region": {
+      "part": "RightTemple"
+    }
+  },
+  "vertex_groups": {
+    "frame": [
+      "Frame"
+    ],
+    "bridge": [
+      "Bridge"
+    ],
+    "left_temple": [
+      "LeftTemple"
+    ],
+    "right_temple": [
+      "RightTemple"
+    ],
+    "left_lens": [
+      "LeftLens"
+    ],
+    "right_lens": [
+      "RightLens"
+    ],
+    "left_rim": [
+      "LeftRim"
+    ],
+    "right_rim": [
+      "RightRim"
+    ]
+  },
+  "constraints": {
+    "bridge_width": {
+      "min": 12,
+      "max": 28
+    },
+    "temple_length": {
+      "min": 120,
+      "max": 180
+    },
+    "frame_width": {
+      "min": 110,
+      "max": 170
+    },
+    "lens_width": {
+      "min": 40,
+      "max": 70
+    },
+    "lens_height": {
+      "min": 25,
+      "max": 50
+    }
+  },
+  "template_dims": {
+    "frame_width": 140.0,
+    "lens_width": 55.79,
+    "lens_height": 36.92,
+    "bridge_width": 17.9,
+    "temple_length": 155.02
+  },
+  "_provenance": {
+    "source": "Built and geometrically validated in a separate Claude chat session (Rhino source -> scale-corrected -> harmonic lens/rim/bridge coupling -> self-intersection tested). See Gold_Template/README.md and reports/ in that package for full derivation and validation numbers. This descriptor adapts that geometry to this repo's existing backend/deformer schema (different from that package's own basis.npz/constraints.json schema - the two are not the same format, this file is the bridge between them.",
+    "not_yet_validated_against": "This repo's actual backend/deformer/*.py deformers (bridge_deformer.py, temple_deformer.py, rim_deformer.py) were read for schema requirements only, not executed end-to-end against this descriptor - see integration notes.",
+    "axis_convention_note": "This template's coordinate convention (from its own build spec) is X=left/right, Y=front/back(depth), Z=up/down. This repo's descriptor_loader._load_lens_planes defaults width/height to geom.extents[0]/[1], which assumes a different axis order and silently produced height_mm=2.9 (actually the lens depth) instead of the real ~36.9mm on first load - caught by actually running the loader, not assumed. Fixed here via the aspect_width_mm/aspect_height_mm override fields the loader already supports. NOT fixed: any other axis-order assumptions inside bridge_deformer.py, rim_deformer.py, temple_deformer.py were not checked - only descriptor_loader.py was exercised end-to-end. Verify axis handling there before trusting deformation output.",
+    "vertex_groups_note": "UPDATED: Bridge/LeftRim/RightRim are now real, separately-named GLB mesh nodes (extracted as genuine sub-meshes of Frame using the exact vertex-index region masks already computed and validated during this template's build - see Gold_Template/metadata/masks.json region_masks). This was necessary because mesh_aliases only resolves inside DescriptorLoader's internal geometry dict and does NOT propagate to DeformationContext.meshes (confirmed by actually running MeshDeformer.deform() end-to-end and hitting a real KeyError before this fix). mesh_aliases is left empty now since it's no longer needed for this template."
+  }
+}

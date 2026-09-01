@@ -1,0 +1,25 @@
+[project]
+name = "deformation"
+version = "0.1.0"
+description = "Eyewear 3D deformation API"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.110.0",
+    "uvicorn[standard]>=0.27.0",
+    "python-multipart>=0.0.9",
+    "pydantic>=2.6.0",
+    "ultralytics>=8.1.0",
+    "opencv-python-headless>=4.9.0",
+    "numpy>=1.26.0",
+    "scipy>=1.12.0",
+    "Pillow>=10.2.0",
+    "trimesh>=4.2.0",
+    "pygltflib>=1.16.0",
+    "shapely>=2.0.0",
+    "open3d>=0.18.0; python_version < '3.13'",
+    "python-dotenv>=1.0.0",
+    "requests>=2.31.0",
+]
+
+[tool.vercel]
+entrypoint = "backend.api.main:app"
