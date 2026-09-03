@@ -1,0 +1,51 @@
+{
+  "systemSetup": [
+    {
+      "name": "Install pip",
+      "command": "curl -fsSL https://bootstrap.pypa.io/get-pip.py -o /tmp/get-pip.py && python3 /tmp/get-pip.py --break-system-packages --quiet"
+    }
+  ],
+  "templateName": "custom",
+  "projectDependencies": [
+    {
+      "name": "Install Python Dependencies",
+      "command": "python3 -m pip install -r requirements.txt --user --break-system-packages --quiet"
+    }
+  ],
+  "codeChecks": [
+    {
+      "name": "Run Tests",
+      "command": "python3 -m pytest tests"
+    }
+  ],
+  "buildSteps": [
+    {
+      "name": "Compile Python Sources",
+      "command": "python3 -m compileall backend"
+    }
+  ],
+  "runStep": [
+    {
+      "name": "Run Dev Server",
+      "command": "python3 -m uvicorn backend.api.main:app --host 0.0.0.0 --port 3000",
+      "port": "3000"
+    }
+  ],
+  "deploySteps": [
+    {
+      "name": "Run Production Server",
+      "command": "python3 -m uvicorn backend.api.main:app --host 0.0.0.0 --port 3000"
+    }
+  ],
+  "cleanupFiles": [
+    ".env",
+    "output",
+    "runs",
+    "__pycache__",
+    "backend/__pycache__"
+  ],
+  "packageManager": "pip",
+  "envPaths": [
+    { "name": "default", "path": ".env" }
+  ]
+}
