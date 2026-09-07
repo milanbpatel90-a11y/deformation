@@ -17,6 +17,7 @@ from backend.models import (
 )
 
 TEMPLATES_DIR = Path(__file__).resolve().parents[2] / "templates"
+DEFAULT_TEMPLATE_NAME = "GT_001"
 
 
 class TemplateLibrary:

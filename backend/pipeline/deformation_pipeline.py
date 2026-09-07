@@ -378,7 +378,7 @@ class DeformationPipeline:
         template_override: str | None = None,
     ) -> dict:
         """
-        Run the full pipeline on 4-6 images:
+        Run the full pipeline on 4-5 images:
         1. Read and segment all images.
         2. Classify each view (front, side, top, perspective).
         3. Extract measurements and contours from each view.
