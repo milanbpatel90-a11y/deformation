@@ -83,11 +83,12 @@ class DeformationPipeline:
             if isinstance(mesh, trimesh.Trimesh):
                 mesh.apply_transform(axis_transform)
         DeformationPipeline._normalize_temple_placement(scene)
+        DeformationPipeline._split_combined_lens(scene)
         return scene
 
     @staticmethod
     def _normalize_temple_placement(scene: trimesh.Scene) -> None:
-        """Place centered elongated source temples at the frame hinges."""
+        """Place source temples at hinges with their long axis along depth."""
         meshes = [
             mesh for mesh in scene.geometry.values()
             if isinstance(mesh, trimesh.Trimesh)
@@ -99,6 +100,7 @@ class DeformationPipeline:
             mesh for mesh in meshes
             if mesh is not frame
             and float(mesh.extents[0]) > 0.7 * float(frame.extents[0])
+            and float(mesh.extents[1]) > 0.5 * float(frame.extents[1])
             and float(mesh.extents[2]) < 0.35 * float(frame.extents[1])
         ]
         if len(lens_candidates) == 1:
@@ -114,16 +116,60 @@ class DeformationPipeline:
         if len(candidates) != 2:
             return
         candidates.sort(key=lambda mesh: float(mesh.centroid[0]))
+        frame_y = float(frame.centroid[1])
+        frame_z = float(frame.centroid[2])
         hinge_x = float(frame.extents[0]) * 0.5
-        target_depth = float(np.mean([mesh.centroid[2] for mesh in candidates]))
         for mesh, target_x in zip(candidates, (-hinge_x, hinge_x)):
+            max_depth = float(mesh.bounds[1][2])
             mesh.apply_translation(
                 [
                     target_x - float(mesh.centroid[0]),
-                    0.0,
-                    target_depth - float(mesh.centroid[2]),
+                    frame_y - float(mesh.centroid[1]),
+                    frame_z - max_depth,
                 ]
             )
+
+    @staticmethod
+    def _split_combined_lens(scene: trimesh.Scene) -> None:
+        """Split the fallback's two-sided lens slab into left and right meshes."""
+        meshes = [
+            (name, mesh)
+            for name, mesh in scene.geometry.items()
+            if isinstance(mesh, trimesh.Trimesh)
+        ]
+        if not meshes:
+            return
+        frame_name, frame = max(meshes, key=lambda item: float(item[1].extents[0]))
+        candidates = [
+            (name, mesh)
+            for name, mesh in meshes
+            if name != frame_name
+            and float(mesh.extents[0]) > 0.7 * float(frame.extents[0])
+            and float(mesh.extents[1]) > 0.5 * float(frame.extents[1])
+            and float(mesh.extents[2]) < 0.35 * float(frame.extents[1])
+        ]
+        if len(candidates) != 1:
+            return
+
+        lens_name, lens = candidates[0]
+        components = [
+            component
+            for component in lens.split(only_watertight=False)
+            if len(component.faces) >= 100
+        ]
+        if len(components) < 2:
+            return
+        midpoint = float(lens.centroid[0])
+        left = [component for component in components if component.centroid[0] <= midpoint]
+        right = [component for component in components if component.centroid[0] > midpoint]
+        if not left or not right:
+            return
+
+        left_mesh = trimesh.util.concatenate(left)
+        right_mesh = trimesh.util.concatenate(right)
+        scene.delete_geometry(lens_name)
+        scene.add_geometry(left_mesh, geom_name="LeftLens")
+        scene.add_geometry(right_mesh, geom_name="RightLens")
 
     @staticmethod
     def _add_aliases_to_context(context: DeformationContext) -> None:
