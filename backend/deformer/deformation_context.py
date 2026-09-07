@@ -32,6 +32,11 @@ class DeformationContext:
             for name, mesh in self.template_scene.geometry.items()
             if isinstance(mesh, trimesh.Trimesh)
         }
+        aliases = self.descriptor.raw.get("mesh_aliases", {})
+        if isinstance(aliases, dict):
+            for logical_name, actual_name in aliases.items():
+                if logical_name not in self.meshes and actual_name in self.meshes:
+                    self.meshes[logical_name] = self.meshes[actual_name]
         if not self.materials:
             self.materials = {
                 name: getattr(mesh.visual, "material", None)

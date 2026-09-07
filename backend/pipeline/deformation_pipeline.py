@@ -62,38 +62,25 @@ class DeformationPipeline:
         )
 
     @staticmethod
-    def _inject_aliases_into_scene(scene: trimesh.Scene, descriptor) -> None:
-        """Add logical mesh names into scene.geometry so DeformationContext can find them.
+    def _load_template_scene(template_info) -> trimesh.Scene:
+        """Load template geometry in the millimeter unit used by measurements."""
+        scene = trimesh.load(template_info.glb_path, force="scene")
+        if scene.extents.size and float(np.max(scene.extents)) < 10.0:
+            for mesh in scene.geometry.values():
+                if isinstance(mesh, trimesh.Trimesh):
+                    mesh.apply_scale(1000.0)
+        return scene
 
-        The descriptor_loader resolves aliases (e.g. 'LeftRim' -> 'Plane_glasses_mat_0')
-        but the scene itself only has the original GLB names. The DeformationContext builds
-        its meshes dict straight from scene.geometry, so logical names must be present there.
-        """
-        from copy import deepcopy
+    @staticmethod
+    def _add_aliases_to_context(context: DeformationContext) -> None:
+        """Expose descriptor aliases without duplicating exported scene geometry."""
+        raw_aliases = context.descriptor.raw.get("mesh_aliases", {})
+        if not isinstance(raw_aliases, dict):
+            return
 
-        # Collect all unique actual→logical mappings from vertex_groups + descriptor parts
-        alias_map: dict[str, str] = {}  # logical_name -> actual_glb_name
-
-        # Pull from descriptor raw mesh_aliases if present
-        raw_aliases = descriptor.raw.get("mesh_aliases", {})
-        if isinstance(raw_aliases, dict):
-            for logical, actual in raw_aliases.items():
-                if actual in scene.geometry and logical not in scene.geometry:
-                    alias_map[logical] = actual
-
-        # Also cover any logical names derived from vertex_groups that aren't in scene yet
-        for group_parts in descriptor.vertex_groups.values():
-            for logical_name in group_parts:
-                if logical_name not in scene.geometry:
-                    # Find the actual mesh this logical name maps to via raw_aliases
-                    actual = raw_aliases.get(logical_name)
-                    if actual and actual in scene.geometry:
-                        alias_map[logical_name] = actual
-
-        # Inject: add logical-named references into scene.geometry
-        for logical_name, actual_name in alias_map.items():
-            if logical_name not in scene.geometry:
-                scene.geometry[logical_name] = scene.geometry[actual_name]
+        for logical_name, actual_name in raw_aliases.items():
+            if logical_name not in context.meshes and actual_name in context.meshes:
+                context.meshes[logical_name] = context.meshes[actual_name]
 
     @staticmethod
     def _optimize_scene(scene: trimesh.Scene) -> trimesh.Scene:
@@ -153,7 +140,7 @@ class DeformationPipeline:
         template_info = match.best.template
         template_name = template_info.name
 
-        scene = trimesh.load(template_info.glb_path, force="scene")
+        scene = self._load_template_scene(template_info)
         
         # Try to load descriptor, fall back to simple deformation if template not properly prepared
         try:
@@ -290,15 +277,15 @@ class DeformationPipeline:
 
         s6 = report.add("Template Deformation")
         t = s6.start()
-        scene = trimesh.load(template_info.glb_path, force="scene")
+        scene = self._load_template_scene(template_info)
         descriptor = self.descriptor_loader.load(template_name, measurements=measurements, template_info=template_info)
-        self._inject_aliases_into_scene(scene, descriptor)
         ctx = DeformationContext(
             template_info=template_info,
             template_scene=scene,
             descriptor=descriptor,
             measurements=measurements,
         )
+        self._add_aliases_to_context(ctx)
         rim_pull = self.library.rim_pull_strength(template_name)
         deformer = MeshDeformer(scene, template_info.dimensions, rim_pull_strength=rim_pull)
         deformed_ctx, quality = deformer.deform(ctx, lens_contour)
@@ -467,15 +454,15 @@ class DeformationPipeline:
 
         s3 = report.add("Template Deformation")
         t = s3.start()
-        scene = trimesh.load(template_info.glb_path, force="scene")
+        scene = self._load_template_scene(template_info)
         descriptor = self.descriptor_loader.load(template_name, measurements=fused_measurements, template_info=template_info)
-        self._inject_aliases_into_scene(scene, descriptor)
         ctx = DeformationContext(
             template_info=template_info,
             template_scene=scene,
             descriptor=descriptor,
             measurements=fused_measurements,
         )
+        self._add_aliases_to_context(ctx)
         rim_pull = self.library.rim_pull_strength(template_name)
         deformer = MeshDeformer(scene, template_info.dimensions, rim_pull_strength=rim_pull)
         deformed_ctx, quality = deformer.deform(ctx, front_lens_contour)
