@@ -69,7 +69,61 @@ class DeformationPipeline:
             for mesh in scene.geometry.values():
                 if isinstance(mesh, trimesh.Trimesh):
                     mesh.apply_scale(1000.0)
+        # The checked-in GLB uses X/Z for the front plane and Y for depth.
+        # The deformation engine uses X/Y for the front plane and Z for depth.
+        axis_transform = np.array(
+            [
+                [1.0, 0.0, 0.0, 0.0],
+                [0.0, 0.0, 1.0, 0.0],
+                [0.0, -1.0, 0.0, 0.0],
+                [0.0, 0.0, 0.0, 1.0],
+            ]
+        )
+        for mesh in scene.geometry.values():
+            if isinstance(mesh, trimesh.Trimesh):
+                mesh.apply_transform(axis_transform)
+        DeformationPipeline._normalize_temple_placement(scene)
         return scene
+
+    @staticmethod
+    def _normalize_temple_placement(scene: trimesh.Scene) -> None:
+        """Place centered elongated source temples at the frame hinges."""
+        meshes = [
+            mesh for mesh in scene.geometry.values()
+            if isinstance(mesh, trimesh.Trimesh)
+        ]
+        if not meshes:
+            return
+        frame = max(meshes, key=lambda mesh: float(mesh.extents[0]))
+        lens_candidates = [
+            mesh for mesh in meshes
+            if mesh is not frame
+            and float(mesh.extents[0]) > 0.7 * float(frame.extents[0])
+            and float(mesh.extents[2]) < 0.35 * float(frame.extents[1])
+        ]
+        if len(lens_candidates) == 1:
+            lens_candidates[0].apply_translation(
+                [float(frame.centroid[0] - lens_candidates[0].centroid[0]), 0.0, 0.0]
+            )
+        candidates = [
+            mesh for mesh in meshes
+            if mesh is not frame
+            and float(mesh.extents[2]) > 0.5 * float(frame.extents[0])
+            and float(mesh.extents[0]) < 0.35 * float(frame.extents[0])
+        ]
+        if len(candidates) != 2:
+            return
+        candidates.sort(key=lambda mesh: float(mesh.centroid[0]))
+        hinge_x = float(frame.extents[0]) * 0.5
+        target_depth = float(np.mean([mesh.centroid[2] for mesh in candidates]))
+        for mesh, target_x in zip(candidates, (-hinge_x, hinge_x)):
+            mesh.apply_translation(
+                [
+                    target_x - float(mesh.centroid[0]),
+                    0.0,
+                    target_depth - float(mesh.centroid[2]),
+                ]
+            )
 
     @staticmethod
     def _add_aliases_to_context(context: DeformationContext) -> None:

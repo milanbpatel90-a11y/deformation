@@ -22,6 +22,7 @@ def test_smoother_preserves_vertex_count():
             metadata_path=None,
             hinges={},
             rim_loops={},
+            empty_anchors={},
             bridge_center=np.array([0, 0, 0]),
             temple_axis={},
             lens_planes={},
