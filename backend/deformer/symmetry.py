@@ -19,6 +19,7 @@ from typing import Any
 
 import numpy as np
 import trimesh
+from scipy.spatial import cKDTree
 
 from backend.deformer.base_deformer import BaseDeformer
 from backend.deformer.deformation_context import DeformationContext
@@ -201,21 +202,10 @@ class SymmetrySolver(BaseDeformer):
     @staticmethod
     def _nearest_distances(source: np.ndarray, target: np.ndarray) -> np.ndarray:
         """Return the distance from each source point to its nearest target."""
-        # For meshes of typical size (< 50 k vertices) this brute-force
-        # approach is fast enough and avoids a KD-tree dependency.
         if len(source) == 0 or len(target) == 0:
             return np.zeros(len(source), dtype=np.float64)
-
-        # Chunk to avoid O(N²) memory for very large meshes.
-        chunk = 512
-        errors = np.empty(len(source), dtype=np.float64)
-        for start in range(0, len(source), chunk):
-            end = min(start + chunk, len(source))
-            diff = source[start:end, None, :] - target[None, :, :]  # (C, M, 3)
-            dist = np.linalg.norm(diff, axis=-1)                    # (C, M)
-            errors[start:end] = dist.min(axis=1)
-
-        return errors
+        distances, _ = cKDTree(target).query(source, workers=1)
+        return distances
 
     # ------------------------------------------------------------------
     # Step 3+4 — compute and apply local correction
@@ -254,14 +244,13 @@ class SymmetrySolver(BaseDeformer):
         if len(over_threshold) == 0:
             return displacements
 
-        for idx in over_threshold:
+        _, nearest_indices = cKDTree(mirrored_ref).query(
+            vertices[over_threshold], workers=1
+        )
+        for idx, error, nearest_idx in zip(
+            over_threshold, errors[over_threshold], nearest_indices
+        ):
             v = vertices[idx]
-            error = float(errors[idx])
-
-            # Find nearest reference point
-            diff = mirrored_ref - v
-            dists = np.linalg.norm(diff, axis=1)
-            nearest_idx = int(np.argmin(dists))
             nearest_ref = mirrored_ref[nearest_idx]
 
             # Direction and correction magnitude
