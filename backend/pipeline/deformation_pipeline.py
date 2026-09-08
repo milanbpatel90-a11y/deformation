@@ -85,6 +85,7 @@ class DeformationPipeline:
         DeformationPipeline._normalize_temple_placement(scene)
         DeformationPipeline._split_combined_lens(scene)
         DeformationPipeline._align_split_lenses(scene)
+        DeformationPipeline._add_hinge_connectors(scene)
         return scene
 
     @staticmethod
@@ -184,6 +185,33 @@ class DeformationPipeline:
         target_y = float(frame.centroid[1])
         for lens in (left, right):
             lens.apply_translation([0.0, target_y - float(lens.centroid[1]), 0.0])
+
+    @staticmethod
+    def _add_hinge_connectors(scene: trimesh.Scene) -> None:
+        """Add small vertical hinge barrels where each temple meets the frame."""
+        frame = scene.geometry.get("Plane_glasses_mat_0")
+        left_temple = scene.geometry.get("Plane.001_glasses_mat_0")
+        right_temple = scene.geometry.get("Plane.002_glasses_mat_0")
+        if not all(
+            isinstance(mesh, trimesh.Trimesh)
+            for mesh in (frame, left_temple, right_temple)
+        ):
+            return
+
+        hinge_x = float(frame.extents[0]) * 0.5
+        hinge_y = float(frame.centroid[1])
+        hinge_z = float(
+            min(left_temple.bounds[1][2], right_temple.bounds[1][2])
+        )
+        for name, x in (("LeftHinge", -hinge_x), ("RightHinge", hinge_x)):
+            if name in scene.geometry:
+                continue
+            hinge = trimesh.creation.cylinder(radius=2.0, height=6.0, sections=16)
+            hinge.apply_transform(
+                trimesh.transformations.rotation_matrix(np.pi / 2.0, [1.0, 0.0, 0.0])
+            )
+            hinge.apply_translation([x, hinge_y, hinge_z])
+            scene.add_geometry(hinge, geom_name=name)
 
     @staticmethod
     def _add_aliases_to_context(context: DeformationContext) -> None:
