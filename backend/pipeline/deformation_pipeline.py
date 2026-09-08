@@ -84,6 +84,7 @@ class DeformationPipeline:
                 mesh.apply_transform(axis_transform)
         DeformationPipeline._normalize_temple_placement(scene)
         DeformationPipeline._split_combined_lens(scene)
+        DeformationPipeline._align_split_lenses(scene)
         return scene
 
     @staticmethod
@@ -170,6 +171,19 @@ class DeformationPipeline:
         scene.delete_geometry(lens_name)
         scene.add_geometry(left_mesh, geom_name="LeftLens")
         scene.add_geometry(right_mesh, geom_name="RightLens")
+
+    @staticmethod
+    def _align_split_lenses(scene: trimesh.Scene) -> None:
+        """Center split lenses on the frame's optical center."""
+        frame = scene.geometry.get("Plane_glasses_mat_0")
+        left = scene.geometry.get("LeftLens")
+        right = scene.geometry.get("RightLens")
+        if not all(isinstance(mesh, trimesh.Trimesh) for mesh in (frame, left, right)):
+            return
+
+        target_y = float(frame.centroid[1])
+        for lens in (left, right):
+            lens.apply_translation([0.0, target_y - float(lens.centroid[1]), 0.0])
 
     @staticmethod
     def _add_aliases_to_context(context: DeformationContext) -> None:
