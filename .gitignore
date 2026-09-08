@@ -1,28 +1,24 @@
-# Python
-__pycache__/
-*.pyc
-*.pyo
+```
+# Build artifacts and output
+output/
+*.glb
 
-# Virtual Environment
-venv/
+# Dependencies
+node_modules/
 .venv/
-env/
+venv/
+__pycache__/
 
-# IDE
+# Logs and temp files
+*.log
+*.tmp
+
+# Environment
+.env
+.env.local
+*.env.*
+
+# Editors
 .vscode/
 .idea/
-
-# Python packages
-*.egg-info/
-
-# Build
-build/
-dist/
-
-# Logs
-*.log
-
-# Dataset (optional)
-*.zip
-*.tmp
-.ideavo/project
+```

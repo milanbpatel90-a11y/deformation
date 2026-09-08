@@ -11,15 +11,10 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
-import random
-import shutil
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Any
-
-import cv2
-import numpy as np
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -36,6 +31,18 @@ STUB_DEFINITIONS = [
     ("browline_metal", "browline", "browline"),
     ("rimless_titanium", "rimless", "rimless"),
 ]
+
+
+def _get_cv2():
+    """Lazy import cv2 to avoid heavy initialization on module load."""
+    import cv2
+    return cv2
+
+
+def _get_np():
+    """Lazy import numpy for deferred loading."""
+    import numpy as np
+    return np
 
 
 @dataclass
@@ -333,6 +340,7 @@ class SegmentationDatasetPipeline:
         logger.info("Added entry: %s (%s)", image_id, style)
 
     def _mask_to_yolo_seg_line(self, mask_path: Path, img_w: int, img_h: int) -> str | None:
+        cv2 = _get_cv2()
         mask = cv2.imread(str(mask_path), cv2.IMREAD_GRAYSCALE)
         if mask is None:
             return None
@@ -364,6 +372,8 @@ class SegmentationDatasetPipeline:
         image_out.mkdir(parents=True, exist_ok=True)
 
         written = 0
+        cv2 = _get_cv2()
+        shutil = __import__("shutil")
         for entry_dict in split_data["entries"]:
             entry = SegmentationDatasetEntry(**entry_dict)
             img_path = Path(entry.image_path)
@@ -448,6 +458,8 @@ class DeformationCalibrationWorkflow:
         from backend.measurement.extractor import MeasurementExtractor
         from backend.segmentation.segmenter import GlassesSegmenter
 
+        cv2 = _get_cv2()
+        np = _get_np()
         image = cv2.imread(str(image_path))
         if image is None:
             raise ValueError(f"Cannot read image: {image_path}")
@@ -493,6 +505,7 @@ class DeformationCalibrationWorkflow:
         }
 
     def _edge_confidence_from_mask(self, mask: np.ndarray) -> float:
+        cv2 = _get_cv2()
         contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         if not contours:
             return 0.0
