@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from backend.models import TemplateInfo
-from backend.template_library.loader import TemplateLibrary
+from backend.template_library.loader import DEFAULT_TEMPLATE_NAME, TemplateLibrary
 from backend.template_matching.feature_extractor import EyewearFeatureSet
 from backend.template_matching.scoring import ScoredTemplate, WeightedTemplateScorer
 
@@ -32,6 +32,9 @@ class TemplateMatcher:
         features: EyewearFeatureSet,
         override: str | None = None,
     ) -> TemplateMatchResult:
+        # GT_001 is the calibrated production baseline. Callers can still
+        # request another template explicitly through `override`.
+        override = override or DEFAULT_TEMPLATE_NAME
         if override:
             try:
                 template = self.library.load(override)

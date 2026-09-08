@@ -86,20 +86,21 @@ class MeshSmoother(BaseDeformer):
         if not hasattr(mesh, 'vertex_neighbors') or not mesh.vertex_neighbors:
             return 0
 
-        # Build a sparse adjacency sum matrix once for vectorised Laplacian
-        # neighbor_counts[i] = number of neighbours of vertex i
-        neighbor_counts = np.array([len(nb) for nb in mesh.vertex_neighbors], dtype=np.float64)
-        neighbor_counts = np.maximum(neighbor_counts, 1.0)  # avoid /0
+        # Build adjacency indices once. Rebuilding these Python lists for every
+        # lambda/mu pass made high-poly templates take minutes to process.
+        row_idx, col_idx = self._build_adjacency_indices(mesh.vertex_neighbors)
+        neighbor_counts = np.bincount(row_idx, minlength=len(vertices)).astype(np.float64)
+        neighbor_counts = np.maximum(neighbor_counts, 1.0)
 
         mask_idx = np.where(mask)[0]
 
         for _ in range(self.iterations):
             # Lambda step (shrink)
-            lap = self._compute_laplacian_vectorised(vertices, mesh.vertex_neighbors, neighbor_counts)
+            lap = self._compute_laplacian_vectorised(vertices, row_idx, col_idx, neighbor_counts)
             vertices[mask_idx] += self.lam * lap[mask_idx]
 
             # Mu step (inflate)
-            lap = self._compute_laplacian_vectorised(vertices, mesh.vertex_neighbors, neighbor_counts)
+            lap = self._compute_laplacian_vectorised(vertices, row_idx, col_idx, neighbor_counts)
             vertices[mask_idx] += self.mu * lap[mask_idx]
 
         mesh.vertices = vertices
@@ -108,24 +109,24 @@ class MeshSmoother(BaseDeformer):
     @staticmethod
     def _compute_laplacian_vectorised(
         vertices: np.ndarray,
-        neighbors: list,
+        row_idx: np.ndarray,
+        col_idx: np.ndarray,
         neighbor_counts: np.ndarray,
     ) -> np.ndarray:
         """Vectorised umbrella Laplacian using index arrays."""
-        n = len(vertices)
         laplacian = np.zeros_like(vertices)
-        # Accumulate neighbour positions via flat index arrays
-        row_idx = []
-        col_idx = []
-        for i, nb in enumerate(neighbors):
-            if nb:
-                row_idx.extend([i] * len(nb))
-                col_idx.extend(nb)
-        if not row_idx:
+        if row_idx.size == 0:
             return laplacian
-        row_idx = np.array(row_idx, dtype=np.int32)
-        col_idx = np.array(col_idx, dtype=np.int32)
         np.add.at(laplacian, row_idx, vertices[col_idx])
         laplacian /= neighbor_counts[:, None]
         laplacian -= vertices
         return laplacian
+
+    @staticmethod
+    def _build_adjacency_indices(neighbors: list) -> tuple[np.ndarray, np.ndarray]:
+        """Flatten trimesh neighbor sets into reusable vectorized indices."""
+        edges = [(i, neighbor) for i, values in enumerate(neighbors) for neighbor in values]
+        if not edges:
+            return np.empty(0, dtype=np.int32), np.empty(0, dtype=np.int32)
+        indices = np.asarray(edges, dtype=np.int32)
+        return indices[:, 0], indices[:, 1]

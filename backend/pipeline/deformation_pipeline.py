@@ -62,38 +62,233 @@ class DeformationPipeline:
         )
 
     @staticmethod
-    def _inject_aliases_into_scene(scene: trimesh.Scene, descriptor) -> None:
-        """Add logical mesh names into scene.geometry so DeformationContext can find them.
+    def _load_template_scene(template_info) -> trimesh.Scene:
+        """Load template geometry in the millimeter unit used by measurements."""
+        scene = trimesh.load(template_info.glb_path, force="scene")
+        if scene.extents.size and float(np.max(scene.extents)) < 10.0:
+            for mesh in scene.geometry.values():
+                if isinstance(mesh, trimesh.Trimesh):
+                    mesh.apply_scale(1000.0)
+        # The checked-in GLB uses X/Z for the front plane and Y for depth.
+        # The deformation engine uses X/Y for the front plane and Z for depth.
+        axis_transform = np.array(
+            [
+                [1.0, 0.0, 0.0, 0.0],
+                [0.0, 0.0, 1.0, 0.0],
+                [0.0, -1.0, 0.0, 0.0],
+                [0.0, 0.0, 0.0, 1.0],
+            ]
+        )
+        for mesh in scene.geometry.values():
+            if isinstance(mesh, trimesh.Trimesh):
+                mesh.apply_transform(axis_transform)
+        DeformationPipeline._normalize_temple_placement(scene)
+        DeformationPipeline._split_combined_lens(scene)
+        DeformationPipeline._align_split_lenses(scene)
+        DeformationPipeline._add_hinge_connectors(scene)
+        return scene
 
-        The descriptor_loader resolves aliases (e.g. 'LeftRim' -> 'Plane_glasses_mat_0')
-        but the scene itself only has the original GLB names. The DeformationContext builds
-        its meshes dict straight from scene.geometry, so logical names must be present there.
-        """
-        from copy import deepcopy
+    @staticmethod
+    def _normalize_temple_placement(scene: trimesh.Scene) -> None:
+        """Place source temples at hinges with their long axis along depth."""
+        meshes = [
+            mesh for mesh in scene.geometry.values()
+            if isinstance(mesh, trimesh.Trimesh)
+        ]
+        if not meshes:
+            return
+        frame = DeformationPipeline._frame_mesh(scene)
+        if frame is None:
+            return
+        lens_candidates = [
+            mesh for mesh in meshes
+            if mesh is not frame
+            and float(mesh.extents[0]) > 0.7 * float(frame.extents[0])
+            and float(mesh.extents[1]) > 0.5 * float(frame.extents[1])
+            and float(mesh.extents[2]) < 0.35 * float(frame.extents[1])
+        ]
+        if len(lens_candidates) == 1:
+            lens_candidates[0].apply_translation(
+                [float(frame.centroid[0] - lens_candidates[0].centroid[0]), 0.0, 0.0]
+            )
+        candidates = [
+            mesh for mesh in meshes
+            if mesh is not frame
+            and float(mesh.extents[2]) > 0.5 * float(frame.extents[0])
+            and float(mesh.extents[0]) < 0.35 * float(frame.extents[0])
+        ]
+        if len(candidates) != 2:
+            return
+        candidates.sort(key=lambda mesh: float(mesh.centroid[0]))
+        frame_y = float(frame.centroid[1])
+        frame_z = float(frame.centroid[2])
+        hinge_x = float(frame.extents[0]) * 0.5
+        for mesh, target_x in zip(candidates, (-hinge_x, hinge_x)):
+            max_depth = float(mesh.bounds[1][2])
+            mesh.apply_translation(
+                [
+                    target_x - float(mesh.centroid[0]),
+                    frame_y - float(mesh.centroid[1]),
+                    frame_z - max_depth,
+                ]
+            )
 
-        # Collect all unique actual→logical mappings from vertex_groups + descriptor parts
-        alias_map: dict[str, str] = {}  # logical_name -> actual_glb_name
+    @staticmethod
+    def _split_combined_lens(scene: trimesh.Scene) -> None:
+        """Split the fallback's two-sided lens slab into left and right meshes."""
+        meshes = [
+            (name, mesh)
+            for name, mesh in scene.geometry.items()
+            if isinstance(mesh, trimesh.Trimesh)
+        ]
+        if not meshes:
+            return
+        frame_name, frame = max(meshes, key=lambda item: float(item[1].extents[0]))
+        candidates = [
+            (name, mesh)
+            for name, mesh in meshes
+            if name != frame_name
+            and float(mesh.extents[0]) > 0.7 * float(frame.extents[0])
+            and float(mesh.extents[1]) > 0.5 * float(frame.extents[1])
+            and float(mesh.extents[2]) < 0.35 * float(frame.extents[1])
+        ]
+        if len(candidates) != 1:
+            return
 
-        # Pull from descriptor raw mesh_aliases if present
-        raw_aliases = descriptor.raw.get("mesh_aliases", {})
-        if isinstance(raw_aliases, dict):
-            for logical, actual in raw_aliases.items():
-                if actual in scene.geometry and logical not in scene.geometry:
-                    alias_map[logical] = actual
+        lens_name, lens = candidates[0]
+        components = [
+            component
+            for component in lens.split(only_watertight=False)
+            if len(component.faces) >= 100
+        ]
+        if len(components) < 2:
+            return
+        midpoint = float(lens.centroid[0])
+        left = [component for component in components if component.centroid[0] <= midpoint]
+        right = [component for component in components if component.centroid[0] > midpoint]
+        if not left or not right:
+            return
 
-        # Also cover any logical names derived from vertex_groups that aren't in scene yet
-        for group_parts in descriptor.vertex_groups.values():
-            for logical_name in group_parts:
-                if logical_name not in scene.geometry:
-                    # Find the actual mesh this logical name maps to via raw_aliases
-                    actual = raw_aliases.get(logical_name)
-                    if actual and actual in scene.geometry:
-                        alias_map[logical_name] = actual
+        left_mesh = trimesh.util.concatenate(left)
+        right_mesh = trimesh.util.concatenate(right)
+        scene.delete_geometry(lens_name)
+        scene.add_geometry(left_mesh, geom_name="LeftLens")
+        scene.add_geometry(right_mesh, geom_name="RightLens")
 
-        # Inject: add logical-named references into scene.geometry
-        for logical_name, actual_name in alias_map.items():
-            if logical_name not in scene.geometry:
-                scene.geometry[logical_name] = scene.geometry[actual_name]
+    @staticmethod
+    def _align_split_lenses(scene: trimesh.Scene) -> None:
+        """Center split lenses on the frame's optical center."""
+        frame = DeformationPipeline._frame_mesh(scene)
+        left = scene.geometry.get("LeftLens")
+        right = scene.geometry.get("RightLens")
+        if not all(isinstance(mesh, trimesh.Trimesh) for mesh in (frame, left, right)):
+            return
+
+        target_y = float(frame.centroid[1])
+        for lens in (left, right):
+            lens.apply_translation([0.0, target_y - float(lens.centroid[1]), 0.0])
+
+    @staticmethod
+    def _add_hinge_connectors(scene: trimesh.Scene) -> None:
+        """Add small vertical hinge barrels where each temple meets the frame."""
+        frame = DeformationPipeline._frame_mesh(scene)
+        left_temple = scene.geometry.get("Plane.001_glasses_mat_0")
+        right_temple = scene.geometry.get("Plane.002_glasses_mat_0")
+        if not all(
+            isinstance(mesh, trimesh.Trimesh)
+            for mesh in (frame, left_temple, right_temple)
+        ):
+            return
+
+        hinge_x = float(frame.extents[0]) * 0.5
+        hinge_y = float(frame.centroid[1])
+        hinge_z = float(
+            min(left_temple.bounds[1][2], right_temple.bounds[1][2])
+        )
+        for name, x in (("LeftHinge", -hinge_x), ("RightHinge", hinge_x)):
+            if name in scene.geometry:
+                continue
+            hinge = trimesh.creation.cylinder(radius=2.0, height=6.0, sections=16)
+            hinge.apply_transform(
+                trimesh.transformations.rotation_matrix(np.pi / 2.0, [1.0, 0.0, 0.0])
+            )
+            hinge.apply_translation([x, hinge_y, hinge_z])
+            scene.add_geometry(hinge, geom_name=name)
+
+    @staticmethod
+    def _frame_mesh(scene: trimesh.Scene) -> trimesh.Trimesh | None:
+        """Find the primary frame by its measured width."""
+        excluded = {"LeftLens", "RightLens", "LeftHinge", "RightHinge"}
+        candidates = [
+            mesh for name, mesh in scene.geometry.items()
+            if name not in excluded and isinstance(mesh, trimesh.Trimesh)
+        ]
+        if not candidates:
+            return None
+        return max(candidates, key=lambda mesh: float(mesh.extents[0]))
+
+    @staticmethod
+    def _assembly_validation(scene: trimesh.Scene) -> dict:
+        """Report geometry-derived lens, temple, hinge, and symmetry metrics."""
+        frame = DeformationPipeline._frame_mesh(scene)
+        left_lens = scene.geometry.get("LeftLens")
+        right_lens = scene.geometry.get("RightLens")
+        left_temple = scene.geometry.get("Plane.001_glasses_mat_0")
+        right_temple = scene.geometry.get("Plane.002_glasses_mat_0")
+        parts = (frame, left_lens, right_lens, left_temple, right_temple)
+        if not all(isinstance(mesh, trimesh.Trimesh) for mesh in parts):
+            return {"status": "incomplete"}
+
+        hinge_x = float(frame.extents[0]) * 0.5
+        hinge_y = float(frame.centroid[1])
+        hinge_z = float(min(left_temple.bounds[1][2], right_temple.bounds[1][2]))
+
+        def endpoint(mesh: trimesh.Trimesh) -> np.ndarray:
+            depth = mesh.vertices[:, 2]
+            cutoff = np.percentile(depth, 99.0)
+            return mesh.vertices[depth >= cutoff].mean(axis=0)
+
+        left_endpoint = endpoint(left_temple)
+        right_endpoint = endpoint(right_temple)
+        left_error = float(
+            np.linalg.norm(left_endpoint - np.array([-hinge_x, hinge_y, hinge_z]))
+        )
+        right_error = float(
+            np.linalg.norm(right_endpoint - np.array([hinge_x, hinge_y, hinge_z]))
+        )
+
+        return {
+            "status": "ok",
+            "frame_center": [float(value) for value in frame.centroid],
+            "frame_dimensions": [float(value) for value in frame.extents],
+            "lens_center_deviation_y_mm": abs(
+                float(left_lens.centroid[1] - right_lens.centroid[1])
+            ),
+            "lens_symmetry_x_mm": abs(
+                abs(float(left_lens.centroid[0]))
+                - abs(float(right_lens.centroid[0]))
+            ),
+            "temple_hinge_connection_error_mm": {
+                "left": left_error,
+                "right": right_error,
+            },
+            "thresholds_mm": {
+                "lens_center_deviation_y": 1.0,
+                "lens_symmetry_x": 1.0,
+                "temple_hinge_connection_error": 4.0,
+            },
+        }
+
+    @staticmethod
+    def _add_aliases_to_context(context: DeformationContext) -> None:
+        """Expose descriptor aliases without duplicating exported scene geometry."""
+        raw_aliases = context.descriptor.raw.get("mesh_aliases", {})
+        if not isinstance(raw_aliases, dict):
+            return
+
+        for logical_name, actual_name in raw_aliases.items():
+            if logical_name not in context.meshes and actual_name in context.meshes:
+                context.meshes[logical_name] = context.meshes[actual_name]
 
     @staticmethod
     def _optimize_scene(scene: trimesh.Scene) -> trimesh.Scene:
@@ -153,7 +348,7 @@ class DeformationPipeline:
         template_info = match.best.template
         template_name = template_info.name
 
-        scene = trimesh.load(template_info.glb_path, force="scene")
+        scene = self._load_template_scene(template_info)
         
         # Try to load descriptor, fall back to simple deformation if template not properly prepared
         try:
@@ -290,15 +485,15 @@ class DeformationPipeline:
 
         s6 = report.add("Template Deformation")
         t = s6.start()
-        scene = trimesh.load(template_info.glb_path, force="scene")
+        scene = self._load_template_scene(template_info)
         descriptor = self.descriptor_loader.load(template_name, measurements=measurements, template_info=template_info)
-        self._inject_aliases_into_scene(scene, descriptor)
         ctx = DeformationContext(
             template_info=template_info,
             template_scene=scene,
             descriptor=descriptor,
             measurements=measurements,
         )
+        self._add_aliases_to_context(ctx)
         rim_pull = self.library.rim_pull_strength(template_name)
         deformer = MeshDeformer(scene, template_info.dimensions, rim_pull_strength=rim_pull)
         deformed_ctx, quality = deformer.deform(ctx, lens_contour)
@@ -326,7 +521,13 @@ class DeformationPipeline:
         s8 = report.add("Mesh Quality Optimization")
         t = s8.start()
         deformed = self._optimize_scene(deformed)
-        s8.finish(t, preserved_topology=True, preserved_materials=True)
+        assembly_validation = self._assembly_validation(deformed)
+        s8.finish(
+            t,
+            preserved_topology=True,
+            preserved_materials=True,
+            assembly_validation=assembly_validation,
+        )
 
         s9 = report.add("GLB Export")
         t = s9.start()
@@ -367,6 +568,7 @@ class DeformationPipeline:
             },
             "scale_factors": self._scale_summary(measurements, template_info.dimensions),
             "lens_contour": lens_contour.model_dump(),
+            "assembly_validation": assembly_validation,
             "pipeline": report.to_dict(),
         }
 
@@ -378,7 +580,7 @@ class DeformationPipeline:
         template_override: str | None = None,
     ) -> dict:
         """
-        Run the full pipeline on 4-6 images:
+        Run the full pipeline on 4-5 images:
         1. Read and segment all images.
         2. Classify each view (front, side, top, perspective).
         3. Extract measurements and contours from each view.
@@ -467,15 +669,15 @@ class DeformationPipeline:
 
         s3 = report.add("Template Deformation")
         t = s3.start()
-        scene = trimesh.load(template_info.glb_path, force="scene")
+        scene = self._load_template_scene(template_info)
         descriptor = self.descriptor_loader.load(template_name, measurements=fused_measurements, template_info=template_info)
-        self._inject_aliases_into_scene(scene, descriptor)
         ctx = DeformationContext(
             template_info=template_info,
             template_scene=scene,
             descriptor=descriptor,
             measurements=fused_measurements,
         )
+        self._add_aliases_to_context(ctx)
         rim_pull = self.library.rim_pull_strength(template_name)
         deformer = MeshDeformer(scene, template_info.dimensions, rim_pull_strength=rim_pull)
         deformed_ctx, quality = deformer.deform(ctx, front_lens_contour)
@@ -504,7 +706,13 @@ class DeformationPipeline:
         s5 = report.add("Mesh Quality Optimization")
         t = s5.start()
         deformed = self._optimize_scene(deformed)
-        s5.finish(t, preserved_topology=True, preserved_materials=True)
+        assembly_validation = self._assembly_validation(deformed)
+        s5.finish(
+            t,
+            preserved_topology=True,
+            preserved_materials=True,
+            assembly_validation=assembly_validation,
+        )
 
         s6 = report.add("GLB Export")
         t = s6.start()
@@ -538,6 +746,7 @@ class DeformationPipeline:
             "features": features.model_dump(mode="json"),
             "scale_factors": self._scale_summary(fused_measurements, template_info.dimensions),
             "lens_contour": front_lens_contour.model_dump(),
+            "assembly_validation": assembly_validation,
             "pipeline": report.to_dict(),
         }
 

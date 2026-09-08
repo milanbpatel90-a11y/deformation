@@ -142,7 +142,7 @@
 
     <div class="img-card" id="card-multi" onclick="document.getElementById('input-multi').click()">
       <input type="file" id="input-multi" accept="image/*" multiple />
-      <div class="label">Multi-View (4-6 images) <span class="badge optional">multi-fusion</span></div>
+      <div class="label">Multi-View (4-5 images) <span class="badge optional">multi-fusion</span></div>
       <div class="placeholder" id="ph-multi">Click to choose multiple files</div>
       <div id="multi-preview-list" style="display: flex; gap: 4px; flex-wrap: wrap; margin-top: 6px;"></div>
     </div>
@@ -339,8 +339,10 @@ inputMulti.addEventListener('change', (e) => {
 
 function updateGenerateBtn() {
   const hasFront = document.getElementById('input-front').files.length > 0;
-  const hasMulti = document.getElementById('input-multi').files.length > 0;
-  document.getElementById('generate-btn').disabled = !(hasFront || hasMulti);
+  const multiCount = document.getElementById('input-multi').files.length;
+  const hasMulti = multiCount > 0;
+  const validMulti = multiCount >= 4 && multiCount <= 5;
+  document.getElementById('generate-btn').disabled = hasMulti ? !validMulti : !hasFront;
 }
 
 // ── Pipeline stages renderer ──────────────────────────────────────────────────
@@ -390,7 +392,11 @@ const downloadBtn = document.getElementById('download-btn');
 document.getElementById('generate-btn').addEventListener('click', async () => {
   const frontFile = document.getElementById('input-front').files[0];
   const multiFiles = document.getElementById('input-multi').files;
-  if (!frontFile && (!multiFiles || multiFiles.length === 0)) return;
+  if (
+    (!multiFiles || multiFiles.length === 0) &&
+    !frontFile
+  ) return;
+  if (multiFiles && (multiFiles.length < 4 || multiFiles.length > 5)) return;
 
   const btn = document.getElementById('generate-btn');
   btn.disabled = true;

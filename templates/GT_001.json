@@ -1,0 +1,35 @@
+{
+  "name": "GT_001",
+  "shape": "rectangle",
+  "material": "metal",
+  "style": "gold_template_rectangle",
+  "toolkit_style": "gold_template_rectangle",
+  "glb_file": "geometric_metal.glb",
+  "fallback_glb": "geometric_metal.glb",
+  "dimensions": {
+    "frame_width": 140.0,
+    "lens_width": 53.0,
+    "lens_height": 42.0,
+    "bridge_width": 17.2,
+    "temple_length": 145.0,
+    "rim_thickness": 1.2,
+    "temple_curve_angle": 28.0,
+    "nose_pad_distance": 18.0,
+    "nose_pad_angle": 15.0,
+    "nose_pad_height": 3.0
+  },
+  "parts": [
+    "Frame",
+    "Bridge",
+    "LeftTemple",
+    "RightTemple",
+    "LeftLens",
+    "RightLens",
+    "LeftRim",
+    "RightRim"
+  ],
+  "rim_pull_strength": 0.45,
+  "template_id": "GT_001",
+  "template_version": "1.1.0",
+  "runtime_source": "assets/templates/GT_001"
+}

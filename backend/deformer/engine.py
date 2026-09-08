@@ -61,6 +61,22 @@ class MeshDeformer:
         """Apply all deformation stages to the context and return quality report."""
         
         for stage in self.stages:
+            if (
+                context.template_info.name == "GT_001"
+                and isinstance(
+                    stage,
+                    (
+                        BridgeDeformer,
+                        RimDeformer,
+                        LensDeformer,
+                        TempleDeformer,
+                        SymmetrySolver,
+                    ),
+                )
+            ):
+                continue
+            if not self._stage_has_distinct_geometry(stage, context):
+                continue
             if hasattr(stage, "apply"):
                 # Handle special argument requirements (e.g., lens_contour)
                 if isinstance(stage, RimDeformer):
@@ -74,6 +90,28 @@ class MeshDeformer:
         quality = self.quality_checker.evaluate(context)
 
         return context, quality
+
+    @staticmethod
+    def _stage_has_distinct_geometry(stage, context: DeformationContext) -> bool:
+        """Avoid applying part-specific deformation to aliased whole meshes."""
+        if isinstance(stage, (BridgeDeformer, RimDeformer, LensDeformer)):
+            groups = context.descriptor.vertex_groups
+            required = {
+                "bridge": ["bridge", "frame"],
+                "rim": ["left_rim", "right_rim", "frame"],
+                "lens": ["left_lens", "right_lens", "left_rim", "right_rim"],
+            }
+            key = (
+                "bridge" if isinstance(stage, BridgeDeformer)
+                else "rim" if isinstance(stage, RimDeformer)
+                else "lens"
+            )
+            names = [groups.get(group, [None])[0] for group in required[key]]
+            if any(name is None or name not in context.meshes for name in names):
+                return False
+            meshes = [context.mesh(name) for name in names]
+            return len({id(mesh) for mesh in meshes}) == len(meshes)
+        return True
 
     def _refresh_normals(self, context: DeformationContext) -> None:
         """Fix normals after all mesh edits."""

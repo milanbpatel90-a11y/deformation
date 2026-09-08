@@ -12,7 +12,7 @@ from fastapi.staticfiles import StaticFiles
 
 from backend.models import FrameMaterial, FrameShape, Measurements
 from backend.pipeline import DeformationPipeline
-from backend.template_library.loader import TemplateLibrary
+from backend.template_library.loader import DEFAULT_TEMPLATE_NAME, TemplateLibrary
 from backend.api import rim_detection_routes
 
 app = FastAPI(
@@ -62,7 +62,7 @@ def root():
 @app.get("/api/templates")
 def list_templates():
     available = library.list_templates()
-    active = "rectangle_plastic" if "rectangle_plastic" in available else (available[0] if available else None)
+    active = DEFAULT_TEMPLATE_NAME if DEFAULT_TEMPLATE_NAME in available else (available[0] if available else None)
     return {
         "templates": available,
         "planned": available,
@@ -129,20 +129,25 @@ async def deform_from_images(
 
 @app.post("/api/deform/multi-view")
 async def deform_from_multiple_images(
-    images: list[UploadFile] = File(..., description="List of 4-6 product images from multiple view angles"),
+    images: list[UploadFile] = File(..., description="List of 4-5 product images from multiple view angles"),
     color: str = Form("#d9a7a2"),
     template: str | None = Form(None),
 ):
-    """Upload multiple product images, classify views, fuse measurements, deform template, and export GLB."""
+    """Upload 4-5 product images, classify views, fuse measurements, deform template, and export GLB."""
     job_id = uuid.uuid4().hex[:12]
     work_dir = OUTPUT_DIR / f"_upload_multi_{job_id}"
     work_dir.mkdir(parents=True, exist_ok=True)
 
     try:
+        supplied_images = [file for file in images if file.filename]
+        if not 4 <= len(supplied_images) <= 5:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Upload 4-5 non-empty images; received {len(supplied_images)}.",
+            )
+
         image_paths = []
-        for i, file in enumerate(images):
-            if not file.filename:
-                continue
+        for i, file in enumerate(supplied_images):
             file_bytes = await file.read()
             if not file_bytes:
                 continue
@@ -164,6 +169,8 @@ async def deform_from_multiple_images(
         result["job_id"] = job_id
         result["download_url"] = f"/api/output/{job_id}.glb"
         return result
+    except HTTPException:
+        raise
     except Exception as exc:
         import traceback
         tb = traceback.format_exc()
@@ -186,7 +193,7 @@ async def deform_from_measurements(
     nose_pads: bool = Form(True),
     temple_curve_angle: float = Form(28),
     color: str = Form("#d9a7a2"),
-    template: str = Form("rectangle_plastic"),
+    template: str = Form(DEFAULT_TEMPLATE_NAME),
 ):
     """Deform template directly from known measurements (no images required)."""
     try:

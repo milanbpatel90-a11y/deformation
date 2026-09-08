@@ -39,11 +39,27 @@ class GLBExporter:
         )
 
         export_scene = scene.copy()
+        self._remove_alias_geometry(export_scene)
         anchors = self._compute_anchors(export_scene, measurements)
         self._attach_metadata(export_scene, metadata, anchors)
 
         export_scene.export(str(output_path), file_type="glb")
         return output_path
+
+    @staticmethod
+    def _remove_alias_geometry(scene: trimesh.Scene) -> None:
+        """Remove logical alias entries before serializing the scene.
+
+        Deformation contexts may expose aliases such as ``LeftRim`` that point
+        at the same mesh as the original GLB entry. Serializing those aliases
+        creates visible duplicate geometry in the exported model.
+        """
+        raw_aliases = scene.metadata.get("mesh_aliases", {}) if scene.metadata else {}
+        if not isinstance(raw_aliases, dict):
+            return
+        for logical_name, actual_name in raw_aliases.items():
+            if logical_name != actual_name and logical_name in scene.geometry:
+                scene.delete_geometry(logical_name)
 
     def _compute_anchors(
         self, scene: trimesh.Scene, measurements: Measurements
