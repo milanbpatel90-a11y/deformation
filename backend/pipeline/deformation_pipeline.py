@@ -97,7 +97,9 @@ class DeformationPipeline:
         ]
         if not meshes:
             return
-        frame = max(meshes, key=lambda mesh: float(mesh.extents[0]))
+        frame = DeformationPipeline._frame_mesh(scene)
+        if frame is None:
+            return
         lens_candidates = [
             mesh for mesh in meshes
             if mesh is not frame
@@ -176,7 +178,7 @@ class DeformationPipeline:
     @staticmethod
     def _align_split_lenses(scene: trimesh.Scene) -> None:
         """Center split lenses on the frame's optical center."""
-        frame = scene.geometry.get("Plane_glasses_mat_0")
+        frame = DeformationPipeline._frame_mesh(scene)
         left = scene.geometry.get("LeftLens")
         right = scene.geometry.get("RightLens")
         if not all(isinstance(mesh, trimesh.Trimesh) for mesh in (frame, left, right)):
@@ -189,7 +191,7 @@ class DeformationPipeline:
     @staticmethod
     def _add_hinge_connectors(scene: trimesh.Scene) -> None:
         """Add small vertical hinge barrels where each temple meets the frame."""
-        frame = scene.geometry.get("Plane_glasses_mat_0")
+        frame = DeformationPipeline._frame_mesh(scene)
         left_temple = scene.geometry.get("Plane.001_glasses_mat_0")
         right_temple = scene.geometry.get("Plane.002_glasses_mat_0")
         if not all(
@@ -212,6 +214,70 @@ class DeformationPipeline:
             )
             hinge.apply_translation([x, hinge_y, hinge_z])
             scene.add_geometry(hinge, geom_name=name)
+
+    @staticmethod
+    def _frame_mesh(scene: trimesh.Scene) -> trimesh.Trimesh | None:
+        """Find the primary frame by its measured width."""
+        excluded = {"LeftLens", "RightLens", "LeftHinge", "RightHinge"}
+        candidates = [
+            mesh for name, mesh in scene.geometry.items()
+            if name not in excluded and isinstance(mesh, trimesh.Trimesh)
+        ]
+        if not candidates:
+            return None
+        return max(candidates, key=lambda mesh: float(mesh.extents[0]))
+
+    @staticmethod
+    def _assembly_validation(scene: trimesh.Scene) -> dict:
+        """Report geometry-derived lens, temple, hinge, and symmetry metrics."""
+        frame = DeformationPipeline._frame_mesh(scene)
+        left_lens = scene.geometry.get("LeftLens")
+        right_lens = scene.geometry.get("RightLens")
+        left_temple = scene.geometry.get("Plane.001_glasses_mat_0")
+        right_temple = scene.geometry.get("Plane.002_glasses_mat_0")
+        parts = (frame, left_lens, right_lens, left_temple, right_temple)
+        if not all(isinstance(mesh, trimesh.Trimesh) for mesh in parts):
+            return {"status": "incomplete"}
+
+        hinge_x = float(frame.extents[0]) * 0.5
+        hinge_y = float(frame.centroid[1])
+        hinge_z = float(min(left_temple.bounds[1][2], right_temple.bounds[1][2]))
+
+        def endpoint(mesh: trimesh.Trimesh) -> np.ndarray:
+            depth = mesh.vertices[:, 2]
+            cutoff = np.percentile(depth, 99.0)
+            return mesh.vertices[depth >= cutoff].mean(axis=0)
+
+        left_endpoint = endpoint(left_temple)
+        right_endpoint = endpoint(right_temple)
+        left_error = float(
+            np.linalg.norm(left_endpoint - np.array([-hinge_x, hinge_y, hinge_z]))
+        )
+        right_error = float(
+            np.linalg.norm(right_endpoint - np.array([hinge_x, hinge_y, hinge_z]))
+        )
+
+        return {
+            "status": "ok",
+            "frame_center": [float(value) for value in frame.centroid],
+            "frame_dimensions": [float(value) for value in frame.extents],
+            "lens_center_deviation_y_mm": abs(
+                float(left_lens.centroid[1] - right_lens.centroid[1])
+            ),
+            "lens_symmetry_x_mm": abs(
+                abs(float(left_lens.centroid[0]))
+                - abs(float(right_lens.centroid[0]))
+            ),
+            "temple_hinge_connection_error_mm": {
+                "left": left_error,
+                "right": right_error,
+            },
+            "thresholds_mm": {
+                "lens_center_deviation_y": 1.0,
+                "lens_symmetry_x": 1.0,
+                "temple_hinge_connection_error": 4.0,
+            },
+        }
 
     @staticmethod
     def _add_aliases_to_context(context: DeformationContext) -> None:
@@ -455,7 +521,13 @@ class DeformationPipeline:
         s8 = report.add("Mesh Quality Optimization")
         t = s8.start()
         deformed = self._optimize_scene(deformed)
-        s8.finish(t, preserved_topology=True, preserved_materials=True)
+        assembly_validation = self._assembly_validation(deformed)
+        s8.finish(
+            t,
+            preserved_topology=True,
+            preserved_materials=True,
+            assembly_validation=assembly_validation,
+        )
 
         s9 = report.add("GLB Export")
         t = s9.start()
@@ -496,6 +568,7 @@ class DeformationPipeline:
             },
             "scale_factors": self._scale_summary(measurements, template_info.dimensions),
             "lens_contour": lens_contour.model_dump(),
+            "assembly_validation": assembly_validation,
             "pipeline": report.to_dict(),
         }
 
@@ -633,7 +706,13 @@ class DeformationPipeline:
         s5 = report.add("Mesh Quality Optimization")
         t = s5.start()
         deformed = self._optimize_scene(deformed)
-        s5.finish(t, preserved_topology=True, preserved_materials=True)
+        assembly_validation = self._assembly_validation(deformed)
+        s5.finish(
+            t,
+            preserved_topology=True,
+            preserved_materials=True,
+            assembly_validation=assembly_validation,
+        )
 
         s6 = report.add("GLB Export")
         t = s6.start()
@@ -667,6 +746,7 @@ class DeformationPipeline:
             "features": features.model_dump(mode="json"),
             "scale_factors": self._scale_summary(fused_measurements, template_info.dimensions),
             "lens_contour": front_lens_contour.model_dump(),
+            "assembly_validation": assembly_validation,
             "pipeline": report.to_dict(),
         }
 
