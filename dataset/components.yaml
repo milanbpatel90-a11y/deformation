@@ -1,0 +1,18 @@
+# Future component-aware YOLOv8-Seg dataset.
+# Do not use until corresponding per-component polygon labels exist.
+
+path: ./dataset
+train: images/train
+val: images/val
+
+nc: 9
+names:
+  0: left_rim
+  1: right_rim
+  2: bridge
+  3: left_temple
+  4: right_temple
+  5: left_lens
+  6: right_lens
+  7: nose_pad
+  8: temple_tip
