@@ -1,27 +1,12 @@
-# YOLOv8 Segmentation Dataset Configuration
-# Multi-class segmentation for detailed eyewear parts
+# Current repository YOLOv8-Seg dataset.
+# This file matches the data that is actually present today: one class.
+# Component-aware annotations are specified in dataset/components.yaml.
 
-path: C:/Users/Petpooja-607/Desktop/defirmation/dataset
-
+path: ./dataset
 train: images/train
 val: images/val
 test: images/test
 
-# Number of classes
-nc: 6
-
-# Class names for detailed segmentation
+nc: 1
 names:
-  0: eyewear_rim      # Frame rim/front
-  1: eyewear_temple   # Temple arms
-  2: bridge           # Bridge connecting lenses
-  3: left_lens        # Left lens area
-  4: right_lens       # Right lens area
-  5: nose_pad         # Nose pads (if present)
-
-# Training parameters (optional, can override in training script)
-# epochs: 100
-# imgsz: 640
-# batch: 16
-
-# Made with Bob
+  0: eyewear
