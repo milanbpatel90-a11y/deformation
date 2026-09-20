@@ -1,11 +1,14 @@
-# Current repository YOLOv8-Seg dataset.
-# This file matches the data that is actually present today: one class.
-# Component-aware annotations are specified in dataset/components.yaml.
+# YOLOv8-Seg dataset configuration for the Deformation project.
+# Scope: 1-class binary segmentation.
+# 0 = eyewear
+#
+# 'path' is relative to this YAML file, so the repository can be cloned on
+# Windows, Linux, CI, Docker, or another developer machine without changing
+# the configuration.
 
 path: ./dataset
 train: images/train
 val: images/val
-test: images/test
 
 nc: 1
 names:
