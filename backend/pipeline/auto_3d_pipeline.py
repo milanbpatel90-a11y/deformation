@@ -253,8 +253,9 @@ class Auto3DPipeline:
             "full": (0, 0, 255)      # Red
         }
         
-        for key, mask in masks.items():
-            if mask is not None and mask.sum() > 0:
+        for key in ("front", "side", "full"):
+            mask = masks.get(key)
+            if mask is not None and isinstance(mask, np.ndarray) and mask.sum() > 0:
                 color = colors.get(key, (255, 255, 255))
                 colored_mask = np.zeros_like(image)
                 colored_mask[mask > 0] = color
