@@ -1,0 +1,460 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="color-scheme" content="dark" />
+  <title>Defirmation — Production 3D Reconstruction</title>
+  <style>
+    :root {
+      --bg:#0b1117; --panel:#111a23; --panel2:#15212c; --line:#263542;
+      --text:#ecf3f7; --muted:#8fa3b2; --accent:#3dd6b0; --warn:#f5b94c;
+      --danger:#ff6b74; --ok:#6ee7a8;
+    }
+    * { box-sizing:border-box; }
+    body { margin:0; font-family:Inter,ui-sans-serif,system-ui,-apple-system,sans-serif; background:var(--bg); color:var(--text); }
+    button,input { font:inherit; }
+    button { border:0; border-radius:9px; cursor:pointer; }
+    button:disabled { cursor:not-allowed; opacity:.48; }
+    .app { min-height:100vh; display:grid; grid-template-columns:360px 1fr; }
+    aside { border-right:1px solid var(--line); padding:22px; background:#0d151d; overflow:auto; }
+    main { padding:24px; overflow:auto; }
+    h1 { font-size:20px; margin:0; }
+    h2 { font-size:14px; margin:0 0 12px; }
+    .sub { color:var(--muted); font-size:13px; line-height:1.5; margin:6px 0 20px; }
+    .card { background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:16px; margin-bottom:14px; }
+    .drop { border:1px dashed #3c5364; border-radius:12px; padding:18px; text-align:center; background:var(--panel2); }
+    .drop.drag { border-color:var(--accent); }
+    .primary { width:100%; padding:12px 14px; background:var(--accent); color:#04120e; font-weight:800; }
+    .secondary { padding:9px 12px; background:#22313c; color:var(--text); }
+    .danger { background:#432329; color:#ffd9dd; }
+    .row { display:flex; gap:8px; align-items:center; }
+    .between { display:flex; justify-content:space-between; gap:10px; align-items:center; }
+    .counter { font-size:12px; color:var(--muted); }
+    .counter.good { color:var(--ok); }
+    .counter.bad { color:var(--danger); }
+    .files { display:grid; gap:8px; margin-top:12px; }
+    .file { display:grid; grid-template-columns:52px 1fr auto; gap:10px; align-items:center; padding:8px; border:1px solid var(--line); border-radius:10px; }
+    .thumb { width:52px; height:42px; object-fit:cover; border-radius:7px; background:#090d12; }
+    .filename { font-size:12px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .meta { font-size:11px; color:var(--muted); margin-top:2px; }
+    .iconbtn { width:30px; height:30px; background:#273641; color:var(--text); }
+    .status { padding:11px 12px; border-radius:9px; font-size:12px; line-height:1.45; background:#15212c; color:var(--muted); }
+    .status.error { background:#351d22; color:#ffc3c8; }
+    .status.ok { background:#123028; color:#b7f6dc; }
+    .progress { height:7px; border-radius:999px; background:#1e2b35; overflow:hidden; margin-top:10px; }
+    .progress > div { height:100%; width:36%; background:var(--accent); animation:pulse 1.2s ease-in-out infinite alternate; }
+    @keyframes pulse { from { transform:translateX(-90%);} to {transform:translateX(260%);} }
+    .tabs { display:flex; gap:8px; margin-bottom:14px; }
+    .tab { padding:8px 12px; background:#17232d; color:var(--muted); }
+    .tab.active { background:#244238; color:#cffff0; }
+    .grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:14px; }
+    .view { background:var(--panel); border:1px solid var(--line); border-radius:12px; overflow:hidden; }
+    .view img { width:100%; aspect-ratio:16/10; object-fit:contain; background:#080c10; display:block; }
+    .viewbody { padding:12px; }
+    .pill { display:inline-flex; align-items:center; gap:5px; border-radius:999px; padding:4px 8px; font-size:11px; background:#1f2e38; color:#c7d6df; }
+    .pill.ok { background:#153c30; color:#a9f3d2; }
+    .pill.warn { background:#3a2e14; color:#ffda82; }
+    .pill.bad { background:#3c1f24; color:#ffbdc2; }
+    table { width:100%; border-collapse:collapse; font-size:12px; }
+    th,td { padding:9px 8px; border-bottom:1px solid var(--line); text-align:left; }
+    th { color:var(--muted); font-weight:600; }
+    .metricv { font-variant-numeric:tabular-nums; }
+    .warning { padding:9px 11px; background:#352a16; color:#ffd98b; border-radius:8px; margin-top:8px; font-size:12px; }
+    iframe { width:100%; height:72vh; border:1px solid var(--line); border-radius:12px; background:#0a0f14; }
+    .hidden { display:none !important; }
+    .empty { border:1px dashed var(--line); border-radius:12px; min-height:300px; display:grid; place-items:center; color:var(--muted); text-align:center; padding:30px; }
+    @media (max-width:900px) { .app{grid-template-columns:1fr;} aside{border-right:0;border-bottom:1px solid var(--line);} .grid{grid-template-columns:1fr;} iframe{height:60vh;} }
+  </style>
+</head>
+<body>
+<div class="app">
+  <aside>
+    <h1>Defirmation Production</h1>
+    <p class="sub">Create one try-on-ready 3D glasses model from 4–5 product photos. Use clear views of the same frame with minimal occlusion.</p>
+
+    <section class="card">
+      <div class="between">
+        <h2>Input images</h2>
+        <span id="count" class="counter bad">0 / 4–5</span>
+      </div>
+      <div id="drop" class="drop">
+        <input id="picker" type="file" accept="image/jpeg,image/png,image/webp" multiple hidden />
+        <button id="pickBtn" class="secondary" type="button">Choose 4–5 images</button>
+        <div class="meta" style="margin-top:8px">JPG, PNG, or WebP · max 15 MB each</div>
+      </div>
+      <div id="files" class="files"></div>
+    </section>
+
+    <section class="card">
+      <h2>Reconstruction</h2>
+      <button id="generate" class="primary" disabled type="button">Generate 3D model</button>
+      <div class="row" style="margin-top:8px">
+        <button id="cancel" class="secondary danger hidden" type="button">Cancel request</button>
+        <button id="reset" class="secondary" type="button">Reset</button>
+      </div>
+      <div id="status" class="status" style="margin-top:10px">Select exactly 4 or 5 images to continue.</div>
+      <div id="progress" class="progress hidden"><div></div></div>
+    </section>
+
+    <section id="actions" class="card hidden">
+      <h2>Model actions</h2>
+      <div class="row">
+        <button id="download" class="secondary" type="button">Download GLB</button>
+        <button id="openViewer" class="secondary" type="button">Open try-on viewer</button>
+      </div>
+      <div id="jobMeta" class="meta" style="margin-top:10px"></div>
+    </section>
+  </aside>
+
+  <main>
+    <div class="tabs">
+      <button id="qaTab" class="tab active" type="button">QA</button>
+      <button id="viewerTab" class="tab" type="button">3D Viewer</button>
+    </div>
+
+    <section id="qaPanel">
+      <div id="empty" class="empty">Reconstruction QA will appear here after the backend completes.</div>
+      <div id="results" class="hidden">
+        <div class="card">
+          <div class="between"><h2>Consolidated measurements</h2><span id="templatePill" class="pill"></span></div>
+          <table><thead><tr><th>Measurement</th><th>Value</th><th>Agreement</th></tr></thead><tbody id="measurementRows"></tbody></table>
+          <div id="warnings"></div>
+        </div>
+        <div>
+          <h2>Per-view segmentation QA</h2>
+          <div id="viewGrid" class="grid"></div>
+        </div>
+      </div>
+    </section>
+
+    <section id="viewerPanel" class="hidden">
+      <div id="viewerEmpty" class="empty">Generate a model first, then inspect it here or open the full try-on viewer.</div>
+      <iframe id="viewerFrame" class="hidden" title="3D glasses viewer" allow="camera"></iframe>
+    </section>
+  </main>
+</div>
+
+<script>
+(() => {
+  'use strict';
+
+  const MAX_FILES = 5;
+  const MIN_FILES = 4;
+  const MAX_BYTES = 15 * 1024 * 1024;
+  const ALLOWED = new Set(['image/jpeg','image/png','image/webp']);
+  const METRICS = [
+    ['frame_width','Frame width'],
+    ['lens_width','Lens width'],
+    ['lens_height','Lens height'],
+    ['bridge_width','Bridge width'],
+    ['temple_length','Temple length']
+  ];
+
+  const $ = (id) => document.getElementById(id);
+  const state = { files: [], urls: [], busy: false, controller: null, result: null };
+
+  function setStatus(message, kind='') {
+    $('status').textContent = message;
+    $('status').className = 'status' + (kind ? ' ' + kind : '');
+  }
+
+  function validateCandidate(file) {
+    if (!ALLOWED.has(file.type)) return 'Unsupported file type';
+    if (file.size <= 0) return 'Empty file';
+    if (file.size > MAX_BYTES) return 'File is larger than 15 MB';
+    return null;
+  }
+
+  function signature(file) {
+    return [file.name, file.size, file.lastModified].join('|');
+  }
+
+  function setFiles(next) {
+    state.urls.forEach(URL.revokeObjectURL);
+    state.urls = [];
+    const seen = new Set();
+    state.files = [];
+    const errors = [];
+
+    for (const file of next) {
+      const err = validateCandidate(file);
+      if (err) { errors.push(file.name + ': ' + err); continue; }
+      const sig = signature(file);
+      if (seen.has(sig)) { errors.push(file.name + ': duplicate selection ignored'); continue; }
+      seen.add(sig);
+      if (state.files.length >= MAX_FILES) { errors.push(file.name + ': maximum is 5 images'); continue; }
+      state.files.push(file);
+    }
+
+    renderFiles();
+    if (errors.length) setStatus(errors.join(' · '), 'error');
+    else if (state.files.length < MIN_FILES) setStatus('Add ' + (MIN_FILES - state.files.length) + ' more image(s).');
+    else setStatus('Ready to reconstruct.', 'ok');
+    updateControls();
+  }
+
+  function renderFiles() {
+    const wrap = $('files');
+    wrap.replaceChildren();
+    state.files.forEach((file, index) => {
+      const url = URL.createObjectURL(file);
+      state.urls.push(url);
+
+      const row = document.createElement('div');
+      row.className = 'file';
+      const img = document.createElement('img');
+      img.className = 'thumb';
+      img.src = url;
+      img.alt = '';
+
+      const info = document.createElement('div');
+      const name = document.createElement('div');
+      name.className = 'filename';
+      name.textContent = file.name;
+      const meta = document.createElement('div');
+      meta.className = 'meta';
+      meta.textContent = (file.size / (1024 * 1024)).toFixed(1) + ' MB';
+      info.append(name, meta);
+
+      const remove = document.createElement('button');
+      remove.className = 'iconbtn';
+      remove.type = 'button';
+      remove.textContent = '×';
+      remove.setAttribute('aria-label', 'Remove ' + file.name);
+      remove.addEventListener('click', () => {
+        const next = state.files.slice();
+        next.splice(index, 1);
+        setFiles(next);
+      });
+
+      row.append(img, info, remove);
+      wrap.appendChild(row);
+    });
+
+    const good = state.files.length >= MIN_FILES && state.files.length <= MAX_FILES;
+    $('count').textContent = state.files.length + ' / 4–5';
+    $('count').className = 'counter ' + (good ? 'good' : 'bad');
+  }
+
+  function updateControls() {
+    const countOk = state.files.length >= MIN_FILES && state.files.length <= MAX_FILES;
+    $('generate').disabled = state.busy || !countOk;
+    $('pickBtn').disabled = state.busy;
+    $('reset').disabled = state.busy;
+    $('cancel').classList.toggle('hidden', !state.busy);
+  }
+
+  function clearResult() {
+    state.result = null;
+    $('results').classList.add('hidden');
+    $('empty').classList.remove('hidden');
+    $('actions').classList.add('hidden');
+    $('viewerFrame').classList.add('hidden');
+    $('viewerFrame').removeAttribute('src');
+    $('viewerEmpty').classList.remove('hidden');
+  }
+
+  function resetAll() {
+    if (state.controller) state.controller.abort();
+    state.urls.forEach(URL.revokeObjectURL);
+    state.files = [];
+    state.urls = [];
+    $('picker').value = '';
+    $('files').replaceChildren();
+    $('count').textContent = '0 / 4–5';
+    $('count').className = 'counter bad';
+    state.busy = false;
+    clearResult();
+    setStatus('Select exactly 4 or 5 images to continue.');
+    updateControls();
+  }
+
+  function agreementCell(info) {
+    const span = document.createElement('span');
+    span.className = 'pill';
+    if (!info || info.status === 'insufficient_samples') {
+      span.classList.add('warn');
+      const n = info && Number.isInteger(info.sample_count) ? info.sample_count : 0;
+      span.textContent = 'Insufficient evidence (' + n + ')';
+      return span;
+    }
+    if (info.status === 'disagreement' || info.flag === true) {
+      span.classList.add('bad');
+      span.textContent = 'Review · σ ' + Number(info.std_dev).toFixed(2) + ' mm';
+      return span;
+    }
+    span.classList.add('ok');
+    span.textContent = 'Agreement · σ ' + Number(info.std_dev).toFixed(2) + ' mm';
+    return span;
+  }
+
+  function renderResults(data) {
+    state.result = data;
+    $('empty').classList.add('hidden');
+    $('results').classList.remove('hidden');
+
+    $('templatePill').textContent = data.template ? 'Template: ' + data.template : 'Template: auto';
+
+    const tbody = $('measurementRows');
+    tbody.replaceChildren();
+    METRICS.forEach(([key,label]) => {
+      const tr = document.createElement('tr');
+      const tdLabel = document.createElement('td');
+      tdLabel.textContent = label;
+      const tdValue = document.createElement('td');
+      tdValue.className = 'metricv';
+      const v = data.consolidated_measurements && data.consolidated_measurements[key];
+      tdValue.textContent = Number.isFinite(Number(v)) ? Number(v).toFixed(1) + ' mm' : '—';
+      const tdAgree = document.createElement('td');
+      tdAgree.appendChild(agreementCell(data.measurement_agreement && data.measurement_agreement[key]));
+      tr.append(tdLabel, tdValue, tdAgree);
+      tbody.appendChild(tr);
+    });
+
+    const warnings = $('warnings');
+    warnings.replaceChildren();
+    (data.warnings || []).forEach((message) => {
+      const el = document.createElement('div');
+      el.className = 'warning';
+      el.textContent = message;
+      warnings.appendChild(el);
+    });
+
+    const grid = $('viewGrid');
+    grid.replaceChildren();
+    (data.views || []).forEach((view) => {
+      const card = document.createElement('article');
+      card.className = 'view';
+      const img = document.createElement('img');
+      img.src = view.overlay_png_base64;
+      img.alt = 'Segmentation overlay for ' + (view.filename || 'uploaded image');
+
+      const body = document.createElement('div');
+      body.className = 'viewbody';
+      const top = document.createElement('div');
+      top.className = 'between';
+      const name = document.createElement('div');
+      name.className = 'filename';
+      name.textContent = view.filename || 'View';
+      const confidence = document.createElement('span');
+      const conf = Number(view.mask_confidence);
+      confidence.className = 'pill ' + (conf >= .85 ? 'ok' : conf >= .70 ? 'warn' : 'bad');
+      confidence.textContent = Number.isFinite(conf) ? Math.round(conf * 100) + '% mask' : 'No confidence';
+      top.append(name, confidence);
+
+      const meta = document.createElement('div');
+      meta.className = 'meta';
+      meta.style.marginTop = '6px';
+      meta.textContent = 'Detected view: ' + (view.view_type || 'unknown');
+      body.append(top, meta);
+      card.append(img, body);
+      grid.appendChild(card);
+    });
+
+    $('actions').classList.remove('hidden');
+    $('jobMeta').textContent = 'Job ' + (data.job_id || '—');
+
+    if (data.model_url) {
+      const viewerUrl = '/viewer/?glb=' + encodeURIComponent(data.model_url);
+      $('viewerFrame').src = viewerUrl;
+      $('viewerFrame').classList.remove('hidden');
+      $('viewerEmpty').classList.add('hidden');
+    }
+  }
+
+  async function parseError(response) {
+    const ct = response.headers.get('content-type') || '';
+    if (ct.includes('application/json')) {
+      const body = await response.json().catch(() => null);
+      if (body) {
+        if (typeof body.detail === 'string') return body.detail;
+        if (typeof body.error === 'string') return body.error;
+      }
+    }
+    const text = await response.text().catch(() => '');
+    return text || ('HTTP ' + response.status);
+  }
+
+  async function reconstruct() {
+    if (state.busy || state.files.length < MIN_FILES || state.files.length > MAX_FILES) return;
+    state.busy = true;
+    state.controller = new AbortController();
+    updateControls();
+    clearResult();
+    $('progress').classList.remove('hidden');
+    setStatus('Processing 4–5 views. The request stays active until segmentation, fusion, deformation, and GLB export finish.');
+
+    const form = new FormData();
+    state.files.forEach((file) => form.append('images', file));
+
+    try {
+      const response = await fetch('/api/reconstruct/multi-view', {
+        method:'POST',
+        body:form,
+        signal:state.controller.signal,
+        headers:{'Accept':'application/json'}
+      });
+      if (!response.ok) throw new Error(await parseError(response));
+      const data = await response.json();
+      if (!data || !data.job_id || !data.consolidated_measurements) {
+        throw new Error('Backend returned an incomplete reconstruction response.');
+      }
+      renderResults(data);
+      setStatus('Reconstruction completed. Review QA before using the model for try-on.', 'ok');
+    } catch (error) {
+      if (error && error.name === 'AbortError') {
+        setStatus('Request cancelled in the browser. Server-side work may finish if it had already started.', 'error');
+      } else {
+        setStatus('Reconstruction failed: ' + (error && error.message ? error.message : String(error)), 'error');
+      }
+    } finally {
+      state.busy = false;
+      state.controller = null;
+      $('progress').classList.add('hidden');
+      updateControls();
+    }
+  }
+
+  function showTab(which) {
+    const qa = which === 'qa';
+    $('qaPanel').classList.toggle('hidden', !qa);
+    $('viewerPanel').classList.toggle('hidden', qa);
+    $('qaTab').classList.toggle('active', qa);
+    $('viewerTab').classList.toggle('active', !qa);
+  }
+
+  $('pickBtn').addEventListener('click', () => $('picker').click());
+  $('picker').addEventListener('change', (e) => setFiles(Array.from(e.target.files || [])));
+  $('generate').addEventListener('click', reconstruct);
+  $('cancel').addEventListener('click', () => state.controller && state.controller.abort());
+  $('reset').addEventListener('click', resetAll);
+  $('qaTab').addEventListener('click', () => showTab('qa'));
+  $('viewerTab').addEventListener('click', () => showTab('viewer'));
+  $('download').addEventListener('click', () => {
+    if (state.result && state.result.model_url) window.location.assign(state.result.model_url);
+  });
+  $('openViewer').addEventListener('click', () => {
+    if (state.result && state.result.model_url) {
+      window.open('/viewer/?glb=' + encodeURIComponent(state.result.model_url), '_blank', 'noopener');
+    }
+  });
+
+  const drop = $('drop');
+  ['dragenter','dragover'].forEach((name) => drop.addEventListener(name, (event) => {
+    event.preventDefault(); drop.classList.add('drag');
+  }));
+  ['dragleave','drop'].forEach((name) => drop.addEventListener(name, (event) => {
+    event.preventDefault(); drop.classList.remove('drag');
+  }));
+  drop.addEventListener('drop', (event) => {
+    if (state.busy) return;
+    setFiles(Array.from(event.dataTransfer.files || []));
+  });
+
+  window.addEventListener('beforeunload', () => state.urls.forEach(URL.revokeObjectURL));
+  updateControls();
+})();
+</script>
+</body>
+</html>
