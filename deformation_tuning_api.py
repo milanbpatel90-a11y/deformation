@@ -17,6 +17,7 @@ from typing import Any
 from fastapi import FastAPI, File, Form, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
+from starlette.concurrency import run_in_threadpool
 
 import cv2
 import numpy as np
@@ -102,9 +103,28 @@ def _agreement(per_view: list[dict[str, Any]]) -> tuple[dict[str, dict[str, Any]
             for v in relevant
             if v["measurements"].get(field) is not None
         ]
-        std_dev = round(float(np.std(values)), 2) if len(values) > 1 else 0.0
+        sample_count = len(values)
+        if sample_count < 2:
+            agreement[field] = {
+                "std_dev": None,
+                "flag": None,
+                "sample_count": sample_count,
+                "status": "insufficient_samples",
+            }
+            warnings.append(
+                f"{field}: insufficient relevant views for agreement check "
+                f"({sample_count} sample; need at least 2)"
+            )
+            continue
+
+        std_dev = round(float(np.std(values)), 2)
         flagged = std_dev > threshold
-        agreement[field] = {"std_dev": std_dev, "flag": flagged}
+        agreement[field] = {
+            "std_dev": std_dev,
+            "flag": flagged,
+            "sample_count": sample_count,
+            "status": "disagreement" if flagged else "agreement",
+        }
         if flagged:
             warnings.append(
                 f"{field} varies ±{std_dev}mm across relevant views (threshold {threshold}mm)"
@@ -347,10 +367,12 @@ async def reconstruct_multi_view(
                 )
 
             glb_path = work_dir / f"{job_id}.glb"
-            result = pipeline.run_from_multiple_images(
+            result = await run_in_threadpool(
+                pipeline.run_from_multiple_images,
                 image_paths,
                 glb_path,
-                template_override=template_name,
+                "#d9a7a2",
+                template_name,
             )
 
             agreement, agreement_warnings = _agreement(per_view)
