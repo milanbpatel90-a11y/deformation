@@ -9,6 +9,7 @@ import base64
 import logging
 import os
 import tempfile
+import time
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -35,10 +36,24 @@ TEMPLATES_DIR = PROJECT_ROOT / "templates"
 RECONSTRUCTION_DIR = PROJECT_ROOT / "output" / "reconstructions"
 RECONSTRUCTION_DIR.mkdir(parents=True, exist_ok=True)
 MAX_IMAGE_BYTES = int(os.environ.get("DEFIRM_MAX_IMAGE_BYTES", str(15 * 1024 * 1024)))
+MODEL_RETENTION_HOURS = int(os.environ.get("DEFIRM_MODEL_RETENTION_HOURS", "24"))
+ALLOWED_ORIGINS = [
+    origin.strip()
+    for origin in os.environ.get(
+        "DEFIRM_ALLOWED_ORIGINS",
+        "http://localhost:8001,http://127.0.0.1:8001",
+    ).split(",")
+    if origin.strip()
+]
 DEFAULT_YOLO = PROJECT_ROOT / "runs" / "segment" / "eyewear_seg" / "weights" / "best.pt"
 
 app = FastAPI(title="Defirmation Deformation Tuning API", version="1.0.0")
-app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=ALLOWED_ORIGINS,
+    allow_methods=["GET", "POST"],
+    allow_headers=["Accept", "Content-Type"],
+)
 
 VIEWER_DIR = PROJECT_ROOT / "viewer"
 if VIEWER_DIR.exists():
@@ -70,6 +85,19 @@ class TuningState:
 
 state: TuningState | None = None
 _reconstruction_pipeline: DeformationPipeline | None = None
+
+
+def _prune_reconstruction_models() -> None:
+    if MODEL_RETENTION_HOURS <= 0:
+        return
+    cutoff = time.time() - MODEL_RETENTION_HOURS * 3600
+    for path in RECONSTRUCTION_DIR.glob("*.glb"):
+        try:
+            if path.stat().st_mtime < cutoff:
+                path.unlink(missing_ok=True)
+                path.with_suffix(".metadata.json").unlink(missing_ok=True)
+        except OSError:
+            logger.warning("Could not prune reconstruction artifact: %s", path, exc_info=True)
 
 
 def _get_reconstruction_pipeline() -> DeformationPipeline:
@@ -152,6 +180,7 @@ def _init_state() -> TuningState:
 async def startup() -> None:
     global state
     state = _init_state()
+    _prune_reconstruction_models()
     logger.info("Tuning API ready — templates dir: %s", TEMPLATES_DIR)
 
 
@@ -307,6 +336,7 @@ async def reconstruct_multi_view(
     if not 4 <= len(images) <= 5:
         raise HTTPException(status_code=400, detail="Upload exactly 4 or 5 images")
 
+    _prune_reconstruction_models()
     pipeline = _get_reconstruction_pipeline()
     view_classifier = ViewClassifier()
     job_id = uuid.uuid4().hex[:12]
