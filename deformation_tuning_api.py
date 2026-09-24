@@ -16,7 +16,8 @@ from typing import Any
 
 from fastapi import FastAPI, File, Form, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.staticfiles import StaticFiles
 from starlette.concurrency import run_in_threadpool
 
 import cv2
@@ -31,10 +32,17 @@ logger = logging.getLogger(__name__)
 
 PROJECT_ROOT = Path(__file__).resolve().parent
 TEMPLATES_DIR = PROJECT_ROOT / "templates"
+RECONSTRUCTION_DIR = PROJECT_ROOT / "output" / "reconstructions"
+RECONSTRUCTION_DIR.mkdir(parents=True, exist_ok=True)
+MAX_IMAGE_BYTES = int(os.environ.get("DEFIRM_MAX_IMAGE_BYTES", str(15 * 1024 * 1024)))
 DEFAULT_YOLO = PROJECT_ROOT / "runs" / "segment" / "eyewear_seg" / "weights" / "best.pt"
 
 app = FastAPI(title="Defirmation Deformation Tuning API", version="1.0.0")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+
+VIEWER_DIR = PROJECT_ROOT / "viewer"
+if VIEWER_DIR.exists():
+    app.mount("/viewer", StaticFiles(directory=str(VIEWER_DIR), html=True), name="viewer")
 
 
 class TuningState:
@@ -313,6 +321,12 @@ async def reconstruct_multi_view(
                 raw = await upload.read()
                 if not raw:
                     raise HTTPException(status_code=400, detail=f"Image {index + 1} is empty")
+                if len(raw) > MAX_IMAGE_BYTES:
+                    raise HTTPException(
+                        status_code=413,
+                        detail=f"{upload.filename or f'Image {index + 1}'} exceeds "
+                        f"{MAX_IMAGE_BYTES // (1024 * 1024)}MB limit",
+                    )
                 suffix = Path(upload.filename or "").suffix.lower()
                 if suffix not in {".jpg", ".jpeg", ".png", ".webp"}:
                     suffix = ".jpg"
@@ -366,7 +380,7 @@ async def reconstruct_multi_view(
                     }
                 )
 
-            glb_path = work_dir / f"{job_id}.glb"
+            glb_path = RECONSTRUCTION_DIR / f"{job_id}.glb"
             result = await run_in_threadpool(
                 pipeline.run_from_multiple_images,
                 image_paths,
@@ -385,10 +399,13 @@ async def reconstruct_multi_view(
                 if key in fused
             }
 
-            model_uri = (
-                "data:model/gltf-binary;base64,"
-                + base64.b64encode(glb_path.read_bytes()).decode("ascii")
-            )
+            model_url = f"/api/reconstruct/{job_id}/model"
+            model_uri = None
+            if os.environ.get("DEFIRM_INLINE_GLB", "0") == "1":
+                model_uri = (
+                    "data:model/gltf-binary;base64,"
+                    + base64.b64encode(glb_path.read_bytes()).decode("ascii")
+                )
 
             return {
                 "job_id": job_id,
@@ -396,6 +413,7 @@ async def reconstruct_multi_view(
                 "consolidated_measurements": consolidated,
                 "measurement_agreement": agreement,
                 "warnings": warnings,
+                "model_url": model_url,
                 "model_glb_base64": model_uri,
                 "template": result.get("template"),
                 "pipeline": result.get("pipeline", []),
@@ -405,6 +423,30 @@ async def reconstruct_multi_view(
     except Exception as exc:
         logger.exception("Multi-view reconstruction failed")
         raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+
+@app.get("/api/reconstruct/{job_id}/model")
+async def reconstruct_model(job_id: str):
+    if not job_id or any(ch not in "0123456789abcdef" for ch in job_id.lower()):
+        raise HTTPException(status_code=400, detail="Invalid job id")
+    path = RECONSTRUCTION_DIR / f"{job_id}.glb"
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="Model not found")
+    return FileResponse(
+        path,
+        media_type="model/gltf-binary",
+        filename=f"defirmation-{job_id}.glb",
+        headers={"Cache-Control": "private, max-age=3600"},
+    )
+
+
+@app.get("/dashboard", response_class=HTMLResponse)
+async def serve_dashboard():
+    dashboard_path = PROJECT_ROOT / "toolkit" / "dashboard.html"
+    if not dashboard_path.exists():
+        raise HTTPException(status_code=404, detail="Dashboard not installed")
+    return dashboard_path.read_text(encoding="utf-8")
 
 
 @app.get("/api/state")
