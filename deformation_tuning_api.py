@@ -170,12 +170,12 @@ def _agreement(per_view: list[dict[str, Any]]) -> tuple[dict[str, dict[str, Any]
 
 
 def _run_multiview_reconstruction(
-    pipeline: DeformationPipeline,
     image_paths: list[Path],
     original_names: list[str],
     template_name: str | None,
     job_id: str,
 ) -> dict[str, Any]:
+    pipeline = _get_reconstruction_pipeline()
     view_classifier = ViewClassifier()
     per_view: list[dict[str, Any]] = []
     warnings: list[str] = []
@@ -429,7 +429,6 @@ async def reconstruct_multi_view(
         raise HTTPException(status_code=400, detail="Upload exactly 4 or 5 images")
 
     _prune_reconstruction_models()
-    pipeline = _get_reconstruction_pipeline()
     job_id = uuid.uuid4().hex[:12]
 
     try:
@@ -458,7 +457,6 @@ async def reconstruct_multi_view(
 
             return await run_in_threadpool(
                 _run_multiview_reconstruction,
-                pipeline,
                 image_paths,
                 original_names,
                 template_name,
