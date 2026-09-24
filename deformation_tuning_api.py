@@ -169,6 +169,98 @@ def _agreement(per_view: list[dict[str, Any]]) -> tuple[dict[str, dict[str, Any]
     return agreement, warnings
 
 
+def _run_multiview_reconstruction(
+    pipeline: DeformationPipeline,
+    image_paths: list[Path],
+    original_names: list[str],
+    template_name: str | None,
+    job_id: str,
+) -> dict[str, Any]:
+    view_classifier = ViewClassifier()
+    per_view: list[dict[str, Any]] = []
+    warnings: list[str] = []
+
+    for filename, path in zip(original_names, image_paths):
+        image = pipeline._imread(path)
+        if image is None:
+            raise ValueError(f"Cannot decode {filename}")
+
+        masks = pipeline.segmenter.segment(image)
+        mask = masks["front"]
+        view_type = view_classifier.classify_view(image, mask)
+        style = pipeline.classifier.classify_style(image, mask)
+        measurements, _ = pipeline.measurer.extract_from_images(
+            image,
+            side=None,
+            mask=mask,
+            shape=style.shape,
+            material=style.material,
+            nose_pads=style.nose_pads,
+            color="#d9a7a2",
+        )
+
+        confidence = float(masks.get("confidence", 0.0))
+        model_type = str(masks.get("model_type", "unknown"))
+        if model_type == "opencv_fallback":
+            warnings.append(f"{filename}: YOLO unavailable; OpenCV fallback used")
+        elif confidence < 0.75:
+            warnings.append(f"{filename}: low mask confidence ({confidence:.2f})")
+
+        per_view.append(
+            {
+                "filename": filename,
+                "view_type": view_type,
+                "overlay_png_base64": _overlay_png_data_uri(image, mask),
+                "mask_confidence": round(confidence, 4),
+                "measurements": {
+                    "frame_width": measurements.frame_width,
+                    "lens_width": measurements.lens_width,
+                    "lens_height": measurements.lens_height,
+                    "bridge_width": measurements.bridge_width,
+                    "temple_length": measurements.temple_length,
+                },
+            }
+        )
+
+    glb_path = RECONSTRUCTION_DIR / f"{job_id}.glb"
+    result = pipeline.run_from_multiple_images(
+        image_paths,
+        glb_path,
+        "#d9a7a2",
+        template_name,
+    )
+
+    agreement, agreement_warnings = _agreement(per_view)
+    warnings.extend(agreement_warnings)
+
+    fused = result["measurements"]
+    consolidated = {
+        key: fused[key]
+        for key in ("frame_width", "lens_width", "lens_height", "bridge_width", "temple_length")
+        if key in fused
+    }
+
+    model_url = f"/api/reconstruct/{job_id}/model"
+    model_uri = None
+    if os.environ.get("DEFIRM_INLINE_GLB", "0") == "1":
+        model_uri = (
+            "data:model/gltf-binary;base64,"
+            + base64.b64encode(glb_path.read_bytes()).decode("ascii")
+        )
+
+    return {
+        "job_id": job_id,
+        "views": per_view,
+        "consolidated_measurements": consolidated,
+        "measurement_agreement": agreement,
+        "warnings": warnings,
+        "model_url": model_url,
+        "model_glb_base64": model_uri,
+        "template": result.get("template"),
+        "pipeline": result.get("pipeline", []),
+    }
+
+
 def _init_state() -> TuningState:
     yolo_path = os.environ.get("YOLO_MODEL_PATH", str(DEFAULT_YOLO))
     tm = TemplateManager(TEMPLATES_DIR)
@@ -338,7 +430,6 @@ async def reconstruct_multi_view(
 
     _prune_reconstruction_models()
     pipeline = _get_reconstruction_pipeline()
-    view_classifier = ViewClassifier()
     job_id = uuid.uuid4().hex[:12]
 
     try:
@@ -365,90 +456,14 @@ async def reconstruct_multi_view(
                 image_paths.append(path)
                 original_names.append(upload.filename or path.name)
 
-            per_view: list[dict[str, Any]] = []
-            warnings: list[str] = []
-
-            for filename, path in zip(original_names, image_paths):
-                image = pipeline._imread(path)
-                if image is None:
-                    raise HTTPException(status_code=400, detail=f"Cannot decode {filename}")
-
-                masks = pipeline.segmenter.segment(image)
-                mask = masks["front"]
-                view_type = view_classifier.classify_view(image, mask)
-                style = pipeline.classifier.classify_style(image, mask)
-                measurements, _ = pipeline.measurer.extract_from_images(
-                    image,
-                    side=None,
-                    mask=mask,
-                    shape=style.shape,
-                    material=style.material,
-                    nose_pads=style.nose_pads,
-                    color="#d9a7a2",
-                )
-
-                confidence = float(masks.get("confidence", 0.0))
-                model_type = str(masks.get("model_type", "unknown"))
-                if model_type == "opencv_fallback":
-                    warnings.append(f"{filename}: YOLO unavailable; OpenCV fallback used")
-                elif confidence < 0.75:
-                    warnings.append(f"{filename}: low mask confidence ({confidence:.2f})")
-
-                per_view.append(
-                    {
-                        "filename": filename,
-                        "view_type": view_type,
-                        "overlay_png_base64": _overlay_png_data_uri(image, mask),
-                        "mask_confidence": round(confidence, 4),
-                        "measurements": {
-                            "frame_width": measurements.frame_width,
-                            "lens_width": measurements.lens_width,
-                            "lens_height": measurements.lens_height,
-                            "bridge_width": measurements.bridge_width,
-                            "temple_length": measurements.temple_length,
-                        },
-                    }
-                )
-
-            glb_path = RECONSTRUCTION_DIR / f"{job_id}.glb"
-            result = await run_in_threadpool(
-                pipeline.run_from_multiple_images,
+            return await run_in_threadpool(
+                _run_multiview_reconstruction,
+                pipeline,
                 image_paths,
-                glb_path,
-                "#d9a7a2",
+                original_names,
                 template_name,
-            )
-
-            agreement, agreement_warnings = _agreement(per_view)
-            warnings.extend(agreement_warnings)
-
-            fused = result["measurements"]
-            consolidated = {
-                key: fused[key]
-                for key in ("frame_width", "lens_width", "lens_height", "bridge_width", "temple_length")
-                if key in fused
-            }
-
-            model_url = f"/api/reconstruct/{job_id}/model"
-            model_uri = None
-            if os.environ.get("DEFIRM_INLINE_GLB", "0") == "1":
-                model_uri = (
-                    "data:model/gltf-binary;base64,"
-                    + base64.b64encode(glb_path.read_bytes()).decode("ascii")
-                )
-
-            return {
-                "job_id": job_id,
-                "views": per_view,
-                "consolidated_measurements": consolidated,
-                "measurement_agreement": agreement,
-                "warnings": warnings,
-                "model_url": model_url,
-                "model_glb_base64": model_uri,
-                "template": result.get("template"),
-                "pipeline": result.get("pipeline", []),
-            }
-    except HTTPException:
+                job_id,
+            )    except HTTPException:
         raise
     except Exception as exc:
         logger.exception("Multi-view reconstruction failed")
