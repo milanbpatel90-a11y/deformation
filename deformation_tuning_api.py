@@ -463,7 +463,8 @@ async def reconstruct_multi_view(
                 original_names,
                 template_name,
                 job_id,
-            )    except HTTPException:
+            )
+    except HTTPException:
         raise
     except Exception as exc:
         logger.exception("Multi-view reconstruction failed")
