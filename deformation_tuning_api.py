@@ -5,17 +5,24 @@ Runs on port 8001 (main VTO API uses 8000).
 
 from __future__ import annotations
 
+import base64
 import logging
 import os
 import tempfile
+import uuid
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, File, HTTPException, Query, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 
+import cv2
+import numpy as np
+
+from backend.fusion.view_classifier import ViewClassifier
+from backend.pipeline import DeformationPipeline
 from eyewear_vto_toolkit import DeformationCalibrationWorkflow, TemplateManager
 
 logging.basicConfig(level=logging.INFO)
@@ -53,6 +60,57 @@ class TuningState:
 
 
 state: TuningState | None = None
+_reconstruction_pipeline: DeformationPipeline | None = None
+
+
+def _get_reconstruction_pipeline() -> DeformationPipeline:
+    global _reconstruction_pipeline
+    if _reconstruction_pipeline is None:
+        _reconstruction_pipeline = DeformationPipeline()
+    return _reconstruction_pipeline
+
+
+def _overlay_png_data_uri(image: np.ndarray, mask: np.ndarray) -> str:
+    tint = np.zeros_like(image)
+    tint[mask > 0] = (0, 200, 110)
+    overlay = cv2.addWeighted(image, 0.72, tint, 0.28, 0)
+    ok, encoded = cv2.imencode(".png", overlay)
+    if not ok:
+        raise ValueError("Failed to encode segmentation overlay")
+    return "data:image/png;base64," + base64.b64encode(encoded.tobytes()).decode("ascii")
+
+
+def _agreement(per_view: list[dict[str, Any]]) -> tuple[dict[str, dict[str, Any]], list[str]]:
+    fields = {
+        "frame_width": 3.0,
+        "lens_width": 2.0,
+        "lens_height": 2.0,
+        "bridge_width": 2.0,
+        "temple_length": 5.0,
+    }
+    agreement: dict[str, dict[str, Any]] = {}
+    warnings: list[str] = []
+
+    for field, threshold in fields.items():
+        if field == "temple_length":
+            relevant = [v for v in per_view if v["view_type"] == "side"] or per_view
+        else:
+            relevant = [v for v in per_view if v["view_type"] in {"front", "perspective"}] or per_view
+
+        values = [
+            float(v["measurements"][field])
+            for v in relevant
+            if v["measurements"].get(field) is not None
+        ]
+        std_dev = round(float(np.std(values)), 2) if len(values) > 1 else 0.0
+        flagged = std_dev > threshold
+        agreement[field] = {"std_dev": std_dev, "flag": flagged}
+        if flagged:
+            warnings.append(
+                f"{field} varies ±{std_dev}mm across relevant views (threshold {threshold}mm)"
+            )
+
+    return agreement, warnings
 
 
 def _init_state() -> TuningState:
@@ -209,6 +267,122 @@ async def batch_create_templates():
         raise HTTPException(status_code=500)
     count = state.template_manager.create_batch_stubs()
     return {"success": True, "templates_created": count, "templates": list(state.template_manager.templates.keys())}
+
+
+
+@app.post("/api/reconstruct/multi-view")
+async def reconstruct_multi_view(
+    images: list[UploadFile] = File(..., description="4-5 images of one pair of glasses"),
+    template_name: str | None = Form(None),
+):
+    """Dashboard-compatible multi-view reconstruction endpoint."""
+    if not 4 <= len(images) <= 5:
+        raise HTTPException(status_code=400, detail="Upload exactly 4 or 5 images")
+
+    pipeline = _get_reconstruction_pipeline()
+    view_classifier = ViewClassifier()
+    job_id = uuid.uuid4().hex[:12]
+
+    try:
+        with tempfile.TemporaryDirectory(prefix=f"defirm_multiview_{job_id}_") as tmp_dir:
+            work_dir = Path(tmp_dir)
+            image_paths: list[Path] = []
+            original_names: list[str] = []
+
+            for index, upload in enumerate(images):
+                raw = await upload.read()
+                if not raw:
+                    raise HTTPException(status_code=400, detail=f"Image {index + 1} is empty")
+                suffix = Path(upload.filename or "").suffix.lower()
+                if suffix not in {".jpg", ".jpeg", ".png", ".webp"}:
+                    suffix = ".jpg"
+                path = work_dir / f"view_{index}{suffix}"
+                path.write_bytes(raw)
+                image_paths.append(path)
+                original_names.append(upload.filename or path.name)
+
+            per_view: list[dict[str, Any]] = []
+            warnings: list[str] = []
+
+            for filename, path in zip(original_names, image_paths):
+                image = pipeline._imread(path)
+                if image is None:
+                    raise HTTPException(status_code=400, detail=f"Cannot decode {filename}")
+
+                masks = pipeline.segmenter.segment(image)
+                mask = masks["front"]
+                view_type = view_classifier.classify_view(image, mask)
+                style = pipeline.classifier.classify_style(image, mask)
+                measurements, _ = pipeline.measurer.extract_from_images(
+                    image,
+                    side=None,
+                    mask=mask,
+                    shape=style.shape,
+                    material=style.material,
+                    nose_pads=style.nose_pads,
+                    color="#d9a7a2",
+                )
+
+                confidence = float(masks.get("confidence", 0.0))
+                model_type = str(masks.get("model_type", "unknown"))
+                if model_type == "opencv_fallback":
+                    warnings.append(f"{filename}: YOLO unavailable; OpenCV fallback used")
+                elif confidence < 0.75:
+                    warnings.append(f"{filename}: low mask confidence ({confidence:.2f})")
+
+                per_view.append(
+                    {
+                        "filename": filename,
+                        "view_type": view_type,
+                        "overlay_png_base64": _overlay_png_data_uri(image, mask),
+                        "mask_confidence": round(confidence, 4),
+                        "measurements": {
+                            "frame_width": measurements.frame_width,
+                            "lens_width": measurements.lens_width,
+                            "lens_height": measurements.lens_height,
+                            "bridge_width": measurements.bridge_width,
+                            "temple_length": measurements.temple_length,
+                        },
+                    }
+                )
+
+            glb_path = work_dir / f"{job_id}.glb"
+            result = pipeline.run_from_multiple_images(
+                image_paths,
+                glb_path,
+                template_override=template_name,
+            )
+
+            agreement, agreement_warnings = _agreement(per_view)
+            warnings.extend(agreement_warnings)
+
+            fused = result["measurements"]
+            consolidated = {
+                key: fused[key]
+                for key in ("frame_width", "lens_width", "lens_height", "bridge_width", "temple_length")
+                if key in fused
+            }
+
+            model_uri = (
+                "data:model/gltf-binary;base64,"
+                + base64.b64encode(glb_path.read_bytes()).decode("ascii")
+            )
+
+            return {
+                "job_id": job_id,
+                "views": per_view,
+                "consolidated_measurements": consolidated,
+                "measurement_agreement": agreement,
+                "warnings": warnings,
+                "model_glb_base64": model_uri,
+                "template": result.get("template"),
+                "pipeline": result.get("pipeline", []),
+            }
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("Multi-view reconstruction failed")
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 @app.get("/api/state")
