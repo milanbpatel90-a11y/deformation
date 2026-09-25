@@ -4,6 +4,7 @@ from types import SimpleNamespace
 import pytest
 from pydantic import ValidationError
 
+from backend.materials.pbr import lens_material
 from backend.models import Measurements
 from backend.pipeline import DeformationPipeline
 from backend.template_library.loader import TemplateLibrary
@@ -155,3 +156,33 @@ def test_dashboard_requires_manual_measurements_and_supports_overrides():
     assert "form.append('shape'" in dashboard
     assert "form.append('material'" in dashboard
     assert "Manual input" in dashboard
+
+
+
+def test_lens_material_exports_as_transparent_blend():
+    measurements = Measurements(
+        frame_width=140,
+        lens_width=52,
+        lens_height=42,
+        bridge_width=18,
+        temple_length=140,
+        lens_opacity=0.4,
+    )
+    material = lens_material(measurements)
+    assert material.alphaMode == "BLEND"
+    assert material.doubleSided is True
+
+
+def test_viewer_scales_against_model_width_not_raw_face_width():
+    viewer = Path("viewer/index.html").read_text(encoding="utf-8")
+    assert "currentModelBaseWidth" in viewer
+    assert "target_width / currentModelBaseWidth" in viewer
+    assert "face_width * 0.72" not in viewer
+
+
+def test_main_api_marks_legacy_single_view_and_requires_manual_multiview_inputs():
+    api = Path("backend/api/main.py").read_text(encoding="utf-8")
+    assert '@app.post("/api/deform", deprecated=True)' in api
+    assert "frame_width: float = Form(...)" in api
+    assert "manual_measurements" in api
+    assert "traceback.format_exc" not in api
