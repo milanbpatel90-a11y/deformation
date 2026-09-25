@@ -67,6 +67,8 @@ class TemplateDescriptor:
     symmetry_plane: dict[str, Any] = field(default_factory=dict)
     deformation_regions: dict[str, Any] = field(default_factory=dict)
     raw: dict[str, Any] = field(default_factory=dict)
+    source_to_mm_scale: float = 1.0
+    source_units: str = "millimeter"
 
 
 class DescriptorLoader:
@@ -107,6 +109,7 @@ class DescriptorLoader:
         template_path: Path | None = None,
         descriptor_path: Path | None = None,
         metadata_path: Path | None = None,
+        require_independent_parts: bool = False,
     ) -> TemplateDescriptor:
         resolved_template = Path(template_path or self._resolve_template_path(template_name, template_info)).resolve()
         resolved_descriptor = Path(
@@ -122,20 +125,33 @@ class DescriptorLoader:
         payload = json.loads(resolved_descriptor.read_text(encoding="utf-8"))
         self._validate_payload(payload, resolved_descriptor)
 
-        scene = trimesh.load(resolved_template, force="scene")
+        source_scene = trimesh.load(resolved_template, force="scene")
+        scene = self._flatten_scene_world(source_scene)
         raw_geometry = {
-            name: mesh for name, mesh in scene.geometry.items() if isinstance(mesh, trimesh.Trimesh) and len(mesh.vertices) > 0
+            name: mesh
+            for name, mesh in scene.geometry.items()
+            if isinstance(mesh, trimesh.Trimesh) and len(mesh.vertices) > 0
         }
         if not raw_geometry:
             raise ValueError(f"No mesh geometry found in template scene: {resolved_template}")
 
-        # Apply mesh aliases: remap actual GLB mesh names → logical part names.
-        # Supports two sources:
-        #   1. "mesh_aliases" key in descriptor JSON  (explicit mapping)
-        #   2. Auto-inference when GLB has no structured names (fallback heuristic)
-        geometry = self._resolve_geometry_aliases(raw_geometry, payload)
+        geometry = self._resolve_geometry_aliases(
+            raw_geometry,
+            payload,
+            require_independent_parts=require_independent_parts,
+        )
 
-        empty_anchors = self._load_empty_anchors(payload, scene)
+        dims = self._resolve_dimensions(template_name, template_info)
+        frame = self._get_geometry(geometry, "Frame", "unit_detection")
+        source_to_mm_scale, source_units = self._infer_source_to_mm_scale(
+            float(frame.extents[0]),
+            float(dims.frame_width),
+        )
+        scene.apply_scale(source_to_mm_scale)
+
+        # Alias dictionaries reference the same mesh objects contained in scene,
+        # so scaling the scene also scales the resolved logical geometry.
+        empty_anchors = self._load_empty_anchors(payload, source_scene, source_to_mm_scale)
         hinges = self._load_hinges(payload["hinges"], geometry, empty_anchors)
         rim_loops = self._load_rim_loops(payload["rim_loops"], geometry)
         bridge_center = self._load_bridge_center(payload["bridge"], geometry, empty_anchors)
@@ -157,6 +173,7 @@ class DescriptorLoader:
             rim_loops=rim_loops,
             lens_planes=lens_planes,
             vertex_groups=vertex_groups,
+            require_independent_parts=require_independent_parts,
         )
 
         return TemplateDescriptor(
@@ -175,6 +192,8 @@ class DescriptorLoader:
             symmetry_plane=dict(payload.get("symmetry_plane", {})),
             deformation_regions=dict(payload.get("deformation_regions", {})),
             raw=payload,
+            source_to_mm_scale=source_to_mm_scale,
+            source_units=source_units,
         )
 
     def _resolve_template_path(self, template_name: str, template_info: TemplateInfo | None) -> Path:
@@ -298,7 +317,11 @@ class DescriptorLoader:
         return geom.vertices.mean(axis=0).astype(np.float64)
 
     @staticmethod
-    def _load_empty_anchors(payload: dict[str, Any], scene: trimesh.Scene) -> dict[str, np.ndarray]:
+    def _load_empty_anchors(
+        payload: dict[str, Any],
+        scene: trimesh.Scene,
+        source_to_mm_scale: float = 1.0,
+    ) -> dict[str, np.ndarray]:
         """Resolve descriptor-declared Blender empties to world-space control points."""
         declared = payload.get("empties", {})
         if not isinstance(declared, dict):
@@ -312,7 +335,9 @@ class DescriptorLoader:
             if node_name not in nodes:
                 raise ValueError(f"Descriptor empty '{role}' references missing scene node '{node_name}'")
             transform, _ = scene.graph.get(node_name)
-            anchors[node_name] = np.asarray(transform[:3, 3], dtype=np.float64)
+            anchors[node_name] = (
+                np.asarray(transform[:3, 3], dtype=np.float64) * float(source_to_mm_scale)
+            )
         return anchors
 
     def _load_lens_planes(
@@ -412,6 +437,7 @@ class DescriptorLoader:
         rim_loops: dict[str, RimLoopDescriptor],
         lens_planes: dict[str, LensPlaneDescriptor],
         vertex_groups: dict[str, list[str]],
+        require_independent_parts: bool = False,
     ) -> None:
         missing_groups = {"frame", "left_rim", "right_rim", "left_temple", "right_temple"}.difference(vertex_groups)
         if missing_groups:
@@ -430,10 +456,15 @@ class DescriptorLoader:
                 if part not in geometry:
                     raise ValueError(f"Descriptor references missing geometry part '{part}' in {template_path}")
 
+        if require_independent_parts:
+            self._validate_independent_components(template_path, geometry)
+
     @staticmethod
     def _resolve_geometry_aliases(
         raw_geometry: dict[str, trimesh.Trimesh],
         payload: dict[str, Any],
+        *,
+        require_independent_parts: bool = False,
     ) -> dict[str, trimesh.Trimesh]:
         """Map actual GLB mesh names to logical part names expected by deformers.
 
@@ -456,6 +487,13 @@ class DescriptorLoader:
         already_correct = required.issubset(raw_geometry.keys())
         if already_correct and not aliases:
             return raw_geometry
+
+        if require_independent_parts and not already_correct and not aliases:
+            raise ValueError(
+                "Production template has generic mesh names but no explicit mesh_aliases. "
+                "Automatic vertex-count component inference is disabled for production because "
+                "it can map the wrong physical parts."
+            )
 
         # Step 3 – auto-infer when GLB has generic Blender export names
         #   Heuristic based on vertex count and X-centroid for side detection:
@@ -534,6 +572,107 @@ class DescriptorLoader:
                 resolved[logical_name] = raw_geometry[actual_name]
 
         return resolved
+
+    @staticmethod
+    def _flatten_scene_world(scene: trimesh.Scene) -> trimesh.Scene:
+        """Bake node transforms into per-node geometry while preserving component separation."""
+        flattened = trimesh.Scene()
+        used_names: set[str] = set()
+
+        for node_name in scene.graph.nodes_geometry:
+            transform, geom_name = scene.graph.get(node_name)
+            if geom_name is None or geom_name not in scene.geometry:
+                continue
+            source = scene.geometry[geom_name]
+            if not isinstance(source, trimesh.Trimesh):
+                continue
+            mesh = source.copy()
+            mesh.apply_transform(np.asarray(transform, dtype=np.float64))
+
+            out_name = str(geom_name)
+            if out_name in used_names:
+                out_name = f"{out_name}__{node_name}"
+            used_names.add(out_name)
+            flattened.add_geometry(mesh, node_name=str(node_name), geom_name=out_name)
+
+        flattened.metadata = dict(scene.metadata or {})
+        return flattened
+
+    @staticmethod
+    def _infer_source_to_mm_scale(frame_width_source: float, expected_width_mm: float) -> tuple[float, str]:
+        """Choose only between already-mm and glTF-standard meter geometry."""
+        if frame_width_source <= 0 or expected_width_mm <= 0:
+            raise ValueError("Cannot infer template units from non-positive frame width")
+
+        candidates = [
+            (1.0, "millimeter"),
+            (1000.0, "meter"),
+        ]
+        scored = [
+            (abs(frame_width_source * scale - expected_width_mm) / expected_width_mm, scale, units)
+            for scale, units in candidates
+        ]
+        error, scale, units = min(scored, key=lambda item: item[0])
+        if error > 0.20:
+            raise ValueError(
+                "Template units are ambiguous: "
+                f"source frame width={frame_width_source:.6f}, expected={expected_width_mm:.3f} mm"
+            )
+        return float(scale), units
+
+    @staticmethod
+    def _validate_independent_components(
+        template_path: Path,
+        geometry: dict[str, trimesh.Trimesh],
+    ) -> None:
+        required = [
+            "Frame", "Bridge", "LeftRim", "RightRim",
+            "LeftLens", "RightLens", "LeftTemple", "RightTemple",
+        ]
+        missing = [name for name in required if name not in geometry]
+        if missing:
+            raise ValueError(
+                f"Production template {template_path} is missing required independent parts: {missing}"
+            )
+
+        identities: dict[int, list[str]] = {}
+        for name in required:
+            identities.setdefault(id(geometry[name]), []).append(name)
+        shared = [names for names in identities.values() if len(names) > 1]
+        if shared:
+            raise ValueError(
+                f"Production template {template_path} aliases independently deformable parts "
+                f"to the same mesh object: {shared}"
+            )
+
+    def build_deformation_scene(
+        self,
+        descriptor: TemplateDescriptor,
+    ) -> trimesh.Scene:
+        """Return a canonical scene containing only logical product components in world-space mm."""
+        source_scene = trimesh.load(descriptor.template_path, force="scene")
+        flattened = self._flatten_scene_world(source_scene)
+        flattened.apply_scale(descriptor.source_to_mm_scale)
+
+        payload = descriptor.raw
+        aliases = payload.get("mesh_aliases", {})
+        logical_parts = {
+            part
+            for group in descriptor.vertex_groups.values()
+            for part in group
+        }
+        logical_parts.update({"Frame", "Bridge", "LeftRim", "RightRim", "LeftLens", "RightLens", "LeftTemple", "RightTemple"})
+
+        canonical = trimesh.Scene()
+        for logical_name in sorted(logical_parts):
+            actual_name = aliases.get(logical_name, logical_name) if isinstance(aliases, dict) else logical_name
+            mesh = flattened.geometry.get(actual_name)
+            if mesh is None:
+                continue
+            canonical.add_geometry(mesh.copy(), node_name=logical_name, geom_name=logical_name)
+
+        canonical.metadata = dict(flattened.metadata or {})
+        return canonical
 
     @staticmethod
     def _get_geometry(
