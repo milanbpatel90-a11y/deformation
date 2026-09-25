@@ -6,11 +6,14 @@ compared honestly.
 from __future__ import annotations
 
 import json
+import sys
 import traceback
 from pathlib import Path
 
 import numpy as np
 import trimesh
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from backend.models import FrameMaterial, FrameShape, Measurements
 from backend.pipeline import DeformationPipeline
