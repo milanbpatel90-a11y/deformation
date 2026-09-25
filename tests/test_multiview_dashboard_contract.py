@@ -1,6 +1,4 @@
 from pathlib import Path
-from types import SimpleNamespace
-
 import pytest
 from pydantic import ValidationError
 
@@ -121,22 +119,39 @@ def test_template_registry_dictionary_is_supported(tmp_path):
     assert matcher._registry_template_names() == ["rectangle_plastic"]
 
 
-def test_shared_mesh_aliases_are_marked_unsafe():
-    descriptor = SimpleNamespace(
-        raw={
-            "mesh_aliases": {
-                "Frame": "front_mesh",
-                "Bridge": "front_mesh",
-                "LeftRim": "front_mesh",
-                "RightRim": "front_mesh",
-                "LeftTemple": "left_temple",
-                "RightTemple": "right_temple",
-            }
-        }
+def test_production_runtime_components_are_independent():
+    measurements = Measurements(
+        frame_width=135,
+        lens_width=50,
+        lens_height=46,
+        bridge_width=16,
+        temple_length=135,
     )
-    warnings = DeformationPipeline._template_safety_warnings(descriptor)
-    assert warnings
-    assert "same mesh" in warnings[0]
+    pipeline = DeformationPipeline(Path("templates"))
+    style = pipeline._style_from_measurements(measurements)
+    features = pipeline.feature_extractor.from_measurements(measurements, style)
+    match = pipeline.matcher.match(features, "geometric_metal")
+    info = match.best.template
+    from backend.scene_utils import load_world_baked_scene
+    from backend.deformer.deformation_context import DeformationContext
+
+    scene = load_world_baked_scene(info.glb_path)
+    descriptor = pipeline.descriptor_loader.load(
+        "geometric_metal",
+        measurements=measurements,
+        template_info=info,
+    )
+    context = DeformationContext(
+        template_info=info,
+        template_scene=scene,
+        descriptor=descriptor,
+        measurements=measurements,
+        feature_set=features,
+    )
+    warnings = pipeline._runtime_safety_warnings(context.template_scene)
+    assert warnings == []
+    assert context.mesh("LeftLens") is not context.mesh("RightLens")
+    assert context.mesh("LeftTemple") is not context.mesh("RightTemple")
 
 
 def test_dashboard_requires_manual_measurements_and_supports_overrides():
