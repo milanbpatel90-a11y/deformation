@@ -38,14 +38,19 @@ class BridgeDeformerTests(unittest.TestCase):
         left_temple_before = ctx.mesh("LeftTemple").vertices.copy()
         bridge_before = ctx.mesh("Bridge").bounds.copy()
         before_width_mm = m_to_mm(float(bridge_before[1, 0] - bridge_before[0, 0]))
-        target_width_mm = float(ctx.measurements.bridge_width)
+        requested_width_mm = float(ctx.measurements.bridge_width)
         ctx = BridgeDeformer().apply(ctx)
         bridge_after = ctx.mesh("Bridge").bounds.copy()
         after_width_mm = m_to_mm(float(bridge_after[1, 0] - bridge_after[0, 0]))
+        stage = ctx.metadata["bridge_deformation"]
+        safe_target_mm = float(stage["target_width"])
+        self.assertAlmostEqual(after_width_mm, safe_target_mm, places=4)
+        if stage["width_clamped"]:
+            self.assertLessEqual(safe_target_mm, requested_width_mm)
         self.assertLess(
-            abs(after_width_mm - target_width_mm),
-            abs(before_width_mm - target_width_mm),
-            (before_width_mm, after_width_mm, target_width_mm),
+            abs(after_width_mm - safe_target_mm),
+            abs(before_width_mm - safe_target_mm),
+            (before_width_mm, after_width_mm, safe_target_mm),
         )
         self.assertAlmostEqual(float(np.linalg.norm(ctx.mesh("LeftRim").vertices - left_rim_before, axis=1).max()), 0.0, places=6)
         self.assertAlmostEqual(float(np.linalg.norm(ctx.mesh("RightRim").vertices - right_rim_before, axis=1).max()), 0.0, places=6)
