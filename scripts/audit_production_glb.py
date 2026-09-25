@@ -246,6 +246,19 @@ def trimesh_stats(path: Path) -> dict[str, Any]:
             tris = verts[faces]
             area2 = np.linalg.norm(np.cross(tris[:, 1]-tris[:, 0], tris[:, 2]-tris[:, 0]), axis=1)
             degenerate = int(np.count_nonzero(area2 <= 1e-12))
+        components = geom.split(only_watertight=False)
+        component_rows = []
+        for component in components:
+            cb = component.bounds
+            component_rows.append({
+                "vertices": int(len(component.vertices)),
+                "triangles": int(len(component.faces)),
+                "bounds": cb.tolist(),
+                "extents": (cb[1] - cb[0]).tolist(),
+                "centroid": component.vertices.mean(axis=0).tolist() if len(component.vertices) else None,
+            })
+        component_rows.sort(key=lambda row: row["triangles"], reverse=True)
+
         geometries[name] = {
             "vertices": int(len(verts)),
             "triangles": int(len(faces)),
@@ -254,6 +267,8 @@ def trimesh_stats(path: Path) -> dict[str, Any]:
             "is_watertight": bool(geom.is_watertight),
             "is_winding_consistent": bool(geom.is_winding_consistent),
             "degenerate_triangles": degenerate,
+            "connected_component_count": len(component_rows),
+            "connected_components": component_rows,
         }
 
     bounds = scene.bounds
@@ -364,6 +379,14 @@ def main() -> int:
         print("vertices", report["vertex_count_sum"], "triangles", report["triangle_count_sum"])
         print("world_extents", report["world_extents"])
         print("materials", report["material_count"], "textures", report["texture_count"])
+        for name, stats in report["trimesh"]["geometries"].items():
+            print(
+                "components",
+                name,
+                stats["connected_component_count"],
+                [(row["vertices"], row["triangles"], [round(x, 6) for x in row["centroid"]])
+                 for row in stats["connected_components"][:12]],
+            )
         for p in report["primitives"]:
             print(
                 "primitive",
