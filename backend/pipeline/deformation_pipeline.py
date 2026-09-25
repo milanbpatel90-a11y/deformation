@@ -208,7 +208,7 @@ class DeformationPipeline:
         self.exporter.export(deformed, out, measurements, template_name)
 
         meta_path = out.with_suffix(".metadata.json")
-        anchors = self.exporter._compute_anchors(deformed, measurements)
+        anchors = self.exporter.compute_anchors_meters(deformed, measurements)
 
         metadata = ExportMetadata(
             shape=measurements.shape.value,
@@ -362,7 +362,7 @@ class DeformationPipeline:
 
         self.exporter.export(deformed, out, measurements, template_name)
         meta_path = out.with_suffix(".metadata.json")
-        anchors = self.exporter._compute_anchors(deformed, measurements)
+        anchors = self.exporter.compute_anchors_meters(deformed, measurements)
 
         metadata = ExportMetadata(
             shape=measurements.shape.value,
@@ -612,7 +612,7 @@ class DeformationPipeline:
             raise RuntimeError("Exported GLB contains no geometry")
 
         meta_path = out.with_suffix(".metadata.json")
-        anchors = self.exporter._compute_anchors(deformed, fused_measurements)
+        anchors = self.exporter.compute_anchors_meters(deformed, fused_measurements)
 
         metadata = ExportMetadata(
             shape=fused_measurements.shape.value,
