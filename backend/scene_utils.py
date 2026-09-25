@@ -38,7 +38,7 @@ def bake_scene_world(source: trimesh.Scene) -> trimesh.Scene:
         )
 
     if not result.geometry:
-        raise ValueError(f"No mesh geometry found in scene: {path}")
+        raise ValueError("No mesh geometry found in scene")
 
     return result
 
