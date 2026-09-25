@@ -142,8 +142,8 @@
 
     <div class="img-card" id="card-multi" onclick="document.getElementById('input-multi').click()">
       <input type="file" id="input-multi" accept="image/*" multiple />
-      <div class="label">Multi-View (4-6 images) <span class="badge optional">multi-fusion</span></div>
-      <div class="placeholder" id="ph-multi">Click to choose multiple files</div>
+      <div class="label">Multi-View (4-5 images) <span class="badge optional">use production dashboard</span></div>
+      <div class="placeholder" id="ph-multi">Select files to preview; generation is handled by /dashboard</div>
       <div id="multi-preview-list" style="display: flex; gap: 4px; flex-wrap: wrap; margin-top: 6px;"></div>
     </div>
   </div>
@@ -355,13 +355,15 @@ inputMulti.addEventListener('change', (e) => {
     reader.readAsDataURL(file);
   }
   
+  statusBox.textContent = 'Multi-view production generation requires manual measurements. Use /dashboard.';
   updateGenerateBtn();
 });
 
 function updateGenerateBtn() {
   const hasFront = document.getElementById('input-front').files.length > 0;
-  const hasMulti = document.getElementById('input-multi').files.length > 0;
-  document.getElementById('generate-btn').disabled = !(hasFront || hasMulti);
+  // Multi-view generation is intentionally handled by the production dashboard,
+  // where physical measurements are required and validated.
+  document.getElementById('generate-btn').disabled = !hasFront;
 }
 
 // ── Pipeline stages renderer ──────────────────────────────────────────────────
@@ -411,7 +413,12 @@ const downloadBtn = document.getElementById('download-btn');
 document.getElementById('generate-btn').addEventListener('click', async () => {
   const frontFile = document.getElementById('input-front').files[0];
   const multiFiles = document.getElementById('input-multi').files;
-  if (!frontFile && (!multiFiles || multiFiles.length === 0)) return;
+  if (multiFiles && multiFiles.length > 0) {
+    statusBox.className = 'error';
+    statusBox.textContent = 'Use the production /dashboard for 4-5 image reconstruction with manual measurements.';
+    return;
+  }
+  if (!frontFile) return;
 
   const btn = document.getElementById('generate-btn');
   btn.disabled = true;
