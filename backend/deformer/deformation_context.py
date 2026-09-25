@@ -8,8 +8,10 @@ from typing import Any
 
 import trimesh
 
+from backend.deformer.component_resolver import prepare_deformation_scene
 from backend.deformer.descriptor_loader import TemplateDescriptor
 from backend.models import Measurements, TemplateInfo
+from backend.scene_utils import bake_scene_world
 from backend.template_matching.feature_extractor import EyewearFeatureSet
 
 
@@ -26,7 +28,12 @@ class DeformationContext:
     metadata: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
-        self.template_scene = deepcopy(self.template_scene)
+        self.template_scene = bake_scene_world(deepcopy(self.template_scene))
+        self.template_scene = prepare_deformation_scene(
+            self.template_scene,
+            self.descriptor,
+            self.template_info,
+        )
         self.meshes = {
             name: mesh
             for name, mesh in self.template_scene.geometry.items()
