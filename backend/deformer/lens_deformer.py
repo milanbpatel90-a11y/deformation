@@ -42,8 +42,7 @@ class LensDeformer(BaseDeformer):
             target_boundary = self._generate_target_boundary(context, selection, rim_boundary)
             self._fit_lens_to_rim(context, selection, target_boundary)
             self._preserve_uvs(context, selection)
-            self._preserve_thickness(context, selection)
-            self._preserve_curvature(context, selection)
+            self._restore_source_normal_profile(context, selection)
             results.append(self._validate(context, selection, target_boundary))
         return self.update_context(context, applied=True, sides=results)
 
@@ -123,53 +122,40 @@ class LensDeformer(BaseDeformer):
         if hasattr(lens_mesh.visual, "uv") and lens_mesh.visual.uv is not None:
             lens_mesh.visual.uv = lens_mesh.visual.uv.copy()
 
-    def _preserve_thickness(self, context: DeformationContext, selection: LensSelection) -> None:
+    def _restore_source_normal_profile(
+        self,
+        context: DeformationContext,
+        selection: LensSelection,
+    ) -> None:
+        """Preserve source thickness and curvature exactly along the lens normal.
+
+        The profile fit modifies only local X/Y. Reprojecting or flattening the
+        front/back surfaces after that fit changes physical thickness on curved
+        production lenses. Restore each source vertex's local normal coordinate
+        one-for-one so topology, optical thickness, and curvature are preserved
+        while the in-plane silhouette changes.
+        """
         lens_mesh = context.mesh(selection.lens_part)
         vertices = np.asarray(lens_mesh.vertices, dtype=np.float64).copy()
         origin, basis = self._lens_basis(selection)
         local = self._to_local(vertices, origin, basis)
         original_local = self._to_local(selection.lens_before, origin, basis)
 
-        front_idx = self._surface_indices(local, front=True)
-        back_idx = self._surface_indices(local, front=False)
-        original_front_idx = self._surface_indices(original_local, front=True)
-        original_back_idx = self._surface_indices(original_local, front=False)
+        if len(local) != len(original_local):
+            raise ValueError(
+                f"Lens topology changed for {selection.lens_part}: "
+                f"{len(original_local)} -> {len(local)} vertices"
+            )
 
-        original_thickness = float(
-            np.mean(original_local[original_front_idx, 2])
-            - np.mean(original_local[original_back_idx, 2])
-        )
-        front_n = float(np.mean(local[front_idx, 2]))
-        local[front_idx, 2] = front_n
-        local[back_idx, 2] = front_n - original_thickness
+        local[:, 2] = original_local[:, 2]
         lens_mesh.vertices = self._from_local(local, origin, basis)
+
+    # Backward-compatible private helpers used by older callers/tests.
+    def _preserve_thickness(self, context: DeformationContext, selection: LensSelection) -> None:
+        self._restore_source_normal_profile(context, selection)
 
     def _preserve_curvature(self, context: DeformationContext, selection: LensSelection) -> None:
-        lens_mesh = context.mesh(selection.lens_part)
-        vertices = np.asarray(lens_mesh.vertices, dtype=np.float64).copy()
-        origin, basis = self._lens_basis(selection)
-        local = self._to_local(vertices, origin, basis)
-        original_local = self._to_local(selection.lens_before, origin, basis)
-
-        front_idx = self._surface_indices(local, front=True)
-        back_idx = self._surface_indices(local, front=False)
-        original_front_idx = self._surface_indices(original_local, front=True)
-        original_back_idx = self._surface_indices(original_local, front=False)
-
-        if len(front_idx) == len(original_front_idx):
-            profile = (
-                original_local[original_front_idx, 2]
-                - np.mean(original_local[original_front_idx, 2])
-            )
-            local[front_idx, 2] = np.mean(local[front_idx, 2]) + profile
-        if len(back_idx) == len(original_back_idx):
-            profile = (
-                original_local[original_back_idx, 2]
-                - np.mean(original_local[original_back_idx, 2])
-            )
-            local[back_idx, 2] = np.mean(local[back_idx, 2]) + profile
-
-        lens_mesh.vertices = self._from_local(local, origin, basis)
+        self._restore_source_normal_profile(context, selection)
 
     def _validate(
         self,
