@@ -235,7 +235,11 @@ def _run_multiview_reconstruction(
     )
 
     agreement, agreement_warnings = _agreement(per_view)
-    warnings.extend(agreement_warnings)
+    warnings.extend(f"Photo diagnostic: {warning}" for warning in agreement_warnings)
+
+    quality = result.get("quality") or {}
+    for warning in quality.get("warnings", []):
+        warnings.append(f"Mesh QA: {warning}")
 
     fused = result["measurements"]
     consolidated = {
@@ -263,7 +267,7 @@ def _run_multiview_reconstruction(
         "model_url": model_url,
         "model_glb_base64": model_uri,
         "template": result.get("template"),
-        "quality": result.get("quality"),
+        "quality": quality,
         "template_selection": result.get("template_selection"),
         "pipeline": result.get("pipeline", []),
     }
