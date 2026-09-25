@@ -5,17 +5,29 @@ Runs on port 8001 (main VTO API uses 8000).
 
 from __future__ import annotations
 
+import base64
+import hashlib
 import logging
 import os
 import tempfile
+import time
+import uuid
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, File, HTTPException, Query, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.staticfiles import StaticFiles
+from starlette.concurrency import run_in_threadpool
 
+import cv2
+import numpy as np
+
+from backend.fusion.view_classifier import ViewClassifier
+from backend.models import FrameMaterial, FrameShape, Measurements
+from backend.pipeline import DeformationPipeline
 from eyewear_vto_toolkit import DeformationCalibrationWorkflow, TemplateManager
 
 logging.basicConfig(level=logging.INFO)
@@ -23,10 +35,33 @@ logger = logging.getLogger(__name__)
 
 PROJECT_ROOT = Path(__file__).resolve().parent
 TEMPLATES_DIR = PROJECT_ROOT / "templates"
+RECONSTRUCTION_DIR = PROJECT_ROOT / "output" / "reconstructions"
+RECONSTRUCTION_DIR.mkdir(parents=True, exist_ok=True)
+MAX_IMAGE_BYTES = int(os.environ.get("DEFIRM_MAX_IMAGE_BYTES", str(15 * 1024 * 1024)))
+MAX_IMAGE_PIXELS = int(os.environ.get("DEFIRM_MAX_IMAGE_PIXELS", str(20_000_000)))
+MODEL_RETENTION_HOURS = int(os.environ.get("DEFIRM_MODEL_RETENTION_HOURS", "24"))
+REQUIRE_YOLO = os.environ.get("DEFIRM_REQUIRE_YOLO", "1") != "0"
+ALLOWED_ORIGINS = [
+    origin.strip()
+    for origin in os.environ.get(
+        "DEFIRM_ALLOWED_ORIGINS",
+        "http://localhost:8001,http://127.0.0.1:8001",
+    ).split(",")
+    if origin.strip()
+]
 DEFAULT_YOLO = PROJECT_ROOT / "runs" / "segment" / "eyewear_seg" / "weights" / "best.pt"
 
 app = FastAPI(title="Defirmation Deformation Tuning API", version="1.0.0")
-app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=ALLOWED_ORIGINS,
+    allow_methods=["GET", "POST"],
+    allow_headers=["Accept", "Content-Type"],
+)
+
+VIEWER_DIR = PROJECT_ROOT / "viewer"
+if VIEWER_DIR.exists():
+    app.mount("/viewer", StaticFiles(directory=str(VIEWER_DIR), html=True), name="viewer")
 
 
 class TuningState:
@@ -53,6 +88,234 @@ class TuningState:
 
 
 state: TuningState | None = None
+_reconstruction_pipeline: DeformationPipeline | None = None
+
+
+def _prune_reconstruction_models() -> None:
+    if MODEL_RETENTION_HOURS <= 0:
+        return
+    cutoff = time.time() - MODEL_RETENTION_HOURS * 3600
+    for path in RECONSTRUCTION_DIR.glob("*.glb"):
+        try:
+            if path.stat().st_mtime < cutoff:
+                path.unlink(missing_ok=True)
+                path.with_suffix(".metadata.json").unlink(missing_ok=True)
+        except OSError:
+            logger.warning("Could not prune reconstruction artifact: %s", path, exc_info=True)
+
+
+def _get_reconstruction_pipeline() -> DeformationPipeline:
+    global _reconstruction_pipeline
+    if _reconstruction_pipeline is None:
+        _reconstruction_pipeline = DeformationPipeline()
+    return _reconstruction_pipeline
+
+
+def _overlay_png_data_uri(image: np.ndarray, mask: np.ndarray) -> str:
+    tint = np.zeros_like(image)
+    tint[mask > 0] = (0, 200, 110)
+    overlay = cv2.addWeighted(image, 0.72, tint, 0.28, 0)
+
+    height, width = overlay.shape[:2]
+    longest = max(height, width)
+    if longest > 1280:
+        scale = 1280.0 / longest
+        overlay = cv2.resize(
+            overlay,
+            (max(1, int(width * scale)), max(1, int(height * scale))),
+            interpolation=cv2.INTER_AREA,
+        )
+
+    ok, encoded = cv2.imencode(".jpg", overlay, [int(cv2.IMWRITE_JPEG_QUALITY), 84])
+    if not ok:
+        raise ValueError("Failed to encode segmentation overlay")
+    return "data:image/jpeg;base64," + base64.b64encode(encoded.tobytes()).decode("ascii")
+
+
+def _detect_frame_color(image: np.ndarray, mask: np.ndarray) -> str:
+    pixels = image[mask > 0]
+    if len(pixels) == 0:
+        return "#000000"
+    b, g, r = np.median(pixels, axis=0)
+    return f"#{int(r):02x}{int(g):02x}{int(b):02x}"
+
+
+def _agreement(per_view: list[dict[str, Any]]) -> tuple[dict[str, dict[str, Any]], list[str]]:
+    fields = {
+        "frame_width": 3.0,
+        "lens_width": 2.0,
+        "lens_height": 2.0,
+        "bridge_width": 2.0,
+        "temple_length": 5.0,
+    }
+    agreement: dict[str, dict[str, Any]] = {}
+    warnings: list[str] = []
+
+    for field, threshold in fields.items():
+        if field == "temple_length":
+            relevant = [v for v in per_view if v["view_type"] == "side"] or per_view
+        else:
+            relevant = [v for v in per_view if v["view_type"] in {"front", "perspective"}] or per_view
+
+        values = [
+            float(v["measurements"][field])
+            for v in relevant
+            if v["measurements"].get(field) is not None
+        ]
+        sample_count = len(values)
+        if sample_count < 2:
+            agreement[field] = {
+                "std_dev": None,
+                "flag": None,
+                "sample_count": sample_count,
+                "status": "insufficient_samples",
+            }
+            warnings.append(
+                f"{field}: insufficient relevant views for agreement check "
+                f"({sample_count} sample; need at least 2)"
+            )
+            continue
+
+        std_dev = round(float(np.std(values)), 2)
+        flagged = std_dev > threshold
+        agreement[field] = {
+            "std_dev": std_dev,
+            "flag": flagged,
+            "sample_count": sample_count,
+            "status": "disagreement" if flagged else "agreement",
+        }
+        if flagged:
+            warnings.append(
+                f"{field} varies ±{std_dev}mm across relevant views (threshold {threshold}mm)"
+            )
+
+    return agreement, warnings
+
+
+def _run_multiview_reconstruction(
+    image_paths: list[Path],
+    original_names: list[str],
+    template_name: str | None,
+    job_id: str,
+    manual_measurements: Measurements,
+    color: str | None,
+    shape_override: FrameShape | None,
+    material_override: FrameMaterial | None,
+) -> dict[str, Any]:
+    pipeline = _get_reconstruction_pipeline()
+    view_classifier = ViewClassifier()
+    per_view: list[dict[str, Any]] = []
+    warnings: list[str] = []
+    detected_color: str | None = None
+
+    for filename, path in zip(original_names, image_paths):
+        image = pipeline._imread(path)
+        if image is None:
+            raise ValueError(f"Cannot decode {filename}")
+        height, width = image.shape[:2]
+        if height * width > MAX_IMAGE_PIXELS:
+            raise ValueError(
+                f"{filename} is too large after decoding "
+                f"({width}x{height}); maximum is {MAX_IMAGE_PIXELS:,} pixels"
+            )
+
+        masks = pipeline.segmenter.segment(image)
+        mask = masks["front"]
+        view_type = view_classifier.classify_view(image, mask)
+        style = pipeline.classifier.classify_style(image, mask)
+        measurements, _ = pipeline.measurer.extract_from_images(
+            image,
+            side=None,
+            mask=mask,
+            shape=style.shape,
+            material=style.material,
+            nose_pads=style.nose_pads,
+            color=color,
+        )
+
+        confidence = float(masks.get("confidence", 0.0))
+        model_type = str(masks.get("model_type", "unknown"))
+        if model_type == "opencv_fallback":
+            if REQUIRE_YOLO:
+                raise RuntimeError(
+                    "Production reconstruction requires the trained YOLO segmentation model; "
+                    "OpenCV fallback is disabled"
+                )
+            warnings.append(f"{filename}: YOLO unavailable; OpenCV fallback used")
+        elif confidence < 0.75:
+            warnings.append(f"{filename}: low mask confidence ({confidence:.2f})")
+
+        if detected_color is None and view_type in {"front", "perspective"}:
+            detected_color = _detect_frame_color(image, mask)
+
+        per_view.append(
+            {
+                "filename": filename,
+                "view_type": view_type,
+                "overlay_png_base64": _overlay_png_data_uri(image, mask),
+                "mask_confidence": round(confidence, 4),
+                "measurements": {
+                    "frame_width": measurements.frame_width,
+                    "lens_width": measurements.lens_width,
+                    "lens_height": measurements.lens_height,
+                    "bridge_width": measurements.bridge_width,
+                    "temple_length": measurements.temple_length,
+                },
+            }
+        )
+
+    resolved_color = color or detected_color or "#000000"
+    manual_measurements.color = resolved_color
+
+    glb_path = RECONSTRUCTION_DIR / f"{job_id}.glb"
+    result = pipeline.run_from_multiple_images(
+        image_paths,
+        glb_path,
+        resolved_color,
+        template_name,
+        manual_measurements=manual_measurements,
+        shape_override=shape_override,
+        material_override=material_override,
+    )
+
+    agreement, agreement_warnings = _agreement(per_view)
+    warnings.extend(f"Photo diagnostic: {warning}" for warning in agreement_warnings)
+
+    quality = result.get("quality") or {}
+    for warning in quality.get("warnings", []):
+        warnings.append(f"Mesh QA: {warning}")
+
+    fused = result["measurements"]
+    consolidated = {
+        key: fused[key]
+        for key in ("frame_width", "lens_width", "lens_height", "bridge_width", "temple_length")
+        if key in fused
+    }
+
+    model_url = f"/api/reconstruct/{job_id}/model"
+    model_uri = None
+    if os.environ.get("DEFIRM_INLINE_GLB", "0") == "1":
+        model_uri = (
+            "data:model/gltf-binary;base64,"
+            + base64.b64encode(glb_path.read_bytes()).decode("ascii")
+        )
+
+    return {
+        "job_id": job_id,
+        "views": per_view,
+        "consolidated_measurements": consolidated,
+        "measurement_source": result.get("measurement_source", "manual"),
+        "resolved_color": resolved_color,
+        "image_estimate_agreement": agreement,
+        "measurement_agreement": agreement,
+        "warnings": warnings,
+        "model_url": model_url,
+        "model_glb_base64": model_uri,
+        "template": result.get("template"),
+        "quality": quality,
+        "template_selection": result.get("template_selection"),
+        "pipeline": result.get("pipeline", []),
+    }
 
 
 def _init_state() -> TuningState:
@@ -66,12 +329,52 @@ def _init_state() -> TuningState:
 async def startup() -> None:
     global state
     state = _init_state()
+    _prune_reconstruction_models()
     logger.info("Tuning API ready — templates dir: %s", TEMPLATES_DIR)
 
 
 @app.get("/api/health")
 async def health():
     return {"status": "ok", "state": state.to_dict() if state else None}
+
+
+@app.get("/api/ready")
+async def ready():
+    """Readiness probe for production reconstruction dependencies."""
+    try:
+        pipeline = await run_in_threadpool(_get_reconstruction_pipeline)
+        template_count = len(pipeline.library.list_templates())
+        yolo_ready = pipeline.segmenter.model_type != "opencv_fallback"
+        checks = {
+            "pipeline_initialized": True,
+            "yolo_ready": yolo_ready,
+            "templates_available": template_count > 0,
+            "template_count": template_count,
+            "dashboard_available": (PROJECT_ROOT / "toolkit" / "dashboard.html").exists(),
+            "viewer_available": VIEWER_DIR.exists(),
+            "output_writable": os.access(RECONSTRUCTION_DIR, os.W_OK),
+        }
+        ready_state = all(
+            checks[key]
+            for key in (
+                "pipeline_initialized",
+                "yolo_ready",
+                "templates_available",
+                "dashboard_available",
+                "viewer_available",
+                "output_writable",
+            )
+        )
+        if REQUIRE_YOLO and not yolo_ready:
+            ready_state = False
+        if not ready_state:
+            raise HTTPException(status_code=503, detail={"status": "not_ready", "checks": checks})
+        return {"status": "ready", "checks": checks}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("Readiness check failed")
+        raise HTTPException(status_code=503, detail={"status": "not_ready", "error": str(exc)}) from exc
 
 
 @app.get("/api/templates")
@@ -209,6 +512,119 @@ async def batch_create_templates():
         raise HTTPException(status_code=500)
     count = state.template_manager.create_batch_stubs()
     return {"success": True, "templates_created": count, "templates": list(state.template_manager.templates.keys())}
+
+
+
+@app.post("/api/reconstruct/multi-view")
+async def reconstruct_multi_view(
+    images: list[UploadFile] = File(..., description="4-5 images of one pair of glasses"),
+    frame_width: float = Form(...),
+    lens_width: float = Form(...),
+    lens_height: float = Form(...),
+    bridge_width: float = Form(...),
+    temple_length: float = Form(...),
+    rim_thickness: float = Form(1.2),
+    temple_curve_angle: float = Form(28.0),
+    color: str | None = Form(None),
+    shape: str | None = Form(None),
+    material: str | None = Form(None),
+    template_name: str | None = Form(None),
+):
+    """Dashboard-compatible multi-view reconstruction endpoint."""
+    if not 4 <= len(images) <= 5:
+        raise HTTPException(status_code=400, detail="Upload exactly 4 or 5 images")
+
+    try:
+        shape_override = FrameShape(shape) if shape else None
+        material_override = FrameMaterial(material) if material else None
+        manual_measurements = Measurements(
+            frame_width=frame_width,
+            lens_width=lens_width,
+            lens_height=lens_height,
+            bridge_width=bridge_width,
+            temple_length=temple_length,
+            rim_thickness=rim_thickness,
+            temple_curve_angle=temple_curve_angle,
+            color=color or "#000000",
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=422, detail=f"Invalid reconstruction input: {exc}") from exc
+
+    _prune_reconstruction_models()
+    job_id = uuid.uuid4().hex[:12]
+
+    try:
+        with tempfile.TemporaryDirectory(prefix=f"defirm_multiview_{job_id}_") as tmp_dir:
+            work_dir = Path(tmp_dir)
+            image_paths: list[Path] = []
+            original_names: list[str] = []
+            seen_hashes: set[str] = set()
+
+            for index, upload in enumerate(images):
+                raw = await upload.read()
+                if not raw:
+                    raise HTTPException(status_code=400, detail=f"Image {index + 1} is empty")
+                if len(raw) > MAX_IMAGE_BYTES:
+                    raise HTTPException(
+                        status_code=413,
+                        detail=f"{upload.filename or f'Image {index + 1}'} exceeds "
+                        f"{MAX_IMAGE_BYTES // (1024 * 1024)}MB limit",
+                    )
+                digest = hashlib.sha256(raw).hexdigest()
+                if digest in seen_hashes:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"{upload.filename or f'Image {index + 1}'} duplicates another uploaded image",
+                    )
+                seen_hashes.add(digest)
+                suffix = Path(upload.filename or "").suffix.lower()
+                if suffix not in {".jpg", ".jpeg", ".png", ".webp"}:
+                    suffix = ".jpg"
+                path = work_dir / f"view_{index}{suffix}"
+                path.write_bytes(raw)
+                image_paths.append(path)
+                original_names.append(upload.filename or path.name)
+
+            return await run_in_threadpool(
+                _run_multiview_reconstruction,
+                image_paths,
+                original_names,
+                template_name,
+                job_id,
+                manual_measurements,
+                color,
+                shape_override,
+                material_override,
+            )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("Multi-view reconstruction failed")
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+
+@app.get("/api/reconstruct/{job_id}/model")
+async def reconstruct_model(job_id: str):
+    if not job_id or any(ch not in "0123456789abcdef" for ch in job_id.lower()):
+        raise HTTPException(status_code=400, detail="Invalid job id")
+    path = RECONSTRUCTION_DIR / f"{job_id}.glb"
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="Model not found")
+    return FileResponse(
+        path,
+        media_type="model/gltf-binary",
+        filename=f"defirmation-{job_id}.glb",
+        headers={"Cache-Control": "private, max-age=3600"},
+    )
+
+
+@app.get("/dashboard", response_class=HTMLResponse)
+async def serve_dashboard():
+    dashboard_path = PROJECT_ROOT / "toolkit" / "dashboard.html"
+    if not dashboard_path.exists():
+        raise HTTPException(status_code=404, detail="Dashboard not installed")
+    return dashboard_path.read_text(encoding="utf-8")
 
 
 @app.get("/api/state")

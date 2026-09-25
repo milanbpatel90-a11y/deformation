@@ -142,8 +142,8 @@
 
     <div class="img-card" id="card-multi" onclick="document.getElementById('input-multi').click()">
       <input type="file" id="input-multi" accept="image/*" multiple />
-      <div class="label">Multi-View (4-6 images) <span class="badge optional">multi-fusion</span></div>
-      <div class="placeholder" id="ph-multi">Click to choose multiple files</div>
+      <div class="label">Multi-View (4-5 images) <span class="badge optional">use production dashboard</span></div>
+      <div class="placeholder" id="ph-multi">Select files to preview; generation is handled by /dashboard</div>
       <div id="multi-preview-list" style="display: flex; gap: 4px; flex-wrap: wrap; margin-top: 6px;"></div>
     </div>
   </div>
@@ -211,7 +211,7 @@ camera.position.set(0, 0, 200);
 
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setSize(container.clientWidth, container.clientHeight);
-renderer.setPixelRatio(window.devicePixelRatio);
+renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 container.appendChild(renderer.domElement);
 
@@ -228,6 +228,7 @@ fill.position.set(-60, -20, 50);
 scene.add(fill);
 
 let currentModel = null;
+let currentModelBaseWidth = 0;
 let isTryOnActive = false;
 let tryOnCamera = null;
 let tryOnVideo = null;
@@ -251,19 +252,39 @@ function fitCamera(obj) {
   controls.update();
 }
 
+function disposeModel(model) {
+  if (!model) return;
+  model.traverse((obj) => {
+    if (!obj.isMesh) return;
+    if (obj.geometry) obj.geometry.dispose();
+    const materials = Array.isArray(obj.material) ? obj.material : [obj.material];
+    materials.filter(Boolean).forEach((material) => {
+      Object.values(material).forEach((value) => {
+        if (value && value.isTexture && typeof value.dispose === 'function') value.dispose();
+      });
+      if (typeof material.dispose === 'function') material.dispose();
+    });
+  });
+}
+
 function loadGLB(url) {
   const loader = new GLTFLoader();
   overlayStatus.textContent = 'Loading model…';
   loader.load(url, (gltf) => {
-    if (currentModel) scene.remove(currentModel);
+    if (currentModel) {
+      scene.remove(currentModel);
+      disposeModel(currentModel);
+    }
     currentModel = gltf.scene;
+    const box = new THREE.Box3().setFromObject(currentModel);
+    currentModelBaseWidth = Math.max(box.max.x - box.min.x, 1e-6);
     scene.add(currentModel);
     if (!isTryOnActive) {
       fitCamera(currentModel);
     }
     overlayStatus.textContent = 'Loaded · Drag to rotate · Scroll to zoom';
   }, undefined, (err) => {
-    overlayStatus.textContent = 'Error loading model: ' + err.message;
+    overlayStatus.textContent = 'Error loading model: ' + (err && err.message ? err.message : err);
   });
 }
 
@@ -334,13 +355,15 @@ inputMulti.addEventListener('change', (e) => {
     reader.readAsDataURL(file);
   }
   
+  statusBox.textContent = 'Multi-view production generation requires manual measurements. Use /dashboard.';
   updateGenerateBtn();
 });
 
 function updateGenerateBtn() {
   const hasFront = document.getElementById('input-front').files.length > 0;
-  const hasMulti = document.getElementById('input-multi').files.length > 0;
-  document.getElementById('generate-btn').disabled = !(hasFront || hasMulti);
+  // Multi-view generation is intentionally handled by the production dashboard,
+  // where physical measurements are required and validated.
+  document.getElementById('generate-btn').disabled = !hasFront;
 }
 
 // ── Pipeline stages renderer ──────────────────────────────────────────────────
@@ -390,7 +413,12 @@ const downloadBtn = document.getElementById('download-btn');
 document.getElementById('generate-btn').addEventListener('click', async () => {
   const frontFile = document.getElementById('input-front').files[0];
   const multiFiles = document.getElementById('input-multi').files;
-  if (!frontFile && (!multiFiles || multiFiles.length === 0)) return;
+  if (multiFiles && multiFiles.length > 0) {
+    statusBox.className = 'error';
+    statusBox.textContent = 'Use the production /dashboard for 4-5 image reconstruction with manual measurements.';
+    return;
+  }
+  if (!frontFile) return;
 
   const btn = document.getElementById('generate-btn');
   btn.disabled = true;
@@ -503,9 +531,14 @@ function onResults(results) {
       // Offset slightly forward along the look direction so glasses sit on the nose
       currentModel.position.addScaledVector(v_dir, face_width * 0.15);
       
-      // 2. Scale the model dynamically based on face width
-      const base_scale = face_width * 0.72;
-      currentModel.scale.set(base_scale, base_scale, base_scale);
+      // 2. Scale the model relative to its actual GLB width.
+      // The previous implementation multiplied directly by face_width, which
+      // made scale depend on model units and could produce extreme sizes.
+      const target_width = face_width * 1.06;
+      const base_scale = currentModelBaseWidth > 1e-6
+        ? target_width / currentModelBaseWidth
+        : 1.0;
+      currentModel.scale.setScalar(base_scale);
       
       overlayStatus.textContent = 'Webcam Try-On active · Face tracked';
     }

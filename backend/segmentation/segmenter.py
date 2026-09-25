@@ -59,7 +59,7 @@ class GlassesSegmenter:
         """
         Return binary masks + metadata for frame regions.
 
-        Keys: front, side, full, model_type
+        Keys: front, side, full, model_type, detections, confidence
         """
         if self._model is not None:
             return self._segment_yolo(image)
@@ -70,8 +70,12 @@ class GlassesSegmenter:
         h, w = image.shape[:2]
         mask = np.zeros((h, w), dtype=np.uint8)
         detections = 0
+        confidences: list[float] = []
 
         for result in results:
+            if result.boxes is not None and result.boxes.conf is not None:
+                confidences.extend(float(x) for x in result.boxes.conf.detach().cpu().tolist())
+
             if result.masks is None:
                 continue
             for m in result.masks.data:
@@ -83,12 +87,15 @@ class GlassesSegmenter:
                 mask = np.maximum(mask, (resized > 0.5).astype(np.uint8) * 255)
                 detections += 1
 
+        confidence = float(np.mean(confidences)) if confidences else 0.0
+
         return {
             "front": mask,
             "side": mask,
             "full": mask,
             "model_type": self.model_type,
             "detections": detections,
+            "confidence": confidence,
         }
 
     def _segment_opencv(self, image: np.ndarray) -> dict[str, np.ndarray]:
@@ -99,8 +106,14 @@ class GlassesSegmenter:
         contours, _ = cv2.findContours(dark, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         if not contours:
             empty = np.zeros_like(gray)
-            return {"front": empty, "side": empty, "full": empty,
-                    "model_type": self.model_type, "detections": 0}
+            return {
+                "front": empty,
+                "side": empty,
+                "full": empty,
+                "model_type": self.model_type,
+                "detections": 0,
+                "confidence": 0.0,
+            }
 
         image_center = (w / 2.0, h / 2.0)
 
@@ -124,4 +137,5 @@ class GlassesSegmenter:
             "full": mask,
             "model_type": self.model_type,
             "detections": 1,
+            "confidence": 0.0,
         }

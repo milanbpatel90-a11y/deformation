@@ -56,22 +56,22 @@ class BridgeType(str, Enum):
 
 
 class Measurements(BaseModel):
-    frame_width: float = Field(..., description="Total frame width in mm")
-    lens_width: float = Field(..., description="Single lens width in mm")
-    lens_height: float = Field(..., description="Single lens height in mm")
-    bridge_width: float = Field(..., description="Bridge width in mm")
-    temple_length: float = Field(..., description="Temple arm length in mm")
-    rim_thickness: float = Field(default=1.2, description="Rim thickness in mm")
+    frame_width: float = Field(..., ge=100.0, le=180.0, description="Total frame width in mm")
+    lens_width: float = Field(..., ge=20.0, le=80.0, description="Single lens width in mm")
+    lens_height: float = Field(..., ge=15.0, le=70.0, description="Single lens height in mm")
+    bridge_width: float = Field(..., ge=5.0, le=35.0, description="Bridge width in mm")
+    temple_length: float = Field(..., ge=100.0, le=180.0, description="Temple arm length in mm")
+    rim_thickness: float = Field(default=1.2, ge=0.2, le=10.0, description="Rim thickness in mm")
     material: FrameMaterial = FrameMaterial.METAL
     shape: FrameShape = FrameShape.GEOMETRIC
     nose_pads: bool = True
-    temple_curve_angle: float = Field(default=28.0, description="Temple curve in degrees")
+    temple_curve_angle: float = Field(default=28.0, ge=0.0, le=60.0, description="Temple curve in degrees")
     nose_pad_distance: float | None = None
     nose_pad_angle: float | None = None
     nose_pad_height: float | None = None
     color: str = "#d9a7a2"
     lens_color: str | None = Field(default=None, description="Hex color code for the lenses")
-    lens_opacity: float | None = Field(default=None, description="Opacity of the lenses (0.0 to 1.0)")
+    lens_opacity: float | None = Field(default=None, ge=0.0, le=1.0, description="Opacity of the lenses (0.0 to 1.0)")
 
 
 class TemplateDimensions(BaseModel):
