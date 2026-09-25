@@ -164,16 +164,30 @@ class GLBExporter:
     ) -> None:
         # Trimesh serializes scene.metadata directly as glTF scene.extras.
         # Do not store another "extras" object here, which creates extras.extras.
-        scene.metadata = {
-            "generator": "deformation/2.0",
-            "deformation": metadata.to_dict(),
-            "anchors": anchors_m,
-            "units": {
-                "geometry": "meter",
-                "anchors": "meter",
-                "measurements": "millimeter",
-            },
-        }
+        existing = dict(scene.metadata or {})
+        legacy_extras = existing.pop("extras", None)
+        if isinstance(legacy_extras, dict):
+            for key, value in legacy_extras.items():
+                if key not in {"defirmation", "deformation", "anchors", "units", "generator"}:
+                    existing.setdefault(key, value)
+
+        # Remove loader/runtime bookkeeping rather than exporting local paths.
+        existing.pop("file_path", None)
+        existing.pop("file_name", None)
+
+        existing.update(
+            {
+                "generator": "deformation/2.0",
+                "deformation": metadata.to_dict(),
+                "anchors": anchors_m,
+                "units": {
+                    "geometry": "meter",
+                    "anchors": "meter",
+                    "measurements": "millimeter",
+                },
+            }
+        )
+        scene.metadata = existing
 
     def export_metadata_json(
         self,
