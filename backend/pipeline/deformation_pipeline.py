@@ -178,13 +178,13 @@ class DeformationPipeline:
         template_info = match.best.template
         template_name = template_info.name
 
-        scene = trimesh.load(template_info.glb_path, force="scene")
         descriptor = self.descriptor_loader.load(
             template_name,
             measurements=measurements,
             template_info=template_info,
+            require_independent_parts=True,
         )
-        self._inject_aliases_into_scene(scene, descriptor)
+        scene = self.descriptor_loader.build_deformation_scene(descriptor)
         ctx = DeformationContext(
             template_info=template_info,
             template_scene=scene,
@@ -316,9 +316,13 @@ class DeformationPipeline:
 
         s6 = report.add("Template Deformation")
         t = s6.start()
-        scene = trimesh.load(template_info.glb_path, force="scene")
-        descriptor = self.descriptor_loader.load(template_name, measurements=measurements, template_info=template_info)
-        self._inject_aliases_into_scene(scene, descriptor)
+        descriptor = self.descriptor_loader.load(
+            template_name,
+            measurements=measurements,
+            template_info=template_info,
+            require_independent_parts=True,
+        )
+        scene = self.descriptor_loader.build_deformation_scene(descriptor)
         ctx = DeformationContext(
             template_info=template_info,
             template_scene=scene,
@@ -545,13 +549,13 @@ class DeformationPipeline:
 
         s3 = report.add("Template Deformation")
         t = s3.start()
-        scene = trimesh.load(template_info.glb_path, force="scene")
         descriptor = self.descriptor_loader.load(
             template_name,
             measurements=fused_measurements,
             template_info=template_info,
+            require_independent_parts=True,
         )
-        self._inject_aliases_into_scene(scene, descriptor)
+        scene = self.descriptor_loader.build_deformation_scene(descriptor)
         ctx = DeformationContext(
             template_info=template_info,
             template_scene=scene,
