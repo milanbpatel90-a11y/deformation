@@ -31,8 +31,8 @@
     .row { display:flex; gap:8px; align-items:center; }
     .fields { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; }
     .field label { display:block; font-size:11px; color:var(--muted); margin-bottom:5px; }
-    .field input { width:100%; padding:9px 10px; border-radius:8px; border:1px solid var(--line); background:#0c141b; color:var(--text); }
-    .field input:focus { outline:none; border-color:var(--accent); }
+    .field input, .field select { width:100%; padding:9px 10px; border-radius:8px; border:1px solid var(--line); background:#0c141b; color:var(--text); }
+    .field input:focus, .field select:focus { outline:none; border-color:var(--accent); }
     .field input.invalid { border-color:var(--danger); }
     .between { display:flex; justify-content:space-between; gap:10px; align-items:center; }
     .counter { font-size:12px; color:var(--muted); }
@@ -105,6 +105,34 @@
         <div class="field"><label for="templeLength">Temple length (100–180 mm)</label><input id="templeLength" type="number" min="100" max="180" step="0.1" inputmode="decimal" /></div>
         <div class="field"><label for="rimThickness">Rim thickness (optional, mm)</label><input id="rimThickness" type="number" min="0.2" max="10" step="0.1" value="1.2" inputmode="decimal" /></div>
       </div>
+      <div class="fields" style="margin-top:10px">
+        <div class="field">
+          <label for="shapeOverride">Frame shape</label>
+          <select id="shapeOverride">
+            <option value="">Auto-detect</option>
+            <option value="round">Round</option>
+            <option value="square">Square</option>
+            <option value="rectangle">Rectangle</option>
+            <option value="aviator">Aviator</option>
+            <option value="cat_eye">Cat-eye</option>
+            <option value="browline">Browline</option>
+            <option value="rimless">Rimless</option>
+            <option value="geometric">Geometric</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="materialOverride">Frame material</label>
+          <select id="materialOverride">
+            <option value="">Auto-detect</option>
+            <option value="metal">Metal</option>
+            <option value="titanium">Titanium</option>
+            <option value="acetate">Acetate</option>
+            <option value="plastic">Plastic</option>
+            <option value="mixed">Mixed</option>
+          </select>
+        </div>
+      </div>
+      <div class="meta" style="margin-top:8px">Use Auto when confident in the photos; choose an override for styles the heuristic classifier cannot reliably distinguish.</div>
     </section>
 
     <section class="card">
@@ -312,11 +340,13 @@
     $('files').replaceChildren();
     ['frameWidth','lensWidth','lensHeight','bridgeWidth','templeLength'].forEach((id) => { $(id).value = ''; $(id).classList.remove('invalid'); });
     $('rimThickness').value = '1.2';
+    $('shapeOverride').value = '';
+    $('materialOverride').value = '';
     $('count').textContent = '0 / 4–5';
     $('count').className = 'counter bad';
     state.busy = false;
     clearResult();
-    setStatus('Select exactly 4 or 5 images to continue.');
+    setStatus('Select 4–5 images and enter the physical measurements to continue.');
     updateControls();
   }
 
@@ -426,6 +456,12 @@
       const body = await response.json().catch(() => null);
       if (body) {
         if (typeof body.detail === 'string') return body.detail;
+        if (Array.isArray(body.detail)) {
+          return body.detail.map((item) => {
+            const loc = Array.isArray(item.loc) ? item.loc.join('.') : 'request';
+            return loc + ': ' + (item.msg || 'invalid value');
+          }).join(' · ');
+        }
         if (typeof body.error === 'string') return body.error;
       }
     }
@@ -451,6 +487,8 @@
     const form = new FormData();
     state.files.forEach((file) => form.append('images', file));
     Object.entries(measurements).forEach(([key, value]) => form.append(key, String(value)));
+    if ($('shapeOverride').value) form.append('shape', $('shapeOverride').value);
+    if ($('materialOverride').value) form.append('material', $('materialOverride').value);
 
     try {
       const response = await fetch('/api/reconstruct/multi-view', {
