@@ -21,7 +21,7 @@ jobs:
       - name: Install audit dependencies
         run: >-
           python -m pip install --upgrade pip numpy trimesh scipy pydantic
-          pillow opencv-python-headless
+          pillow opencv-python-headless networkx
 
       - name: Audit actual production GLBs
         run: |
