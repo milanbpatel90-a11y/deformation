@@ -19,15 +19,24 @@ jobs:
           python-version: "3.11"
 
       - name: Install audit dependencies
-        run: python -m pip install --upgrade pip numpy trimesh
+        run: >-
+          python -m pip install --upgrade pip numpy trimesh scipy pydantic
+          pillow opencv-python-headless
 
       - name: Audit actual production GLBs
         run: |
           python scripts/audit_production_glb.py             templates/geometric_metal.glb             templates/rectangle_plastic.glb             --output output/glb_audit_baseline.json
 
-      - name: Upload baseline audit
+      - name: Run deformation regression on production GLB
+        run: python scripts/regress_production_glb.py
+
+      - name: Upload production audit
         uses: actions/upload-artifact@v4
         with:
-          name: production-glb-baseline
-          path: output/glb_audit_baseline.json
+          name: production-glb-audit
+          path: |
+            output/glb_audit_baseline.json
+            output/production_regression/regression.json
+            output/production_regression/*.glb
+            output/production_regression/*.metadata.json
           if-no-files-found: error
