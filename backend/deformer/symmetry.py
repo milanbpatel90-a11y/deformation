@@ -19,9 +19,11 @@ from typing import Any
 
 import numpy as np
 import trimesh
+from scipy.spatial import cKDTree
 
 from backend.deformer.base_deformer import BaseDeformer
 from backend.deformer.deformation_context import DeformationContext
+from backend.geometry_units import m_to_mm, mm_to_m
 
 # ---------------------------------------------------------------------------
 # Threshold (mm).  Errors below this value are left untouched.
@@ -200,22 +202,12 @@ class SymmetrySolver(BaseDeformer):
 
     @staticmethod
     def _nearest_distances(source: np.ndarray, target: np.ndarray) -> np.ndarray:
-        """Return the distance from each source point to its nearest target."""
-        # For meshes of typical size (< 50 k vertices) this brute-force
-        # approach is fast enough and avoids a KD-tree dependency.
+        """Return meter-space nearest-neighbor distances using a KD-tree."""
         if len(source) == 0 or len(target) == 0:
             return np.zeros(len(source), dtype=np.float64)
-
-        # Chunk to avoid O(N²) memory for very large meshes.
-        chunk = 512
-        errors = np.empty(len(source), dtype=np.float64)
-        for start in range(0, len(source), chunk):
-            end = min(start + chunk, len(source))
-            diff = source[start:end, None, :] - target[None, :, :]  # (C, M, 3)
-            dist = np.linalg.norm(diff, axis=-1)                    # (C, M)
-            errors[start:end] = dist.min(axis=1)
-
-        return errors
+        tree = cKDTree(target)
+        distances, _ = tree.query(source, k=1, workers=-1)
+        return np.asarray(distances, dtype=np.float64)
 
     # ------------------------------------------------------------------
     # Step 3+4 — compute and apply local correction
@@ -249,7 +241,8 @@ class SymmetrySolver(BaseDeformer):
         displacements : ndarray of shape (N, 3)
         """
         displacements = np.zeros_like(vertices)
-        over_threshold = np.where(errors > self.threshold_mm)[0]
+        threshold_m = mm_to_m(self.threshold_mm)
+        over_threshold = np.where(errors > threshold_m)[0]
 
         if len(over_threshold) == 0:
             return displacements
@@ -271,7 +264,7 @@ class SymmetrySolver(BaseDeformer):
                 continue
 
             # Correct only the excess beyond the threshold
-            excess = error - self.threshold_mm
+            excess = error - threshold_m
             correction_magnitude = excess * 0.5  # move halfway
 
             # Spatial falloff: contribution decays with distance from neighbours
@@ -339,6 +332,18 @@ class SymmetrySolver(BaseDeformer):
         left_mesh = context.meshes[left_name]
         right_mesh = context.meshes[right_name]
 
+        if left_mesh is right_mesh:
+            return PairCorrection(
+                label=label,
+                left_mesh=left_name,
+                right_mesh=right_name,
+                max_error_mm=0.0,
+                average_error_mm=0.0,
+                corrected_vertices=0,
+                skipped=True,
+                skip_reason="Both logical sides reference the same physical mesh.",
+            )
+
         left_verts = left_mesh.vertices.astype(np.float64)
         right_verts = right_mesh.vertices.astype(np.float64)
 
@@ -366,8 +371,8 @@ class SymmetrySolver(BaseDeformer):
             label=label,
             left_mesh=left_name,
             right_mesh=right_name,
-            max_error_mm=round(max_error, 6),
-            average_error_mm=round(avg_error, 6),
+            max_error_mm=round(m_to_mm(max_error), 6),
+            average_error_mm=round(m_to_mm(avg_error), 6),
             corrected_vertices=n_left + n_right,
         )
 
@@ -386,8 +391,8 @@ class SymmetrySolver(BaseDeformer):
             frame_mesh = context.meshes.get("Frame")
             if frame_mesh is not None:
                 bounds = frame_mesh.bounds.astype(float)
-                extents = bounds[1] - bounds[0]
-                if np.any(extents > 500.0):  # sanity: no axis > 500 mm
+                extents_mm = m_to_mm(bounds[1] - bounds[0])
+                if np.any(extents_mm > 500.0):  # sanity: no axis > 500 mm
                     return False
         except Exception:  # noqa: BLE001
             return False
