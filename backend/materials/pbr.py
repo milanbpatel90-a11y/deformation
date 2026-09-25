@@ -63,6 +63,8 @@ def lens_material(measurements: Measurements) -> PBRMaterial:
         baseColorFactor=rgba,
         metallicFactor=metallic,
         roughnessFactor=0.05,
+        alphaMode="BLEND",
+        doubleSided=True,
     )
 
 
