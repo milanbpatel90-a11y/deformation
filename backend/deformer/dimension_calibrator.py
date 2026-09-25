@@ -171,25 +171,23 @@ class DimensionCalibrator(BaseDeformer):
         rim_u = sign * (rim_vertices[:, 0] - center_x)
         lens_u = sign * (lens_vertices[:, 0] - center_x)
 
-        current_inner = float(np.min(lens_u))
-        current_lens_outer = float(np.max(lens_u))
+        current_rim_inner = float(np.min(rim_u))
         current_frame_outer = float(np.max(rim_u))
-        if current_frame_outer <= current_lens_outer:
-            raise ValueError("Frame side has no outer margin beyond lens geometry")
+        current_rim_span = current_frame_outer - current_rim_inner
+        if current_rim_span <= 1e-9:
+            raise ValueError("Frame side has zero physical span")
 
         target_inner = mm_to_m(bridge_width_mm * 0.5)
         target_lens_outer = target_inner + mm_to_m(lens_width_mm)
         target_frame_outer = mm_to_m(frame_width_mm * 0.5)
 
-        rim_u_new = self._map_outward(
-            rim_u,
-            current_inner=current_inner,
-            current_lens_outer=current_lens_outer,
-            current_frame_outer=current_frame_outer,
-            target_inner=target_inner,
-            target_lens_outer=target_lens_outer,
-            target_frame_outer=target_frame_outer,
-        )
+        # Final calibration is authoritative. Earlier style stages may
+        # temporarily place a lens outside the current rim envelope, so do not
+        # derive the frame mapping from the pre-calibration lens extent.
+        # Preserve every real rim vertex and map the source rim span directly
+        # into the target bridge-to-frame span.
+        rim_t = (rim_u - current_rim_inner) / current_rim_span
+        rim_u_new = target_inner + rim_t * (target_frame_outer - target_inner)
         rim_vertices[:, 0] = center_x + sign * rim_u_new
 
         rim_center_y = float(np.mean(rim_vertices[:, 1]))
