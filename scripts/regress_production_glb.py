@@ -165,6 +165,9 @@ def _gltf_contract(path: Path) -> dict:
 
     nodes = {node.get("name"): node for node in doc.get("nodes", []) if node.get("name")}
     pivot_errors = {}
+    local_hinge_distances = {}
+
+    local_scene = trimesh.load(path, force="scene", process=False)
     for temple_name, anchor_name in (("LeftTemple", "LeftHinge"), ("RightTemple", "RightHinge")):
         node = nodes.get(temple_name, {})
         translation = np.asarray(node.get("translation", [0.0, 0.0, 0.0]), dtype=np.float64)
@@ -175,6 +178,14 @@ def _gltf_contract(path: Path) -> dict:
             else float("inf")
         )
 
+        geometry = local_scene.geometry.get(temple_name)
+        if geometry is None or not len(geometry.vertices):
+            local_hinge_distances[temple_name] = float("inf")
+        else:
+            local_hinge_distances[temple_name] = float(
+                np.linalg.norm(np.asarray(geometry.vertices), axis=1).min()
+            )
+
     return {
         "generator": doc.get("asset", {}).get("generator"),
         "scene_extras_keys": sorted(extras.keys()) if isinstance(extras, dict) else [],
@@ -183,6 +194,7 @@ def _gltf_contract(path: Path) -> dict:
         "units": units,
         "anchors": anchors,
         "temple_node_pivot_error_m": pivot_errors,
+        "temple_local_hinge_distance_m": local_hinge_distances,
         "node_names": sorted(nodes),
     }
 
@@ -251,6 +263,11 @@ def _accept_case(case: dict, source_triangle_count: int) -> list[str]:
         if not np.isfinite(pivot_error) or pivot_error > 1e-7:
             errors.append(
                 f"{temple_name} node pivot does not match authoritative hinge: {pivot_error} m"
+            )
+    for temple_name, local_distance in contract["temple_local_hinge_distance_m"].items():
+        if not np.isfinite(local_distance) or local_distance > 1e-7:
+            errors.append(
+                f"{temple_name} local geometry does not contain the hinge origin: {local_distance} m"
             )
 
     return errors
