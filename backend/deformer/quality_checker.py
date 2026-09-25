@@ -13,6 +13,7 @@ from dataclasses import asdict, dataclass, field
 from typing import Any
 
 import numpy as np
+from scipy.spatial import cKDTree
 
 from backend.deformer.deformation_context import DeformationContext
 from backend.geometry_units import m_to_mm
@@ -115,6 +116,22 @@ class QualityChecker:
             "left_lens_height": m_to_mm(left_lens.extents[1]),
             "right_lens_height": m_to_mm(right_lens.extents[1]),
         }
+
+        frame_vertices = np.vstack([
+            left_rim.vertices,
+            bridge.vertices,
+            right_rim.vertices,
+        ])
+
+        def temple_length(name: str) -> float:
+            temple = context.mesh(name)
+            tree = cKDTree(frame_vertices)
+            distances, _ = tree.query(temple.vertices, k=1)
+            hinge = temple.vertices[int(np.argmin(distances))]
+            return m_to_mm(float(np.max(np.linalg.norm(temple.vertices - hinge, axis=1))))
+
+        measured["left_temple_length"] = temple_length("LeftTemple")
+        measured["right_temple_length"] = temple_length("RightTemple")
         targets = {
             "frame_width": m.frame_width,
             "bridge_width": m.bridge_width,
@@ -122,6 +139,8 @@ class QualityChecker:
             "right_lens_width": m.lens_width,
             "left_lens_height": m.lens_height,
             "right_lens_height": m.lens_height,
+            "left_temple_length": m.temple_length,
+            "right_temple_length": m.temple_length,
         }
         tolerances = {
             "frame_width": 2.0,
@@ -130,6 +149,8 @@ class QualityChecker:
             "right_lens_width": 1.5,
             "left_lens_height": 1.5,
             "right_lens_height": 1.5,
+            "left_temple_length": 2.0,
+            "right_temple_length": 2.0,
         }
 
         penalties = []
