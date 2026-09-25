@@ -157,7 +157,6 @@ class DeformationPipeline:
             lens_color=measurements.lens_color,
             lens_opacity=measurements.lens_opacity,
         )
-        self.exporter.export_metadata_json(metadata, anchors, meta_path)
 
         return {
             "quality": quality.to_dict(),
@@ -317,7 +316,6 @@ class DeformationPipeline:
             lens_color=measurements.lens_color,
             lens_opacity=measurements.lens_opacity,
         )
-        self.exporter.export_metadata_json(metadata, anchors, meta_path)
         s9.finish(t, output=str(out), size_kb=round(out.stat().st_size / 1024, 1))
 
         return {
@@ -502,7 +500,6 @@ class DeformationPipeline:
             lens_color=fused_measurements.lens_color,
             lens_opacity=fused_measurements.lens_opacity,
         )
-        self.exporter.export_metadata_json(metadata, anchors, meta_path)
         s6.finish(t, output=str(out), size_kb=round(out.stat().st_size / 1024, 1))
 
         return {

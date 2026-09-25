@@ -66,3 +66,6 @@ tests independently verify rejection of ambiguous geometry, manual input handlin
 API errors and limits, GLB materials and export. One existing Gold Template
 integration test remains skipped pending asset preparation. Passing those tests
 does not replace production visual and load testing.
+
+## Current measured GLB audit
+See [GLB_PRODUCTION_AUDIT.md](docs/GLB_PRODUCTION_AUDIT.md). Export units, normals, hierarchy and metadata are repaired and tested on the real Gold asset. Dimensional production readiness remains false: the nominal lens/bridge basis requires calibration and coupled range validation. Successful GLB generation is not a production-readiness guarantee.

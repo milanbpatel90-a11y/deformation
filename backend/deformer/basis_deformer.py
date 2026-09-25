@@ -77,13 +77,33 @@ class BasisDeformer:
             end = offset + len(mesh.vertices)
             mesh.vertices = vertices[offset:end].copy()
             offset = end
+        # The delivery calls its default width 140 mm, but the actual outer
+        # frame is 145.332 mm. Normalize the complete assembly together so
+        # relative component alignment is retained and requested width is real.
+        frame_width = np.ptp(scene.geometry["Frame"].vertices[:, 0])
+        width_scale = measurements.frame_width / frame_width
+        for mesh in scene.geometry.values():
+            mesh.vertices[:, 0] *= width_scale
         # Source: X across, Y depth, Z up. Viewer/export convention: Y up.
         scene.apply_transform(trimesh.transformations.rotation_matrix(-np.pi / 2, [1, 0, 0]))
-        rotation = trimesh.transformations.rotation_matrix(-np.pi / 2, [1, 0, 0])
+        from backend.exporter.geometry import world_vertices
         anchors = {"NoseBridge": [0.0, 0.0, 0.0]}
         for name in ("LeftHinge", "RightHinge"):
-            anchors[name] = trimesh.transform_points(
-                [scene.geometry[name].vertices.mean(axis=0)], rotation)[0].tolist()
+            points = world_vertices(scene, name)
+            anchors[name] = ((points.min(0) + points.max(0)) / 2).tolist()
         scene.metadata["vto_anchors"] = anchors
+        scene.metadata["coordinate_units"] = "mm"
         warnings = ["Gold Template preserves the supplied rim thickness and temple curve; its basis adjusts the five primary dimensions."]
-        return scene, QualityReport(warnings=warnings, breakdown={"finite_geometry": 100.0})
+        dimension_errors = []
+        # Nominal basis controls are not certified geometric measurements.
+        # Make residual errors explicit instead of reporting requested values
+        # as measured dimensions or silently claiming a production-quality fit.
+        for name in ("LeftLens", "RightLens"):
+            extent = np.ptp(world_vertices(scene, name), axis=0)
+            dimension_errors.extend([abs(extent[0] - measurements.lens_width), abs(extent[1] - measurements.lens_height)])
+            if abs(extent[0] - measurements.lens_width) > 0.5 or abs(extent[1] - measurements.lens_height) > 0.5:
+                warnings.append(f"{name} measured {extent[0]:.2f} x {extent[1]:.2f} mm; requested {measurements.lens_width:.2f} x {measurements.lens_height:.2f} mm. Template calibration is required for an exact fit.")
+        dimensions_passed = bool(max(dimension_errors) <= 0.5)
+        return scene, QualityReport(score=100.0 if dimensions_passed else 50.0,
+            passed=dimensions_passed, warnings=warnings,
+            breakdown={"finite_geometry": 100.0, "dimension_tolerance_0_5mm": 100.0 if dimensions_passed else 0.0})
