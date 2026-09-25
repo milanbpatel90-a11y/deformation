@@ -7,6 +7,7 @@ from typing import Any
 
 import numpy as np
 from scipy import interpolate
+from scipy.spatial import ConvexHull
 from shapely.geometry import Polygon
 
 from backend.deformer.base_deformer import BaseDeformer
@@ -59,11 +60,8 @@ class LensDeformer(BaseDeformer):
 
     def _extract_rim_boundary(self, context: DeformationContext, selection: LensSelection) -> np.ndarray:
         rim_mesh = context.mesh(selection.rim_part)
-        rim_vertices = rim_mesh.vertices.copy()
-        front_idx = self._surface_indices(rim_vertices, front=True)
-        boundary = rim_vertices[front_idx][:, :2]
-        order = self._loop_order(boundary)
-        return boundary[order]
+        rim_vertices = np.asarray(rim_mesh.vertices, dtype=np.float64)
+        return self._convex_boundary(rim_vertices[:, :2])
 
     def _generate_target_boundary(
         self,
@@ -162,10 +160,10 @@ class LensDeformer(BaseDeformer):
         fitted_target = self._resample_boundary(target_boundary, len(lens_boundary))
         fitted_target = self._align_boundary(lens_boundary, fitted_target)
         fit_error = m_to_mm(float(np.mean(np.linalg.norm(lens_boundary - fitted_target, axis=1))))
-        rim_boundary = rim_vertices[self._surface_indices(rim_vertices, front=True)][:, :2]
-        ordered_rim = rim_boundary[self._loop_order(rim_boundary)]
-        rim_polygon = Polygon(ordered_rim).buffer(0)
-        lens_polygon = Polygon(lens_boundary).buffer(0)
+        rim_boundary = self._convex_boundary(rim_vertices[:, :2])
+        lens_polygon_boundary = self._convex_boundary(lens_boundary)
+        rim_polygon = Polygon(rim_boundary).buffer(0)
+        lens_polygon = Polygon(lens_polygon_boundary).buffer(0)
         inside_rim = bool(
             not rim_polygon.is_empty
             and not lens_polygon.is_empty
@@ -195,6 +193,14 @@ class LensDeformer(BaseDeformer):
         z_values = vertices[:, 2]
         z_target = float(np.max(z_values) if front else np.min(z_values))
         return np.where(np.isclose(z_values, z_target))[0]
+
+    @staticmethod
+    def _convex_boundary(points_2d: np.ndarray) -> np.ndarray:
+        points = np.unique(np.asarray(points_2d, dtype=np.float64), axis=0)
+        if len(points) < 3:
+            raise ValueError("Projected rim/lens boundary has fewer than 3 unique points")
+        hull = ConvexHull(points)
+        return points[hull.vertices]
 
     @staticmethod
     def _loop_order(points_2d: np.ndarray) -> np.ndarray:
