@@ -7,7 +7,7 @@ from typing import Any
 
 import numpy as np
 from scipy import interpolate
-from scipy.spatial import ConvexHull
+from scipy.spatial import ConvexHull, cKDTree
 from shapely.geometry import Polygon
 
 from backend.deformer.base_deformer import BaseDeformer
@@ -120,6 +120,31 @@ class LensDeformer(BaseDeformer):
         scale = target_extent / source_extent
 
         local[:, :2] = target_center + (local[:, :2] - source_center) * scale
+
+        # A bounding-box fit preserves the production source silhouette, but a
+        # non-rectangular source can still protrude through a convex target at
+        # corners. Find the largest uniform in-plane factor that keeps the
+        # projected lens inside the target polygon. This is geometry-driven,
+        # not a fixed shrink percentage.
+        target_polygon = Polygon(target).buffer(0)
+        if target_polygon.is_empty:
+            raise ValueError(f"Invalid target lens polygon for {selection.lens_part}")
+
+        def projected_polygon(factor: float) -> Polygon:
+            candidate = target_center + (local[:, :2] - target_center) * factor
+            boundary = self._convex_boundary(candidate[front_idx])
+            return Polygon(boundary).buffer(0)
+
+        if not target_polygon.covers(projected_polygon(1.0)):
+            lo, hi = 0.0, 1.0
+            for _ in range(32):
+                mid = (lo + hi) * 0.5
+                if target_polygon.covers(projected_polygon(mid)):
+                    lo = mid
+                else:
+                    hi = mid
+            local[:, :2] = target_center + (local[:, :2] - target_center) * lo
+
         lens_mesh.vertices = self._from_local(local, origin, basis)
 
     def _preserve_uvs(self, context: DeformationContext, selection: LensSelection) -> None:
@@ -179,10 +204,23 @@ class LensDeformer(BaseDeformer):
         front_idx = self._surface_indices(lens_local, front=True)
         back_idx = self._surface_indices(lens_local, front=False)
         lens_boundary = self._convex_boundary(lens_local[front_idx, :2])
-        fitted_target = self._resample_boundary(target_boundary, len(lens_boundary))
-        fitted_target = self._align_boundary(lens_boundary, fitted_target)
+        target_boundary = self._convex_boundary(target_boundary)
+
+        # Compare shapes geometrically rather than by arbitrary loop start
+        # indices. Ordered correspondence produced false 10+ mm errors for
+        # otherwise close production contours.
+        lens_tree = cKDTree(lens_boundary)
+        target_tree = cKDTree(target_boundary)
+        lens_to_target, _ = target_tree.query(lens_boundary, k=1)
+        target_to_lens, _ = lens_tree.query(target_boundary, k=1)
         fit_error = m_to_mm(
-            float(np.mean(np.linalg.norm(lens_boundary - fitted_target, axis=1)))
+            float(
+                0.5
+                * (
+                    np.mean(lens_to_target)
+                    + np.mean(target_to_lens)
+                )
+            )
         )
 
         rim_boundary = self._convex_boundary(rim_local[:, :2])
