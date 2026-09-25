@@ -376,80 +376,104 @@ class DeformationPipeline:
         output_path: Path | str | None = None,
         color: str = "#d9a7a2",
         template_override: str | None = None,
+        manual_measurements: Measurements | None = None,
     ) -> dict:
         """
-        Run the full pipeline on 4-6 images:
-        1. Read and segment all images.
-        2. Classify each view (front, side, top, perspective).
-        3. Extract measurements and contours from each view.
-        4. Fuse the measurements.
-        5. Detect lens opacity & dominant color from the front view's lens region.
-        6. Apply template deformation and material mapping using the fused measurements.
+        Run the full pipeline on 4-5 images.
+
+        Photos are the source of truth for segmentation, style, lens contour,
+        lens appearance, and template selection. When manual_measurements is
+        provided, its physical dimensions are the source of truth for mesh
+        deformation; image-derived millimetre estimates are retained only as
+        diagnostics.
         """
         report = PipelineReport()
         s1 = report.add("Multi-View Classification and Extraction")
         t = s1.start()
-        
+
         view_classifier = ViewClassifier()
         fuser = MeasurementFuser()
         opacity_detector = OpacityDetector()
-        
-        extracted_views = []
-        front_image = None
-        front_lens_contour = None
-        
+
+        extracted_views: list[tuple[str, Measurements]] = []
+        processed: list[dict] = []
+
         for path in image_paths:
             img = self._imread(path)
             if img is None:
                 continue
-            
+
             masks = self.segmenter.segment(img)
-            view_type = view_classifier.classify_view(img, masks["front"])
-            
-            style = self.classifier.classify_style(img, masks["front"])
-            measurements, lens_contour = self.measurer.extract_from_images(
+            mask = masks["front"]
+            view_type = view_classifier.classify_view(img, mask)
+            style = self.classifier.classify_style(img, mask)
+            estimated, lens_contour = self.measurer.extract_from_images(
                 img,
                 side=None,
-                mask=masks["front"],
+                mask=mask,
                 shape=style.shape,
                 material=style.material,
                 nose_pads=style.nose_pads,
                 color=color,
             )
-            
-            extracted_views.append((view_type, measurements))
-            
-            if view_type == "front" and front_image is None:
-                front_image = img
-                front_lens_contour = lens_contour
-                
-        if not extracted_views:
+
+            extracted_views.append((view_type, estimated))
+            processed.append(
+                {
+                    "view_type": view_type,
+                    "image": img,
+                    "mask": mask,
+                    "style": style,
+                    "estimated": estimated,
+                    "lens_contour": lens_contour,
+                }
+            )
+
+        if not processed:
             raise ValueError("No valid images could be processed")
-            
-        # If no front view was classified, pick the first view as front fallback
-        if front_image is None:
-            first_view_type, first_ms = extracted_views[0]
-            front_image = self._imread(image_paths[0])
-            extracted_views[0] = ("front", first_ms)
-            masks = self.segmenter.segment(front_image)
-            front_lens_contour = self.measurer.extract_lens_contour(front_image, masks["front"])
-            
-        # Fuse measurements
-        fused_measurements = fuser.fuse(extracted_views)
-        
-        # Detect lens opacity and dominant color
+
+        front_record = next(
+            (record for record in processed if record["view_type"] == "front"),
+            processed[0],
+        )
+        front_image = front_record["image"]
+        front_mask = front_record["mask"]
+        front_style = front_record["style"]
+        front_lens_contour = front_record["lens_contour"]
+
+        if manual_measurements is not None:
+            fused_measurements = manual_measurements.model_copy(deep=True)
+            # Physical dimensions come from the user; semantic appearance comes
+            # from the product photos.
+            fused_measurements.shape = front_style.shape
+            fused_measurements.material = front_style.material
+            fused_measurements.nose_pads = front_style.nose_pads
+            fused_measurements.color = color
+            measurement_source = "manual"
+        else:
+            fused_measurements = fuser.fuse(extracted_views)
+            measurement_source = "image_estimate"
+
         lens_opacity, lens_color = opacity_detector.detect(front_image, front_lens_contour)
         fused_measurements.lens_color = lens_color
         fused_measurements.lens_opacity = lens_opacity
-        
-        s1.finish(t, views=[v[0] for v in extracted_views])
-        
-        # Run template selection, deformation, material mapping, and export
+
+        s1.finish(
+            t,
+            views=[record["view_type"] for record in processed],
+            measurement_source=measurement_source,
+        )
+
         s2 = report.add("Template Scoring")
         t = s2.start()
-        
-        style = self._style_from_measurements(fused_measurements)
-        features = self.feature_extractor.from_measurements(fused_measurements, style)
+
+        # Keep visual style from the photos while using authoritative manual
+        # dimensions for geometric template matching.
+        features = self.feature_extractor.extract(
+            front_mask,
+            fused_measurements,
+            front_style,
+        )
         match = self.matcher.match(features, template_override)
         template_info = match.best.template
         template_name = template_info.name
@@ -468,13 +492,18 @@ class DeformationPipeline:
         s3 = report.add("Template Deformation")
         t = s3.start()
         scene = trimesh.load(template_info.glb_path, force="scene")
-        descriptor = self.descriptor_loader.load(template_name, measurements=fused_measurements, template_info=template_info)
+        descriptor = self.descriptor_loader.load(
+            template_name,
+            measurements=fused_measurements,
+            template_info=template_info,
+        )
         self._inject_aliases_into_scene(scene, descriptor)
         ctx = DeformationContext(
             template_info=template_info,
             template_scene=scene,
             descriptor=descriptor,
             measurements=fused_measurements,
+            feature_set=features,
         )
         rim_pull = self.library.rim_pull_strength(template_name)
         deformer = MeshDeformer(scene, template_info.dimensions, rim_pull_strength=rim_pull)
@@ -485,6 +514,7 @@ class DeformationPipeline:
             rim_pull_strength=rim_pull,
             deformation_mode="template_vertex_groups",
             scale_factors=self._scale_summary(fused_measurements, template_info.dimensions),
+            quality=quality.to_dict(),
         )
 
         s4 = report.add("Texture Mapping")
@@ -513,6 +543,14 @@ class DeformationPipeline:
         out = Path(output_path)
 
         self.exporter.export(deformed, out, fused_measurements, template_name)
+        if not out.exists() or out.stat().st_size == 0:
+            raise RuntimeError("GLB export completed without a valid output file")
+
+        # Re-open the exported artifact before declaring success.
+        exported_scene = trimesh.load(out, force="scene")
+        if not exported_scene.geometry:
+            raise RuntimeError("Exported GLB contains no geometry")
+
         meta_path = out.with_suffix(".metadata.json")
         anchors = self.exporter._compute_anchors(deformed, fused_measurements)
 
@@ -534,10 +572,28 @@ class DeformationPipeline:
             "output_glb": str(out),
             "metadata_json": str(meta_path),
             "measurements": fused_measurements.model_dump(),
+            "measurement_source": measurement_source,
+            "image_estimates": [
+                {
+                    "view_type": view_type,
+                    "measurements": estimate.model_dump(),
+                }
+                for view_type, estimate in extracted_views
+            ],
             "template": template_name,
+            "template_selection": {
+                "reason": match.best.reason,
+                "score": match.best.score,
+                "breakdown": match.best.breakdown,
+                "top_candidates": [
+                    {"template": candidate.template.name, "score": candidate.score, "reason": candidate.reason}
+                    for candidate in match.candidates[:3]
+                ],
+            },
             "features": features.model_dump(mode="json"),
             "scale_factors": self._scale_summary(fused_measurements, template_info.dimensions),
             "lens_contour": front_lens_contour.model_dump(),
+            "quality": quality.to_dict(),
             "pipeline": report.to_dict(),
         }
 
