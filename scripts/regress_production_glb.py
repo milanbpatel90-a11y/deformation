@@ -49,7 +49,7 @@ def _union_bounds(scene: trimesh.Scene, names: list[str]) -> np.ndarray | None:
 
 
 def scene_metrics(path: Path) -> dict:
-    scene = trimesh.load(path, force="scene", process=False)
+    scene = load_world_baked_scene(path)
     bounds = scene.bounds
     geoms = {}
 
