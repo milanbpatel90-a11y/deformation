@@ -8,7 +8,8 @@ from pathlib import Path
 
 import numpy as np
 import trimesh
-from scipy.spatial import cKDTree
+from backend.deformer.calibrated_regions import CalibratedRegions
+from backend.template_library.compatibility import validate_combination, MeasurementCompatibilityError
 
 from backend.deformer.quality_checker import QualityReport
 
@@ -16,6 +17,13 @@ from backend.deformer.quality_checker import QualityReport
 class BasisDeformer:
     def __init__(self, root: Path):
         self.root = Path(root)
+        for relative, magic in (("geometry/template.glb", b"glTF"), ("deformation/basis.npz", b"PK")):
+            path = self.root / relative
+            if not path.is_file():
+                raise FileNotFoundError(f"Install real GT_001 delivery asset: {path}; binary assets are not supplied by a metadata-only checkout")
+            with path.open("rb") as source:
+                if not source.read(4).startswith(magic):
+                    raise ValueError(f"{path} is not a real binary asset (check Git LFS/delivery files)")
         self.parameters = json.loads((self.root / "deformation/basis_metadata.json").read_text(encoding="utf-8"))["parameters"]
         with np.load(self.root / "deformation/basis.npz", allow_pickle=False) as data:
             self.basis = data["B"]
@@ -40,51 +48,41 @@ class BasisDeformer:
             raise ValueError("Invalid Gold Template deformation basis")
         if not np.isfinite(self.rest).all():
             raise ValueError("Invalid Gold Template rest vertices")
-        # The supplied basis shortens the outer temples but leaves their inner
-        # inserts at the original length. Transfer the temple displacement to
-        # each insert so its metal core cannot protrude from a shortened arm.
-        offsets = {}
+        self.slices = {}
         start = 0
         for name in self.part_order:
             end = start + len(self.scene.geometry[name].vertices)
-            offsets[name] = slice(start, end)
+            self.slices[name] = slice(start, end)
             start = end
-        for side in ("Left", "Right"):
-            temple = offsets[side + "Temple"]
-            insert = offsets[side + "FrameInsert"]
-            distance, nearest = cKDTree(self.rest[temple]).query(self.rest[insert], k=4)
-            weights = 1 / np.maximum(distance, 1e-5)
-            weights /= weights.sum(axis=1, keepdims=True)
-            for index, parameter in enumerate(self.parameters):
-                if parameter["name"] in {"temple_length", "frame_width"}:
-                    self.basis[insert, :, index] = np.sum(
-                        self.basis[temple, :, index][nearest] * weights[:, :, None], axis=1)
+        landmarks = json.loads((self.root / "metadata/landmarks.json").read_text(encoding="utf-8"))["landmarks"]
+        self.regions = CalibratedRegions(self.rest, self.basis, self.slices, self.parameters, landmarks)
+        self.calibration_matrix = self.regions.calibration
+        self.reference_measurements = dict(zip(self.regions.names, self.regions.reference))
+        self.reference_measurements["temple_length"] = self.regions.temple_reference
 
     def deform(self, measurements):
-        deltas = []
+        ranges = {p["name"]: {"min": p["min"], "max": p["max"]} for p in self.parameters}
+        validate_combination(measurements, ranges)
         for parameter in self.parameters:
             value = getattr(measurements, parameter["name"])
             if not parameter["min"] <= value <= parameter["max"]:
-                raise ValueError(f'{parameter["name"]} must be between {parameter["min"]} and {parameter["max"]} mm for Gold Template')
-            deltas.append(value - parameter["default"])
-        vertices = self.rest + self.basis @ np.asarray(deltas)
-        if not np.isfinite(vertices).all():
-            raise ValueError("Gold Template deformation produced invalid coordinates")
+                raise MeasurementCompatibilityError(f'{parameter["name"]} must be between {parameter["min"]} and {parameter["max"]} mm for Gold Template', ranges)
+        field = self.regions.configure(measurements)
+        vertices = field.warp(self.rest)
+        if not np.isfinite(vertices).all() or field.min_jacobian <= 0:
+            raise ValueError("Gold Template deformation produced invalid or folded coordinates")
         scene = self.scene.copy()
-        offset = 0
-        for name in self.part_order:
-            mesh = scene.geometry[name]
-            end = offset + len(mesh.vertices)
-            mesh.vertices = vertices[offset:end].copy()
-            offset = end
-        # The delivery calls its default width 140 mm, but the actual outer
-        # frame is 145.332 mm. Normalize the complete assembly together so
-        # relative component alignment is retained and requested width is real.
-        frame_width = np.ptp(scene.geometry["Frame"].vertices[:, 0])
-        width_scale = measurements.frame_width / frame_width
-        for mesh in scene.geometry.values():
-            mesh.vertices[:, 0] *= width_scale
-        # Source: X across, Y depth, Z up. Viewer/export convention: Y up.
+        for name, sl in self.slices.items():
+            scene.geometry[name].vertices = vertices[sl].copy()
+        measured = field.measure(vertices)
+        expected = np.array([getattr(measurements,n) for n in field.names])
+        errors = np.abs(measured-expected)
+        endpoints = field.warp(np.vstack([field.temple_root,field.temple_tip]))
+        temple_length = float(np.linalg.norm(endpoints[1]-endpoints[0]))
+        maximum_error = max(float(errors.max()),abs(temple_length-measurements.temple_length))
+        if maximum_error > 0.5:
+            raise ValueError(f"Gold Template failed physical dimension validation: {maximum_error:g} mm")
+        # Native Z-up -> Y-up. All internal deformation and anchor inputs stay mm.
         scene.apply_transform(trimesh.transformations.rotation_matrix(-np.pi / 2, [1, 0, 0]))
         from backend.exporter.geometry import world_vertices
         anchors = {"NoseBridge": [0.0, 0.0, 0.0]}
@@ -93,17 +91,14 @@ class BasisDeformer:
             anchors[name] = ((points.min(0) + points.max(0)) / 2).tolist()
         scene.metadata["vto_anchors"] = anchors
         scene.metadata["coordinate_units"] = "mm"
-        warnings = ["Gold Template preserves the supplied rim thickness and temple curve; its basis adjusts the five primary dimensions."]
-        dimension_errors = []
-        # Nominal basis controls are not certified geometric measurements.
-        # Make residual errors explicit instead of reporting requested values
-        # as measured dimensions or silently claiming a production-quality fit.
-        for name in ("LeftLens", "RightLens"):
-            extent = np.ptp(world_vertices(scene, name), axis=0)
-            dimension_errors.extend([abs(extent[0] - measurements.lens_width), abs(extent[1] - measurements.lens_height)])
-            if abs(extent[0] - measurements.lens_width) > 0.5 or abs(extent[1] - measurements.lens_height) > 0.5:
-                warnings.append(f"{name} measured {extent[0]:.2f} x {extent[1]:.2f} mm; requested {measurements.lens_width:.2f} x {measurements.lens_height:.2f} mm. Template calibration is required for an exact fit.")
-        dimensions_passed = bool(max(dimension_errors) <= 0.5)
-        return scene, QualityReport(score=100.0 if dimensions_passed else 50.0,
-            passed=dimensions_passed, warnings=warnings,
-            breakdown={"finite_geometry": 100.0, "dimension_tolerance_0_5mm": 100.0 if dimensions_passed else 0.0})
+        scene.metadata["deformation_validation"] = {
+            "measured_mm": dict(zip(field.names, measured.tolist())) | {"temple_length": temple_length},
+            "maximum_error_mm": maximum_error, "minimum_jacobian": field.min_jacobian,
+            "basis_calibration_matrix": self.calibration_matrix.tolist(),
+            "basis_coefficients": field.coefficients.tolist(),
+            "bridge_definition": "horizontal gap between lens bounding boxes",
+        }
+        return scene, QualityReport(passed=True, warnings=[
+            "Gold Template retains its authored rim cross-section and temple curve; rim thickness reserves outer clearance in coupled validation."],
+            breakdown={"finite_geometry": 100.0, "dimension_tolerance_0_5mm": 100.0,
+                       "positive_deformation_jacobian": 100.0})

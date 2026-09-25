@@ -52,7 +52,10 @@ def test_physical_scale_normals_metadata_and_independent_components(real_export)
     sidecar=json.loads(path.with_suffix('.metadata.json').read_text())
     assert sidecar['anchors']==extras['anchors']
     assert sidecar['frame_width']==135  # Public dimension API stays mm.
-    assert not quality.passed  # Exposes residual lens calibration, not a false pass.
+    assert quality.passed
+    assert abs(report['components']['LeftLens']['extent'][0]*1000-measurements.lens_width)<0.5
+    assert abs(report['components']['LeftLens']['extent'][1]*1000-measurements.lens_height)<0.5
+    assert abs((report['components']['LeftLens']['bounds'][0][0]-report['components']['RightLens']['bounds'][1][0])*1000-measurements.bridge_width)<0.5
 
 
 def test_cleanup_preserves_surface_and_source_topology(real_export):
@@ -124,11 +127,11 @@ def test_nested_parent_translation_and_world_anchors_scale_once(real_export,tmp_
     np.testing.assert_allclose(loaded.metadata['anchors']['LeftHinge'],expected,atol=2e-8)
 
 
-@pytest.mark.parametrize('width,length',[(120,120),(135,155.02),(160,180)])
-def test_real_deformation_width_symmetry_and_temple_independence(width,length):
+@pytest.mark.parametrize('width,lens_width,length',[(120,48,120),(135,55.79,155.02),(160,55.79,180)])
+def test_real_deformation_width_symmetry_and_temple_independence(width,lens_width,length):
     engine=BasisDeformer(ROOT)
     defaults={p['name']:p['default'] for p in engine.parameters}
-    defaults.update(frame_width=width,temple_length=length)
+    defaults.update(frame_width=width,lens_width=lens_width,temple_length=length)
     scene,_=engine.deform(Measurements(**defaults))
     assert np.ptp(world_vertices(scene,'Frame')[:,0])==pytest.approx(width,abs=1e-7)
     left=world_vertices(scene,'LeftLens');right=world_vertices(scene,'RightLens')

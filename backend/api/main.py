@@ -23,7 +23,8 @@ from backend.template_library.loader import TemplateLibrary
 from backend.template_library.readiness import template_readiness
 from backend.api import rim_detection_routes
 from backend.measurement.suggestions import suggest_measurements
-from backend.template_library.compatibility import MeasurementCompatibilityError, measurement_ranges
+from backend.template_library.compatibility import (
+    MeasurementCompatibilityError, measurement_ranges, dependent_ranges, validate_combination)
 
 app = FastAPI(
     title="Defirmation API",
@@ -49,6 +50,28 @@ if viewer_dir.exists():
     app.mount("/viewer", StaticFiles(directory=str(viewer_dir), html=True), name="viewer")
 
 app.include_router(rim_detection_routes.router)
+
+
+@app.exception_handler(MeasurementCompatibilityError)
+async def incompatible_measurements(request, exc):
+    return JSONResponse(status_code=422, content={"detail": str(exc), "ranges": exc.ranges})
+
+
+def input_ranges(measurements, template=None):
+    name = template or "GT_001"
+    base = measurement_ranges(library.load(name)) if name in library.list_templates() else {}
+    return dependent_ranges(measurements, base)
+
+
+def check_combination(measurements, template=None):
+    validate_combination(measurements, input_ranges(measurements, template))
+
+
+@app.post("/api/measurements/ranges")
+def calculate_ranges(measurements: Measurements, template: str | None = None):
+    validate_template(template)
+    return {"ranges": input_ranges(measurements, template),
+            "constraint": "frame_width >= 2*lens_width + bridge_width + 2*rim_thickness"}
 
 
 def parse_measurements(payload: str, color: str) -> Measurements:
@@ -153,6 +176,7 @@ async def deform_from_images(
         front_path = work_dir / "front.jpg"
         manual = parse_measurements(measurements, color)
         validate_template(template)
+        check_combination(manual, template)
         front_bytes, _ = await read_image(front)
         if not front_bytes:
             raise ValueError("Front image upload is empty — please re-select the file and try again.")
@@ -183,13 +207,14 @@ async def deform_from_images(
             manual_measurements=manual,
             automatic_appearance=automatic_appearance,
         )
+        result["ranges"] = input_ranges(Measurements(**result["measurements"]), result.get("template"))
         result["job_id"] = job_id
         result["download_url"] = f"/api/output/{job_id}.glb"
         return result
     except HTTPException:
         raise
-    except MeasurementCompatibilityError as exc:
-        raise HTTPException(422, str(exc)) from exc
+    except MeasurementCompatibilityError:
+        raise
     except ValueError as exc:
         logger.info("Rejected deformation job %s: %s", job_id, exc)
         raise HTTPException(400, "Input or template is unsuitable for deformation") from exc
@@ -217,6 +242,7 @@ async def deform_from_multiple_images(
     try:
         manual = parse_measurements(measurements, color)
         validate_template(template)
+        check_combination(manual, template)
         if not 1 <= len(images) <= 6:
             raise HTTPException(400, "Upload between 1 and 6 images")
         image_paths = []
@@ -243,13 +269,14 @@ async def deform_from_multiple_images(
             manual_measurements=manual,
             automatic_appearance=automatic_appearance,
         )
+        result["ranges"] = input_ranges(Measurements(**result["measurements"]), result.get("template"))
         result["job_id"] = job_id
         result["download_url"] = f"/api/output/{job_id}.glb"
         return result
     except HTTPException:
         raise
-    except MeasurementCompatibilityError as exc:
-        raise HTTPException(422, str(exc)) from exc
+    except MeasurementCompatibilityError:
+        raise
     except ValueError as exc:
         logger.info("Rejected deformation job %s: %s", job_id, exc)
         raise HTTPException(400, "Input or template is unsuitable for deformation") from exc
@@ -299,14 +326,16 @@ async def deform_from_measurements(
 
     try:
         validate_template(template)
+        check_combination(measurements, template)
         result = await run_job(pipeline.run_from_measurements, measurements, out_path, template)
+        result["ranges"] = input_ranges(Measurements(**result["measurements"]), result.get("template"))
         result["job_id"] = job_id
         result["download_url"] = f"/api/output/{job_id}.glb"
         return result
     except HTTPException:
         raise
-    except MeasurementCompatibilityError as exc:
-        raise HTTPException(422, str(exc)) from exc
+    except MeasurementCompatibilityError:
+        raise
     except ValueError as exc:
         logger.info("Rejected deformation job %s: %s", job_id, exc)
         raise HTTPException(400, "Input or template is unsuitable for deformation") from exc

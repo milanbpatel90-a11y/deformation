@@ -15,13 +15,11 @@ def test_gold_bundle_discovered_and_rest_state_matches():
     info = library.load("GT_001")
     assert info.deformation_mode == "basis"
     engine = BasisDeformer(library.bundle_dir / "GT_001")
-    defaults = {p["name"]: p["default"] for p in engine.parameters}
+    defaults = engine.reference_measurements
     scene, quality = engine.deform(Measurements(**defaults))
     rest = np.vstack([scene.geometry[name].vertices for name in engine.part_order])
-    expected = engine.rest.copy()
-    expected[:, 0] *= defaults["frame_width"] / np.ptp(engine.scene.geometry["Frame"].vertices[:, 0])
-    np.testing.assert_allclose(rest, expected, atol=1e-9)
-    assert not quality.passed  # Actual lens widths expose delivery calibration drift.
+    np.testing.assert_allclose(rest, engine.rest, atol=1e-9)
+    assert quality.passed
 
 
 def test_gold_api_generates_and_downloads(monkeypatch, tmp_path):

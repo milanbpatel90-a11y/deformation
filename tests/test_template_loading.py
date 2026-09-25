@@ -156,35 +156,43 @@ class TestTemplateIntegration:
         assert constraints is not None
 
 
-# Integration test placeholder for deformation engine
+# Real production-asset integration: never skip or substitute generated geometry.
 class TestDeformationEngineIntegration:
-    """
-    Integration tests with deformation engine.
-    
-    These tests will be enabled once Gold Template is extracted
-    and deformation engine is connected to TemplateBundle.
-    """
-    
-    @pytest.mark.skip(reason="Awaiting Gold Template extraction and engine integration")
     def test_deformation_with_template(self):
-        """Test deformation using template bundle."""
-        from backend.deformer.engine import DeformationEngine
-        
-        bundle = TemplateBundle.load("GT_001")
-        engine = DeformationEngine(template=bundle)
-        
-        result = engine.deform(params={
-            "frame_width": 145,
-            "lens_width": 58,
-            "lens_height": 37,
-            "bridge_width": 18,
-            "temple_length": 155,
-        })
-        
-        assert result is not None
-        assert "vertices" in result
-        assert "faces" in result
+        import numpy as np
+        from backend.deformer.basis_deformer import BasisDeformer
+        from backend.models import Measurements
+        root = get_template_dir("GT_001")
+        for relative in ("geometry/template.glb", "deformation/basis.npz"):
+            assert (root / relative).is_file(), f"Install the real GT_001 delivery asset: {root / relative}"
+        engine = BasisDeformer(root)
+        for values in (
+            dict(frame_width=145, lens_width=58, lens_height=37, bridge_width=18, temple_length=155),
+            dict(frame_width=110, lens_width=40, lens_height=25, bridge_width=12, temple_length=120),
+            dict(frame_width=170, lens_width=69.8, lens_height=50, bridge_width=28, temple_length=180),
+        ):
+            scene, quality = engine.deform(Measurements(**values, rim_thickness=1.2))
+            left = scene.geometry["LeftLens"].vertices
+            right = scene.geometry["RightLens"].vertices
+            frame = scene.geometry["Frame"].vertices
+            assert abs(np.ptp(frame[:, 0]) - values["frame_width"]) <= 0.5
+            for lens in (left, right):
+                assert abs(np.ptp(lens[:, 0]) - values["lens_width"]) <= 0.5
+                assert abs(np.ptp(lens[:, 2]) - values["lens_height"]) <= 0.5
+            assert abs(left[:, 0].min() - right[:, 0].max() - values["bridge_width"]) <= 0.5
+            assert left[:, 0].min() > right[:, 0].max()
+            for mesh in scene.geometry.values():
+                assert np.isfinite(mesh.vertices).all()
+                assert np.prod(mesh.extents) > 0
+                assert mesh.area_faces.min() > 1e-10
+            assert quality.passed
 
-
-if __name__ == "__main__":
-    pytest.main([__file__, "-v"])
+    def test_invalid_coupled_dimensions_return_422(self):
+        from fastapi.testclient import TestClient
+        from backend.api.main import app
+        response = TestClient(app).post("/api/deform/measurements", data=dict(
+            frame_width=135, lens_width=60, lens_height=37, bridge_width=20,
+            temple_length=155, rim_thickness=1.2))
+        assert response.status_code == 422
+        assert "Frame width" in response.json()["detail"]
+        assert "ranges" in response.json()

@@ -9,6 +9,7 @@ from backend.exporter.geometry import dimensions, world_vertices
 from backend.exporter.validation import inspect_glb
 from backend.materials.pbr import apply_materials
 from backend.models import Measurements
+from backend.template_library.compatibility import MeasurementCompatibilityError, validate_combination
 
 
 def run():
@@ -26,8 +27,17 @@ def run():
          for p in engine.parameters for side in ('min','max')]
     for name,overrides in cases:
         m=Measurements(**(values | overrides))
+        try:
+            validate_combination(m)
+        except MeasurementCompatibilityError:
+            try:
+                engine.deform(m)
+            except MeasurementCompatibilityError:
+                results.append({'case':name,'valid_input':False,'rejected':True,'requested_mm':m.model_dump(mode='json')})
+                continue
+            raise AssertionError('Engine accepted invalid coupled measurements')
         scene,quality=engine.deform(m)
-        entry={'case':name,'requested_mm':m.model_dump(mode='json'),
+        entry={'case':name,'valid_input':True,'requested_mm':m.model_dump(mode='json'),
                'measured_mm':dimensions(scene),'quality':quality.to_dict()}
         # Signed lens gap is separate from nominal template bridge control.
         left=world_vertices(scene,'LeftLens');right=world_vertices(scene,'RightLens')
@@ -39,7 +49,8 @@ def run():
         results.append(entry)
     assert originals=={p:hashlib.sha256(Path(p).read_bytes()).hexdigest() for p in originals}
     report={'source_sha256':originals,'cases':results,
-            'all_cases_production_ready':all(x['quality']['passed'] and x['lens_box_gap_mm']>0 for x in results)}
+            'all_cases_production_ready':all((x.get('rejected',False) if not x['valid_input'] else
+                 x['quality']['passed'] and x['lens_box_gap_mm']>0) for x in results)}
     (output/'regression.json').write_text(json.dumps(report,indent=2),encoding='utf-8')
     print(json.dumps({'cases':len(results),'source_assets_unchanged':True,
          'all_cases_production_ready':report['all_cases_production_ready'],
