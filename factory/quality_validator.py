@@ -14,10 +14,12 @@ import numpy as np
 try:
     import bpy  # type: ignore
     import bmesh  # type: ignore
+    from mathutils.bvhtree import BVHTree  # type: ignore
     _BLENDER_AVAILABLE = True
 except ImportError:  # pragma: no cover
     bpy = None  # type: ignore[assignment]
     bmesh = None  # type: ignore[assignment]
+    BVHTree = None  # type: ignore[assignment]
     _BLENDER_AVAILABLE = False
 
 from .types import (
@@ -186,22 +188,44 @@ def _check_manifold() -> tuple[bool, str | None]:
 
 
 def _check_self_intersections() -> tuple[bool, str | None]:
-    """Quick BVH-based self-intersection test per object."""
+    """Conservative BVH self-overlap check for non-adjacent triangle candidates.
+
+    BVH overlap is a broad-phase test, so candidates are reported conservatively
+    rather than silently accepted. Adjacent faces sharing vertices are ignored.
+    """
     require_blender()
     intersected: list[str] = []
+    failures: list[str] = []
+
     for obj in bpy.data.objects:
         if obj.type != "MESH" or len(obj.data.vertices) < 4:
             continue
         try:
-            bvhtree = bmesh.types.BVHTree.FromObject(obj, bpy.context.evaluated_depsgraph_get())
-            hits = bvhtree.overlap(bvhtree)
-            if hits:
-                intersected.append(obj.name)
-        except Exception:
-            # BVH overlap can fail on very thin geometry; treat as pass.
-            pass
+            tree = BVHTree.FromObject(obj, bpy.context.evaluated_depsgraph_get())
+            hits = tree.overlap(tree)
+            polygons = obj.data.polygons
+
+            suspicious = 0
+            for left_index, right_index in hits:
+                if left_index >= right_index:
+                    continue
+                if left_index >= len(polygons) or right_index >= len(polygons):
+                    continue
+                left_vertices = set(polygons[left_index].vertices)
+                right_vertices = set(polygons[right_index].vertices)
+                if left_vertices.intersection(right_vertices):
+                    continue
+                suspicious += 1
+
+            if suspicious:
+                intersected.append(f"{obj.name} ({suspicious} non-adjacent overlap candidates)")
+        except Exception as exc:
+            failures.append(f"{obj.name}: {exc}")
+
+    if failures:
+        return False, "Self-intersection validation failed to execute: " + "; ".join(failures)
     if intersected:
-        return False, f"Self-intersections in: {', '.join(intersected)}"
+        return False, "Potential self-intersections in: " + ", ".join(intersected)
     return True, None
 
 
