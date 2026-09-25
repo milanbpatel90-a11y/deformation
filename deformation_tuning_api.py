@@ -338,6 +338,45 @@ async def health():
     return {"status": "ok", "state": state.to_dict() if state else None}
 
 
+@app.get("/api/ready")
+async def ready():
+    """Readiness probe for production reconstruction dependencies."""
+    try:
+        pipeline = await run_in_threadpool(_get_reconstruction_pipeline)
+        template_count = len(pipeline.library.list_templates())
+        yolo_ready = pipeline.segmenter.model_type != "opencv_fallback"
+        checks = {
+            "pipeline_initialized": True,
+            "yolo_ready": yolo_ready,
+            "templates_available": template_count > 0,
+            "template_count": template_count,
+            "dashboard_available": (PROJECT_ROOT / "toolkit" / "dashboard.html").exists(),
+            "viewer_available": VIEWER_DIR.exists(),
+            "output_writable": os.access(RECONSTRUCTION_DIR, os.W_OK),
+        }
+        ready_state = all(
+            checks[key]
+            for key in (
+                "pipeline_initialized",
+                "yolo_ready",
+                "templates_available",
+                "dashboard_available",
+                "viewer_available",
+                "output_writable",
+            )
+        )
+        if REQUIRE_YOLO and not yolo_ready:
+            ready_state = False
+        if not ready_state:
+            raise HTTPException(status_code=503, detail={"status": "not_ready", "checks": checks})
+        return {"status": "ready", "checks": checks}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("Readiness check failed")
+        raise HTTPException(status_code=503, detail={"status": "not_ready", "error": str(exc)}) from exc
+
+
 @app.get("/api/templates")
 async def list_templates():
     if not state:
