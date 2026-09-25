@@ -266,6 +266,29 @@ class DescriptorLoader:
                 axis=axis,
                 confidence=float(payload.get("confidence", 1.0)),
             )
+
+        # Some production source files contain duplicated Blender empties for
+        # left/right hinges. A duplicated pivot is never a valid two-hinge
+        # configuration; fall back to the independently addressable temple
+        # geometry instead of rotating both arms around the same point.
+        left = hinges["left"]
+        right = hinges["right"]
+        if np.linalg.norm(left.pivot - right.pivot) < 1e-6:
+            repaired: dict[str, HingeDescriptor] = {}
+            for side, current in (("left", left), ("right", right)):
+                geom = self._get_geometry(geometry, current.part, f"hinge_repair:{side}")
+                pivot = self._infer_hinge_pivot(geom, side)
+                axis = self._infer_temple_axis(geom, pivot, side)
+                repaired[side] = HingeDescriptor(
+                    part=current.part,
+                    pivot=pivot,
+                    axis=axis,
+                    confidence=min(current.confidence, 0.5),
+                )
+            hinges = repaired
+
+        if np.linalg.norm(hinges["left"].pivot - hinges["right"].pivot) < 1e-6:
+            raise ValueError("Left and right hinge pivots collapse to the same point")
         return hinges
 
     def _load_rim_loops(
