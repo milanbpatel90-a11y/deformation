@@ -163,20 +163,62 @@ def _gltf_contract(path: Path) -> dict:
     anchors = extras.get("anchors", {}) if isinstance(extras, dict) else {}
     units = extras.get("units", {}) if isinstance(extras, dict) else {}
 
-    nodes = {node.get("name"): node for node in doc.get("nodes", []) if node.get("name")}
+    raw_nodes = doc.get("nodes", [])
+    nodes = {node.get("name"): (index, node) for index, node in enumerate(raw_nodes) if node.get("name")}
+    parents: dict[int, int] = {}
+    for parent_index, node in enumerate(raw_nodes):
+        for child_index in node.get("children", []):
+            parents[int(child_index)] = parent_index
+
+    def local_matrix(node: dict) -> np.ndarray:
+        if "matrix" in node:
+            values = np.asarray(node["matrix"], dtype=np.float64)
+            if values.size != 16:
+                raise ValueError("glTF node matrix must contain 16 values")
+            return values.reshape((4, 4), order="F")
+
+        translation = np.asarray(node.get("translation", [0.0, 0.0, 0.0]), dtype=np.float64)
+        scale = np.asarray(node.get("scale", [1.0, 1.0, 1.0]), dtype=np.float64)
+        x, y, z, w = np.asarray(node.get("rotation", [0.0, 0.0, 0.0, 1.0]), dtype=np.float64)
+        rotation = np.array(
+            [
+                [1 - 2 * (y * y + z * z), 2 * (x * y - z * w), 2 * (x * z + y * w), 0.0],
+                [2 * (x * y + z * w), 1 - 2 * (x * x + z * z), 2 * (y * z - x * w), 0.0],
+                [2 * (x * z - y * w), 2 * (y * z + x * w), 1 - 2 * (x * x + y * y), 0.0],
+                [0.0, 0.0, 0.0, 1.0],
+            ],
+            dtype=np.float64,
+        )
+        scale_matrix = np.diag([scale[0], scale[1], scale[2], 1.0])
+        transform = rotation @ scale_matrix
+        transform[:3, 3] = translation
+        return transform
+
+    world_cache: dict[int, np.ndarray] = {}
+
+    def world_matrix(index: int) -> np.ndarray:
+        if index in world_cache:
+            return world_cache[index]
+        matrix = local_matrix(raw_nodes[index])
+        parent = parents.get(index)
+        if parent is not None:
+            matrix = world_matrix(parent) @ matrix
+        world_cache[index] = matrix
+        return matrix
+
     pivot_errors = {}
     local_hinge_distances = {}
 
     local_scene = trimesh.load(path, force="scene", process=False)
     for temple_name, anchor_name in (("LeftTemple", "LeftHinge"), ("RightTemple", "RightHinge")):
-        node = nodes.get(temple_name, {})
-        translation = np.asarray(node.get("translation", [0.0, 0.0, 0.0]), dtype=np.float64)
+        node_entry = nodes.get(temple_name)
         anchor = np.asarray(anchors.get(anchor_name, [np.nan, np.nan, np.nan]), dtype=np.float64)
-        pivot_errors[temple_name] = (
-            float(np.linalg.norm(translation - anchor))
-            if translation.shape == (3,) and anchor.shape == (3,)
-            else float("inf")
-        )
+        if node_entry is None or anchor.shape != (3,):
+            pivot_errors[temple_name] = float("inf")
+        else:
+            node_index, _node = node_entry
+            world_translation = world_matrix(node_index)[:3, 3]
+            pivot_errors[temple_name] = float(np.linalg.norm(world_translation - anchor))
 
         geometry = local_scene.geometry.get(temple_name)
         if geometry is None or not len(geometry.vertices):
