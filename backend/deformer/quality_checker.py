@@ -15,6 +15,7 @@ from typing import Any
 import numpy as np
 
 from backend.deformer.deformation_context import DeformationContext
+from backend.geometry_units import m_to_mm
 
 
 @dataclass
@@ -72,8 +73,8 @@ class QualityChecker:
         try:
             frame = context.mesh("Frame")
             bounds = frame.bounds
-            extents = bounds[1] - bounds[0]
-            if extents[0] > 200 or extents[0] < 50:
+            extents_mm = m_to_mm(bounds[1] - bounds[0])
+            if extents_mm[0] > 200 or extents_mm[0] < 50:
                 score -= 30.0
         except KeyError:
             score -= 50.0
