@@ -213,12 +213,6 @@ class DeformationPipeline:
                 "Exported GLB failed production validation: "
                 + "; ".join(glb_validation.errors)
             )
-        glb_validation = validate_glb(out, measurements)
-        if not glb_validation.passed:
-            raise RuntimeError(
-                "Exported GLB failed production validation: "
-                + "; ".join(glb_validation.errors)
-            )
 
         meta_path = out.with_suffix(".metadata.json")
         anchors = self.exporter.compute_anchors_meters(deformed, measurements)
