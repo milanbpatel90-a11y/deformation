@@ -46,6 +46,7 @@ class TempleDeformer(BaseDeformer):
             self._extend_length(context, selection, target)
             self._apply_wrap(context, selection, target)
             self._apply_ear_bend(context, selection, target)
+            self._normalize_final_length(context, selection, target)
             self._preserve_symmetry(context, selection)
             results.append(self._validate_constraints(context, selection, target))
 
@@ -146,6 +147,46 @@ class TempleDeformer(BaseDeformer):
             vertices[:, 2] += backward
             center_z = float(vertices[:, 2].mean())
             vertices[:, 2] = center_z + (vertices[:, 2] - center_z) * target["thickness_scale"]
+            mesh.vertices = vertices
+
+    def _normalize_final_length(
+        self,
+        context: DeformationContext,
+        selection: TempleSelection,
+        target: dict[str, Any],
+    ) -> None:
+        """Correct post-wrap temple reach without scaling the cross-section.
+
+        Wrap and ear-bend rotations can change hinge-to-tip reach after the
+        initial axial extension. Translate vertices progressively along the
+        final distal direction so the farthest point lands on the physical
+        target while hinge-adjacent vertices remain effectively pinned.
+        """
+        temple_mesh = context.mesh(selection.temple_part)
+        temple_vertices = temple_mesh.vertices.copy()
+        distances = np.linalg.norm(temple_vertices - selection.hinge_pivot, axis=1)
+        if not len(distances):
+            return
+        farthest_idx = int(np.argmax(distances))
+        current_length = float(distances[farthest_idx])
+        target_length = mm_to_m(float(target["target_length"]))
+        delta = target_length - current_length
+        if abs(delta) <= 1e-8 or current_length <= 1e-8:
+            return
+
+        direction = temple_vertices[farthest_idx] - selection.hinge_pivot
+        direction_norm = float(np.linalg.norm(direction))
+        if direction_norm <= 1e-8:
+            return
+        direction /= direction_norm
+
+        for part in filter(None, [selection.temple_part, selection.tip_part]):
+            mesh = context.mesh(part)
+            vertices = mesh.vertices.copy()
+            part_distances = np.linalg.norm(vertices - selection.hinge_pivot, axis=1)
+            progress = np.clip(part_distances / current_length, 0.0, 1.0)
+            weights = self.apply_falloff(progress)
+            vertices += direction * (delta * weights)[:, None]
             mesh.vertices = vertices
 
     def _preserve_symmetry(self, context: DeformationContext, selection: TempleSelection) -> None:
