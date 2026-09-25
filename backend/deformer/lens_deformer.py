@@ -131,6 +131,20 @@ class LensDeformer(BaseDeformer):
         local[:, :2] = target_center + directions * mapped_radius[:, None]
         local[~nonzero, :2] = target_center
 
+        # Use the real convex-hull perimeter vertices as deformation controls.
+        # Snapping only those existing boundary vertices to linearly resampled
+        # target-edge positions improves silhouette fidelity without adding
+        # vertices or collapsing dense interior surfaces.
+        for surface_front in (True, False):
+            surface_idx = self._surface_indices(local, front=surface_front)
+            surface_points = local[surface_idx, :2]
+            hull = ConvexHull(surface_points)
+            perimeter_idx = surface_idx[np.asarray(hull.vertices, dtype=np.int64)]
+            template_perimeter = local[perimeter_idx, :2]
+            target_samples = self._resample_boundary_linear(target, len(perimeter_idx))
+            target_samples = self._align_boundary(template_perimeter, target_samples)
+            local[perimeter_idx, :2] = target_samples
+
         # Numerical tolerance only: radial mapping should already be contained.
         candidate_boundary = self._convex_boundary(local[front_idx, :2])
         candidate_polygon = Polygon(candidate_boundary).buffer(0)
@@ -338,6 +352,37 @@ class LensDeformer(BaseDeformer):
         center = points_2d.mean(axis=0)
         angles = np.arctan2(points_2d[:, 1] - center[1], points_2d[:, 0] - center[0])
         return np.argsort(-angles)
+
+    @staticmethod
+    def _resample_boundary_linear(boundary: np.ndarray, count: int) -> np.ndarray:
+        """Sample a closed polygon by arc length without spline overshoot."""
+        points = np.asarray(boundary, dtype=np.float64)
+        if count <= 0:
+            return np.empty((0, 2), dtype=np.float64)
+        if len(points) == count:
+            return points.copy()
+
+        closed = np.vstack([points, points[0]])
+        segments = np.diff(closed, axis=0)
+        lengths = np.linalg.norm(segments, axis=1)
+        perimeter = float(lengths.sum())
+        if perimeter <= 1e-12:
+            return np.repeat(points[:1], count, axis=0)
+
+        cumulative = np.concatenate([[0.0], np.cumsum(lengths)])
+        distances = np.linspace(0.0, perimeter, count, endpoint=False)
+        result = np.empty((count, 2), dtype=np.float64)
+        segment_index = 0
+        for i, distance in enumerate(distances):
+            while (
+                segment_index + 1 < len(cumulative) - 1
+                and distance >= cumulative[segment_index + 1]
+            ):
+                segment_index += 1
+            length = max(lengths[segment_index], 1e-12)
+            t = (distance - cumulative[segment_index]) / length
+            result[i] = closed[segment_index] + segments[segment_index] * t
+        return result
 
     def _resample_boundary(self, boundary: np.ndarray, count: int) -> np.ndarray:
         if len(boundary) == count:
