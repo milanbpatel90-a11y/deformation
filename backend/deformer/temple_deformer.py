@@ -10,6 +10,7 @@ from scipy.spatial.transform import Rotation
 
 from backend.deformer.base_deformer import BaseDeformer
 from backend.deformer.deformation_context import DeformationContext
+from backend.geometry_units import m_to_mm, mm_to_m
 
 
 @dataclass(frozen=True)
@@ -73,7 +74,9 @@ class TempleDeformer(BaseDeformer):
 
     def _compute_target(self, context: DeformationContext, selection: TempleSelection) -> dict[str, Any]:
         constraints = context.descriptor.constraints
-        current_length = self._temple_length(selection.temple_before, selection.hinge_pivot, selection.axis)
+        current_length = m_to_mm(
+            self._temple_length(selection.temple_before, selection.hinge_pivot, selection.axis)
+        )
         requested_length = float(context.measurements.temple_length)
         length_limits = constraints.get("temple_length", {"min": requested_length, "max": requested_length})
         target_length = float(np.clip(requested_length, length_limits["min"], length_limits["max"]))
@@ -137,8 +140,8 @@ class TempleDeformer(BaseDeformer):
             vertices = mesh.vertices.copy()
             progress = self._progress_along_axis(vertices, selection.hinge_pivot, selection.axis)
             bend_zone = self.apply_falloff(np.clip((progress - 0.6) / 0.4, 0.0, 1.0))
-            downward = -bend_zone * np.deg2rad(target["ear_bend"]) * 6.0
-            backward = -bend_zone * np.deg2rad(target["ear_bend"]) * 3.0
+            downward = -bend_zone * np.deg2rad(target["ear_bend"]) * mm_to_m(6.0)
+            backward = -bend_zone * np.deg2rad(target["ear_bend"]) * mm_to_m(3.0)
             vertices[:, 1] += downward
             vertices[:, 2] += backward
             center_z = float(vertices[:, 2].mean())
@@ -162,11 +165,17 @@ class TempleDeformer(BaseDeformer):
 
     def _validate_constraints(self, context: DeformationContext, selection: TempleSelection, target: dict[str, Any]) -> dict[str, Any]:
         temple_after = context.mesh(selection.temple_part).vertices.copy()
-        final_length = self._temple_length(temple_after, selection.hinge_pivot, selection.axis)
-        hinge_error = self._hinge_anchor_error(selection.temple_before, temple_after, selection.hinge_pivot)
+        final_length = m_to_mm(
+            self._temple_length(temple_after, selection.hinge_pivot, selection.axis)
+        )
+        hinge_error = m_to_mm(
+            self._hinge_anchor_error(selection.temple_before, temple_after, selection.hinge_pivot)
+        )
         frame_bounds = context.mesh("Frame").bounds
         temple_bounds = context.mesh(selection.temple_part).bounds
-        frame_clearance = float(np.min(np.abs(temple_bounds[:, 0][:, None] - frame_bounds[:, 0][None, :])))
+        frame_clearance = m_to_mm(
+            float(np.min(np.abs(temple_bounds[:, 0][:, None] - frame_bounds[:, 0][None, :])))
+        )
         return self.validate_constraints(
             {
                 "side": selection.side,
