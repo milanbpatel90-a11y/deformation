@@ -7,7 +7,7 @@ from typing import Any
 
 import numpy as np
 from scipy import interpolate
-from scipy.spatial import ConvexHull, cKDTree
+from scipy.spatial import ConvexHull
 from shapely.geometry import Polygon
 
 from backend.deformer.base_deformer import BaseDeformer
@@ -87,14 +87,12 @@ class LensDeformer(BaseDeformer):
         selection: LensSelection,
         target_boundary: np.ndarray,
     ) -> None:
-        """Fit the complete lens in-plane without collapsing interior vertices.
+        """Radially map the real production lens surface into the rim boundary.
 
-        Production lens meshes contain dense front/back surfaces, not only edge
-        loops. The previous implementation classified whole surfaces and wrote a
-        boundary sample into every selected vertex, which collapsed interior
-        topology onto the perimeter. Derive an affine fit from the actual
-        projected source boundary, then apply that same in-plane transform to
-        every vertex. Normal coordinates are restored exactly afterwards.
+        Every vertex keeps its angular direction and normalized radial position
+        within the source lens. Only the in-plane radius is changed. This
+        preserves dense interior topology instead of replacing surface vertices
+        with perimeter samples.
         """
         lens_mesh = context.mesh(selection.lens_part)
         vertices = np.asarray(lens_mesh.vertices, dtype=np.float64).copy()
@@ -105,47 +103,79 @@ class LensDeformer(BaseDeformer):
         source_boundary = self._convex_boundary(local[front_idx, :2])
         target = self._convex_boundary(target_boundary)
 
-        source_min = source_boundary.min(axis=0)
-        source_max = source_boundary.max(axis=0)
-        target_min = target.min(axis=0)
-        target_max = target.max(axis=0)
-
-        source_extent = source_max - source_min
-        target_extent = target_max - target_min
-        if np.any(source_extent <= 1e-9) or np.any(target_extent <= 1e-9):
-            raise ValueError(f"Degenerate lens/rim boundary for {selection.lens_part}")
-
-        source_center = (source_min + source_max) * 0.5
-        target_center = (target_min + target_max) * 0.5
-        scale = target_extent / source_extent
-
-        local[:, :2] = target_center + (local[:, :2] - source_center) * scale
-
-        # A bounding-box fit preserves the production source silhouette, but a
-        # non-rectangular source can still protrude through a convex target at
-        # corners. Find the largest uniform in-plane factor that keeps the
-        # projected lens inside the target polygon. This is geometry-driven,
-        # not a fixed shrink percentage.
+        source_polygon = Polygon(source_boundary).buffer(0)
         target_polygon = Polygon(target).buffer(0)
-        if target_polygon.is_empty:
-            raise ValueError(f"Invalid target lens polygon for {selection.lens_part}")
+        if source_polygon.is_empty or target_polygon.is_empty:
+            raise ValueError(f"Invalid lens/rim polygon for {selection.lens_part}")
 
-        def projected_polygon(factor: float) -> Polygon:
-            candidate = target_center + (local[:, :2] - target_center) * factor
-            boundary = self._convex_boundary(candidate[front_idx])
-            return Polygon(boundary).buffer(0)
+        source_center = np.asarray(source_polygon.centroid.coords[0], dtype=np.float64)
+        target_center = np.asarray(target_polygon.centroid.coords[0], dtype=np.float64)
 
-        if not target_polygon.covers(projected_polygon(1.0)):
+        relative = local[:, :2] - source_center
+        distance = np.linalg.norm(relative, axis=1)
+        directions = np.zeros_like(relative)
+        nonzero = distance > 1e-12
+        directions[nonzero] = relative[nonzero] / distance[nonzero, None]
+        directions[~nonzero] = np.array([1.0, 0.0])
+
+        source_radius = self._ray_radii(source_boundary, source_center, directions)
+        target_radius = self._ray_radii(target, target_center, directions)
+        fraction = np.divide(
+            distance,
+            source_radius,
+            out=np.zeros_like(distance),
+            where=source_radius > 1e-12,
+        )
+
+        mapped_radius = fraction * target_radius
+        local[:, :2] = target_center + directions * mapped_radius[:, None]
+        local[~nonzero, :2] = target_center
+
+        # Numerical tolerance only: radial mapping should already be contained.
+        candidate_boundary = self._convex_boundary(local[front_idx, :2])
+        candidate_polygon = Polygon(candidate_boundary).buffer(0)
+        if not target_polygon.buffer(1e-10).covers(candidate_polygon):
             lo, hi = 0.0, 1.0
-            for _ in range(32):
+            for _ in range(40):
                 mid = (lo + hi) * 0.5
-                if target_polygon.covers(projected_polygon(mid)):
+                candidate = target_center + (local[:, :2] - target_center) * mid
+                poly = Polygon(self._convex_boundary(candidate[front_idx])).buffer(0)
+                if target_polygon.buffer(1e-10).covers(poly):
                     lo = mid
                 else:
                     hi = mid
             local[:, :2] = target_center + (local[:, :2] - target_center) * lo
 
         lens_mesh.vertices = self._from_local(local, origin, basis)
+
+    @staticmethod
+    def _ray_radii(
+        boundary: np.ndarray,
+        center: np.ndarray,
+        directions: np.ndarray,
+    ) -> np.ndarray:
+        """Return convex-polygon ray intersection radius for each direction."""
+        points = np.asarray(boundary, dtype=np.float64)
+        edges = np.roll(points, -1, axis=0) - points
+        q = points - np.asarray(center, dtype=np.float64)
+        cross_q_e = q[:, 0] * edges[:, 1] - q[:, 1] * edges[:, 0]
+
+        radii = np.empty(len(directions), dtype=np.float64)
+        for index, direction in enumerate(np.asarray(directions, dtype=np.float64)):
+            denom = direction[0] * edges[:, 1] - direction[1] * edges[:, 0]
+            valid_denom = np.abs(denom) > 1e-12
+            t = np.full(len(edges), np.inf, dtype=np.float64)
+            u = np.full(len(edges), np.inf, dtype=np.float64)
+            t[valid_denom] = cross_q_e[valid_denom] / denom[valid_denom]
+            cross_q_d = q[:, 0] * direction[1] - q[:, 1] * direction[0]
+            u[valid_denom] = cross_q_d[valid_denom] / denom[valid_denom]
+            valid = valid_denom & (t >= -1e-12) & (u >= -1e-12) & (u <= 1.0 + 1e-12)
+            hits = t[valid]
+            hits = hits[np.isfinite(hits) & (hits >= 0.0)]
+            if len(hits) == 0:
+                raise ValueError("Ray did not intersect convex lens boundary")
+            radii[index] = float(np.min(hits))
+        return radii
 
     def _preserve_uvs(self, context: DeformationContext, selection: LensSelection) -> None:
         lens_mesh = context.mesh(selection.lens_part)
@@ -206,21 +236,12 @@ class LensDeformer(BaseDeformer):
         lens_boundary = self._convex_boundary(lens_local[front_idx, :2])
         target_boundary = self._convex_boundary(target_boundary)
 
-        # Compare shapes geometrically rather than by arbitrary loop start
-        # indices. Ordered correspondence produced false 10+ mm errors for
-        # otherwise close production contours.
-        lens_tree = cKDTree(lens_boundary)
-        target_tree = cKDTree(target_boundary)
-        lens_to_target, _ = target_tree.query(lens_boundary, k=1)
-        target_to_lens, _ = lens_tree.query(target_boundary, k=1)
+        # Measure continuous boundary-to-boundary distance. Point-to-point
+        # nearest-neighbour metrics over sparse polygon vertices overstate error
+        # because they ignore the intervening line segments.
+        target_polygon = Polygon(target_boundary).buffer(0)
         fit_error = m_to_mm(
-            float(
-                0.5
-                * (
-                    np.mean(lens_to_target)
-                    + np.mean(target_to_lens)
-                )
-            )
+            float(lens_polygon_boundary.shape[0] and Polygon(lens_polygon_boundary).boundary.hausdorff_distance(target_polygon.boundary))
         )
 
         rim_boundary = self._convex_boundary(rim_local[:, :2])
