@@ -142,7 +142,7 @@ class LensDeformer(BaseDeformer):
             perimeter_idx = surface_idx[np.asarray(hull.vertices, dtype=np.int64)]
             template_perimeter = local[perimeter_idx, :2]
             target_samples = self._resample_boundary_linear(target, len(perimeter_idx))
-            target_samples = self._align_boundary(template_perimeter, target_samples)
+            target_samples = self._align_boundary_exact(template_perimeter, target_samples)
             local[perimeter_idx, :2] = target_samples
 
         # Numerical tolerance only: radial mapping should already be contained.
@@ -398,6 +398,29 @@ class LensDeformer(BaseDeformer):
         spline_y = interpolate.make_interp_spline(t, closed[:, 1], k=k)
         sample_t = np.linspace(0.0, 1.0, count + 1)[:-1]
         return np.column_stack([spline_x(sample_t), spline_y(sample_t)])
+
+    @staticmethod
+    def _align_boundary_exact(
+        template_points: np.ndarray,
+        target_points: np.ndarray,
+    ) -> np.ndarray:
+        """Find the exact best cyclic/reversed correspondence for a perimeter."""
+        n = len(template_points)
+        if n == 0 or len(target_points) != n:
+            return target_points
+
+        best = target_points
+        best_score = float("inf")
+        for candidate in (target_points, target_points[::-1]):
+            for shift in range(n):
+                rolled = np.roll(candidate, shift, axis=0)
+                score = float(
+                    np.mean(np.linalg.norm(template_points - rolled, axis=1))
+                )
+                if score < best_score:
+                    best_score = score
+                    best = rolled
+        return best
 
     @staticmethod
     def _align_boundary(template_points: np.ndarray, target_points: np.ndarray) -> np.ndarray:
