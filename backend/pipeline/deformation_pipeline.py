@@ -17,6 +17,7 @@ from backend.materials.pbr import apply_materials
 from backend.measurement.extractor import MeasurementExtractor
 from backend.models import ExportMetadata, FrameMaterial, FrameShape, Measurements, PipelineReport, StyleClassification
 from backend.segmentation.segmenter import GlassesSegmenter
+from backend.scene_utils import load_world_baked_scene
 from backend.template_library.loader import TemplateLibrary
 from backend.template_matching import FeatureExtractor, TemplateMatcher
 from backend.deformer.descriptor_loader import DescriptorLoader
@@ -178,7 +179,7 @@ class DeformationPipeline:
         template_info = match.best.template
         template_name = template_info.name
 
-        scene = trimesh.load(template_info.glb_path, force="scene")
+        scene = load_world_baked_scene(template_info.glb_path)
         descriptor = self.descriptor_loader.load(
             template_name,
             measurements=measurements,
@@ -316,7 +317,7 @@ class DeformationPipeline:
 
         s6 = report.add("Template Deformation")
         t = s6.start()
-        scene = trimesh.load(template_info.glb_path, force="scene")
+        scene = load_world_baked_scene(template_info.glb_path)
         descriptor = self.descriptor_loader.load(template_name, measurements=measurements, template_info=template_info)
         self._inject_aliases_into_scene(scene, descriptor)
         ctx = DeformationContext(
@@ -545,7 +546,7 @@ class DeformationPipeline:
 
         s3 = report.add("Template Deformation")
         t = s3.start()
-        scene = trimesh.load(template_info.glb_path, force="scene")
+        scene = load_world_baked_scene(template_info.glb_path)
         descriptor = self.descriptor_loader.load(
             template_name,
             measurements=fused_measurements,
