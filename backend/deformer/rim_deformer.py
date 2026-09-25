@@ -8,6 +8,7 @@ import numpy as np
 from scipy import interpolate
 
 from backend.deformer.base_deformer import BaseDeformer
+from backend.geometry_units import m_to_mm, mm_to_m
 from backend.deformer.deformation_context import DeformationContext
 from backend.models import LensContour
 
@@ -62,10 +63,10 @@ class RimDeformer(BaseDeformer):
             results.append(
                 RimSideResult(
                     side=side,
-                    width_before=round(float(bounds_before[0]), 3),
-                    width_after=round(float(bounds_after[0]), 3),
-                    height_before=round(float(bounds_before[1]), 3),
-                    height_after=round(float(bounds_after[1]), 3),
+                    width_before=round(m_to_mm(bounds_before[0]), 3),
+                    width_after=round(m_to_mm(bounds_after[0]), 3),
+                    height_before=round(m_to_mm(bounds_before[1]), 3),
+                    height_after=round(m_to_mm(bounds_after[1]), 3),
                     contour_points=len(target_contour),
                 )
             )
@@ -158,21 +159,23 @@ class RimDeformer(BaseDeformer):
         local_y = np.clip(local_y, 0.0, 1.0)
 
         measured = context.measurements
-        center_x = (-1.0 if side == "left" else 1.0) * (measured.bridge_width * 0.5 + measured.lens_width * 0.5)
+        center_x = (-1.0 if side == "left" else 1.0) * mm_to_m(
+            measured.bridge_width * 0.5 + measured.lens_width * 0.5
+        )
         center_y = 0.0
-        width = measured.lens_width
-        height = measured.lens_height
+        width = mm_to_m(measured.lens_width)
+        height = mm_to_m(measured.lens_height)
 
-        x_mm = center_x + (local_x - 0.5) * width
-        y_mm = center_y + (0.5 - local_y) * height
+        x_m = center_x + (local_x - 0.5) * width
+        y_m = center_y + (0.5 - local_y) * height
 
-        contour = np.column_stack([x_mm, y_mm])
+        contour = np.column_stack([x_m, y_m])
         return self._normalize_contour_orientation(contour, side)
 
     def _fallback_contour(self, context: DeformationContext, side: str) -> np.ndarray:
         plane = context.descriptor.lens_planes[side]
-        width = context.measurements.lens_width
-        height = context.measurements.lens_height
+        width = mm_to_m(context.measurements.lens_width)
+        height = mm_to_m(context.measurements.lens_height)
         cx, cy = plane.origin[0], plane.origin[1]
         base = np.array(
             [
@@ -287,7 +290,7 @@ class RimDeformer(BaseDeformer):
         target_thickness: float,
     ) -> float:
         existing = float(np.mean(vertices[front_indices, 2] - vertices[back_indices, 2]))
-        return float(np.clip(target_thickness, 0.8, 6.0)) if np.isfinite(target_thickness) else existing
+        return mm_to_m(np.clip(target_thickness, 0.8, 6.0)) if np.isfinite(target_thickness) else existing
 
     @staticmethod
     def _propagate_to_frame(frame_mesh, original_rim_vertices: np.ndarray, deformed_rim_vertices: np.ndarray) -> None:
@@ -315,15 +318,16 @@ class RimDeformer(BaseDeformer):
         soft_rim = original_rim_vertices[no_exact_mask]
         soft_deltas = deltas[no_exact_mask]
 
-        # Query neighbours within 12 mm
-        neighbours = tree.query_ball_point(soft_rim, r=12.0)
+        # Query neighbours within 12 mm (geometry is meters).
+        falloff_radius = mm_to_m(12.0)
+        neighbours = tree.query_ball_point(soft_rim, r=falloff_radius)
         weighted = np.zeros_like(frame_vertices)
         for r_idx, f_indices in enumerate(neighbours):
             if not f_indices:
                 continue
             f_idx = np.array(f_indices, dtype=np.int32)
             dist = np.linalg.norm(frame_vertices[f_idx] - soft_rim[r_idx], axis=1)
-            influence = BaseDeformer.apply_falloff(np.clip(1.0 - dist / 12.0, 0.0, 1.0))
+            influence = BaseDeformer.apply_falloff(np.clip(1.0 - dist / falloff_radius, 0.0, 1.0))
             weighted[f_idx] += soft_deltas[r_idx] * influence[:, None] * 0.2
 
         frame_vertices += weighted
