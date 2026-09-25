@@ -48,7 +48,7 @@ class GLBExporter:
         anchors = self._compute_anchors(scene, measurements)
         payload = self._canonical_payload(metadata, anchors)
 
-        export_scene = self._prepare_export_scene(scene)
+        export_scene = self._prepare_export_scene(scene, anchors)
         exported = export_scene.export(file_type="glb")
         if not isinstance(exported, (bytes, bytearray)):
             raise RuntimeError("trimesh did not return GLB bytes")
@@ -57,8 +57,19 @@ class GLBExporter:
         self._rewrite_glb_metadata(output_path, payload)
         return output_path
 
-    def _prepare_export_scene(self, scene: trimesh.Scene) -> trimesh.Scene:
-        """Remove runtime-only proxy geometry while preserving real components."""
+    def _prepare_export_scene(
+        self,
+        scene: trimesh.Scene,
+        anchors: dict[str, list[float]],
+    ) -> trimesh.Scene:
+        """Prepare export hierarchy while preserving world-space geometry.
+
+        Runtime deformation operates on world-space meter vertices. For glTF
+        articulation, temple vertices are converted to hinge-local coordinates
+        and their mesh nodes receive a translation equal to the authoritative
+        hinge anchor. This changes only the representation, not world-space
+        positions.
+        """
         export_scene = deepcopy(scene)
         runtime = export_scene.metadata.get("deformation_runtime", {})
         frame_proxy = runtime.get("frame_proxy") if isinstance(runtime, dict) else None
@@ -92,6 +103,27 @@ class GLBExporter:
             raise ValueError("Left and right lenses must be independent mesh objects")
         if export_scene.geometry["LeftTemple"] is export_scene.geometry["RightTemple"]:
             raise ValueError("Left and right temples must be independent mesh objects")
+
+        for temple_name, anchor_name in (
+            ("LeftTemple", "LeftHinge"),
+            ("RightTemple", "RightHinge"),
+        ):
+            pivot = np.asarray(anchors[anchor_name], dtype=np.float64)
+            if pivot.shape != (3,) or not np.isfinite(pivot).all():
+                raise ValueError(f"Invalid {anchor_name} anchor for temple pivot")
+
+            temple = export_scene.geometry[temple_name].copy()
+            temple.apply_translation(-pivot)
+            export_scene.delete_geometry(temple_name)
+
+            transform = np.eye(4, dtype=np.float64)
+            transform[:3, 3] = pivot
+            export_scene.add_geometry(
+                temple,
+                geom_name=temple_name,
+                node_name=temple_name,
+                transform=transform,
+            )
 
         return export_scene
 
