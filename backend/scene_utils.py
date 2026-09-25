@@ -9,15 +9,8 @@ import numpy as np
 import trimesh
 
 
-def load_world_baked_scene(path: str | Path) -> trimesh.Scene:
-    """Load a GLB and bake each geometry node's world transform into vertices.
-
-    The returned scene has identity node transforms and meter-space geometry.
-    Source files are never modified. Geometry names are preserved when each
-    source geometry has a single instance, which is the production-template
-    convention used by the deformation descriptors.
-    """
-    source = trimesh.load(str(path), force="scene", process=False)
+def bake_scene_world(source: trimesh.Scene) -> trimesh.Scene:
+    """Bake a scene's node world transforms into copied geometry vertices."""
     if not isinstance(source, trimesh.Scene):
         source = trimesh.Scene(source)
 
@@ -48,3 +41,9 @@ def load_world_baked_scene(path: str | Path) -> trimesh.Scene:
         raise ValueError(f"No mesh geometry found in scene: {path}")
 
     return result
+
+
+def load_world_baked_scene(path: str | Path) -> trimesh.Scene:
+    """Load a GLB and return an identity-transform, world-space meter scene."""
+    source = trimesh.load(str(path), force="scene", process=False)
+    return bake_scene_world(source)
