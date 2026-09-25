@@ -53,8 +53,13 @@ class QualityChecker:
         sym_score = self._score_symmetry(context)
         report.breakdown["symmetry"] = sym_score
 
+        # Physical dimension fit score
+        fit_score, fit_warnings = self._score_fit(context)
+        report.breakdown["fit"] = fit_score
+        report.warnings.extend(fit_warnings)
+
         # Aggregate score
-        weights = {"geometry": 0.3, "constraints": 0.4, "symmetry": 0.3}
+        weights = {"geometry": 0.2, "constraints": 0.25, "symmetry": 0.2, "fit": 0.35}
         total = sum(score * weights[k] for k, score in report.breakdown.items())
         report.score = total
         
@@ -90,6 +95,57 @@ class QualityChecker:
         score -= len(corrections) * 5.0
         
         return max(0.0, score)
+
+    def _score_fit(self, context: DeformationContext) -> tuple[float, list[str]]:
+        m = context.measurements
+        bridge = context.mesh("Bridge")
+        left_rim = context.mesh("LeftRim")
+        right_rim = context.mesh("RightRim")
+        left_lens = context.mesh("LeftLens")
+        right_lens = context.mesh("RightLens")
+
+        measured = {
+            "frame_width": m_to_mm(
+                max(right_rim.bounds[1, 0], bridge.bounds[1, 0])
+                - min(left_rim.bounds[0, 0], bridge.bounds[0, 0])
+            ),
+            "bridge_width": m_to_mm(bridge.extents[0]),
+            "left_lens_width": m_to_mm(left_lens.extents[0]),
+            "right_lens_width": m_to_mm(right_lens.extents[0]),
+            "left_lens_height": m_to_mm(left_lens.extents[1]),
+            "right_lens_height": m_to_mm(right_lens.extents[1]),
+        }
+        targets = {
+            "frame_width": m.frame_width,
+            "bridge_width": m.bridge_width,
+            "left_lens_width": m.lens_width,
+            "right_lens_width": m.lens_width,
+            "left_lens_height": m.lens_height,
+            "right_lens_height": m.lens_height,
+        }
+        tolerances = {
+            "frame_width": 2.0,
+            "bridge_width": 1.5,
+            "left_lens_width": 1.5,
+            "right_lens_width": 1.5,
+            "left_lens_height": 1.5,
+            "right_lens_height": 1.5,
+        }
+
+        penalties = []
+        warnings: list[str] = []
+        for key, target in targets.items():
+            error = abs(float(measured[key]) - float(target))
+            tolerance = tolerances[key]
+            penalties.append(min(error / tolerance, 2.0))
+            if error > tolerance:
+                warnings.append(
+                    f"{key} physical fit error {error:.2f} mm exceeds {tolerance:.2f} mm tolerance."
+                )
+
+        average_penalty = float(np.mean(penalties)) if penalties else 0.0
+        score = max(0.0, 100.0 - average_penalty * 50.0)
+        return score, warnings
 
     def _score_symmetry(self, context: DeformationContext) -> float:
         score = 100.0
