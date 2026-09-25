@@ -218,7 +218,37 @@ def stage_trace(measurements: Measurements) -> list[dict]:
 
     trace = [{"stage": "resolved_components", "temples": _topology_snapshot(context)}]
     for stage in deformer.stages:
-        if isinstance(stage, RimDeformer):
+        if getattr(stage, "stage_name", "") == "temple_deformation":
+            frame_before = context.mesh("Frame").vertices.copy()
+            results = []
+            for side in ("left", "right"):
+                selection = stage._collect_temples(context, side)
+                target = stage._compute_target(context, selection)
+                trace.append({
+                    "stage": f"temple_{side}_start",
+                    "temples": _topology_snapshot(context),
+                    "target": target,
+                })
+                stage._rotate_about_hinge(context, selection, target)
+                trace.append({"stage": f"temple_{side}_rotate", "temples": _topology_snapshot(context)})
+                stage._extend_length(context, selection, target)
+                trace.append({"stage": f"temple_{side}_extend", "temples": _topology_snapshot(context)})
+                stage._apply_wrap(context, selection, target)
+                trace.append({"stage": f"temple_{side}_wrap", "temples": _topology_snapshot(context)})
+                stage._apply_ear_bend(context, selection, target)
+                trace.append({"stage": f"temple_{side}_ear_bend", "temples": _topology_snapshot(context)})
+                stage._preserve_symmetry(context, selection)
+                trace.append({"stage": f"temple_{side}_preserve_symmetry", "temples": _topology_snapshot(context)})
+                results.append(stage._validate_constraints(context, selection, target))
+            frame_after = context.mesh("Frame").vertices.copy()
+            frame_max_displacement = float(np.linalg.norm(frame_after - frame_before, axis=1).max())
+            context = stage.update_context(
+                context,
+                applied=True,
+                frame_max_displacement=round(frame_max_displacement, 6),
+                sides=results,
+            )
+        elif isinstance(stage, RimDeformer):
             context = stage.apply(context, None)
         else:
             context = stage.apply(context)
