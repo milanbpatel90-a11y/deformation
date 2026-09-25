@@ -68,7 +68,7 @@ Source GLB and basis files are never rewritten. The audit records and rechecks S
 - 11-case production dimensional sweep: completed; readiness result false, exit code 2 by design. This is a failed production gate, not a passing regression disguised as success.
 - Viewer module syntax check and git diff whitespace check executed. Live image-upload API also returned HTTP 200 with detected metal/rose colour, a measured 0.135 m frame, and quality.passed=false for the unresolved dimensional mismatch.
 
-The one skipped test is an existing legacy-template integration case; it is not substituted for the real Gold Template tests.
+The one skipped test is the pre-existing `tests/test_template_loading.py::TestDeformationEngineIntegration::test_deformation_with_template` placeholder, whose reason is "Awaiting Gold Template extraction and engine integration". It targets a nonexistent `DeformationEngine` API. The real Gold Template tests run separately through the actual `BasisDeformer` and API; no real-asset validation is replaced by this placeholder.
 
 ## G. Visual and deformation validation
 
