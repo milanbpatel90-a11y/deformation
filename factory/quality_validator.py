@@ -106,16 +106,30 @@ def _check_normals() -> tuple[bool, str | None]:
 
 
 def _check_uvs() -> tuple[bool, str | None]:
-    """At least one UV layer should exist on renderable meshes."""
+    """Require UVs only for meshes whose materials actually use image textures."""
     require_blender()
     missing = []
     for obj in bpy.data.objects:
         if obj.type != "MESH":
             continue
-        if not obj.data.uv_layers:
+
+        requires_uv = False
+        for slot in obj.material_slots:
+            material = slot.material
+            if material is None or not material.use_nodes or material.node_tree is None:
+                continue
+            for node in material.node_tree.nodes:
+                if node.type == "TEX_IMAGE" and getattr(node, "image", None) is not None:
+                    requires_uv = True
+                    break
+            if requires_uv:
+                break
+
+        if requires_uv and not obj.data.uv_layers:
             missing.append(obj.name)
+
     if missing:
-        return False, f"Missing UVs: {', '.join(missing)}"
+        return False, f"Textured meshes missing UVs: {', '.join(missing)}"
     return True, None
 
 
@@ -192,9 +206,12 @@ def _check_self_intersections() -> tuple[bool, str | None]:
 
 
 def _check_mesh_count(classification: ComponentClassification) -> tuple[bool, str | None]:
-    """Must have at least Frame + 2 Temples + 2 Lenses (or Rims) + Bridge."""
+    """Require independently classified production deformation components."""
     required = {
         PartKind.FRAME: 1,
+        PartKind.BRIDGE: 1,
+        PartKind.LEFT_LENS: 1,
+        PartKind.RIGHT_LENS: 1,
         PartKind.LEFT_TEMPLE: 1,
         PartKind.RIGHT_TEMPLE: 1,
     }
@@ -202,8 +219,16 @@ def _check_mesh_count(classification: ComponentClassification) -> tuple[bool, st
     for kind, count in required.items():
         if len(classification.by_kind(kind)) < count:
             missing.append(kind.value)
+
+    # Full/semi-rim production templates also require independently
+    # classified left/right rims. Rimless authoring may intentionally omit them.
+    left_rims = classification.by_kind(PartKind.LEFT_RIM)
+    right_rims = classification.by_kind(PartKind.RIGHT_RIM)
+    if bool(left_rims) != bool(right_rims):
+        missing.append("paired_rims")
+
     if missing:
-        return False, f"Missing required parts: {', '.join(missing)}"
+        return False, f"Missing required independent parts: {', '.join(missing)}"
     return True, None
 
 
