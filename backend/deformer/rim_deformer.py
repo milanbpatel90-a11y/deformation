@@ -289,7 +289,9 @@ class RimDeformer(BaseDeformer):
         back_indices: np.ndarray,
         target_thickness: float,
     ) -> float:
-        existing = float(np.mean(vertices[front_indices, 2] - vertices[back_indices, 2]))
+        existing = float(
+            np.mean(vertices[front_indices, 2]) - np.mean(vertices[back_indices, 2])
+        )
         return mm_to_m(np.clip(target_thickness, 0.8, 6.0)) if np.isfinite(target_thickness) else existing
 
     @staticmethod
