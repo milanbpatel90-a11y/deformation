@@ -301,7 +301,7 @@ def run_stage9(
 ) -> ValidationResult:
     """Run all quality checks and compute aggregate score.
 
-    Weights (sum to 100):
+    Checks are normalized to a final 0–100 score:
       orientation         10
       scale               10
       normals             10
@@ -333,14 +333,17 @@ def run_stage9(
 
     results: dict[str, bool] = {}
     issues: list[str] = []
-    score = 0
+    earned_weight = 0
+    total_weight = sum(weight for _name, _result, weight in checks)
 
     for name, (ok, msg), weight in checks:
         results[name] = ok
         if ok:
-            score += weight
+            earned_weight += weight
         else:
             issues.append(f"{name}: {msg or 'failed'}")
+
+    score = int(round((earned_weight / max(total_weight, 1)) * 100.0))
 
     report = QualityReport(
         score=score,
@@ -355,5 +358,5 @@ def run_stage9(
         passed=score >= 70,
     )
 
-    LOG.info("Stage 9 done — score=%d passed=%s issues=%d", score, report.passed, len(issues))
+    LOG.info("Stage 9 done — score=%d/100 passed=%s issues=%d", score, report.passed, len(issues))
     return ValidationResult(report=report, passed=report.passed)
