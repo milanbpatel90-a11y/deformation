@@ -27,8 +27,10 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install             fastapi python-multipart pydantic numpy scipy pillow             opencv-python-headless trimesh pygltflib shapely networkx             requests python-dotenv pytest
 
-      - name: Install glTF and Three.js validators
-        run: npm install --no-save --package-lock=false gltf-validator@2.0.0-dev.3.10 three@0.162.0
+      - name: Install glTF, Three.js, and browser validators
+        run: |
+          npm install --no-save --package-lock=false gltf-validator@2.0.0-dev.3.10 three@0.162.0 playwright@1.55.0
+          npx playwright install --with-deps chromium
 
       - name: Run existing deformation tests
         run: pytest -q tests
@@ -44,6 +46,13 @@ jobs:
         run: |
           node scripts/validate_exported_glbs.mjs             output/production_regression/identity_135mm.glb             output/production_regression/target_145mm.glb
 
+      - name: Browser smoke test actual project viewer
+        run: |
+          python -m http.server 8765 --bind 127.0.0.1 > /tmp/deformation-viewer.log 2>&1 &
+          SERVER_PID=$!
+          trap 'kill $SERVER_PID' EXIT
+          node scripts/validate_viewer_smoke.mjs             "http://127.0.0.1:8765/viewer/?glb=/output/production_regression/identity_135mm.glb"             output/production_regression/viewer_identity.png
+
       - name: Upload production audit
         if: always()
         uses: actions/upload-artifact@v4
@@ -54,4 +63,5 @@ jobs:
             output/production_regression/regression.json
             output/production_regression/*.glb
             output/production_regression/*.metadata.json
+            output/production_regression/*.png
           if-no-files-found: warn
