@@ -207,8 +207,18 @@ class TempleDeformer(BaseDeformer):
 
     @staticmethod
     def _temple_length(vertices: np.ndarray, pivot: np.ndarray, axis: np.ndarray) -> float:
-        axial = np.dot(vertices - pivot, axis)
-        return float(np.max(axial) - np.min(axial))
+        """Measure physical temple reach from the hinge in world-space meters.
+
+        A projection onto the template axis is not invariant under intentional
+        wrap/ear-bend rotations and can report a much shorter arm even when
+        geometry length is preserved. The production regression and exported
+        measurements use hinge-to-farthest-vertex distance, so the component
+        stage uses the same definition.
+        """
+        del axis  # retained in the signature for API compatibility
+        if len(vertices) == 0:
+            return 0.0
+        return float(np.max(np.linalg.norm(vertices - pivot, axis=1)))
 
     @staticmethod
     def _hinge_anchor_error(before: np.ndarray, after: np.ndarray, hinge_pivot: np.ndarray) -> float:
