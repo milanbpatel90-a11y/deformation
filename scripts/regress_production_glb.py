@@ -101,9 +101,21 @@ def scene_metrics(path: Path) -> dict:
             measured[f"{key}_lens_width_mm"] = float(scene.geometry[lens_name].extents[0] * 1000.0)
             measured[f"{key}_lens_height_mm"] = float(scene.geometry[lens_name].extents[1] * 1000.0)
         if temple_name in scene.geometry:
-            measured[f"{key}_temple_length_mm"] = float(
-                np.max(scene.geometry[temple_name].extents) * 1000.0
-            )
+            temple_vertices = np.asarray(scene.geometry[temple_name].vertices, dtype=np.float64)
+            frame_parts = [
+                np.asarray(scene.geometry[name].vertices, dtype=np.float64)
+                for name in ("Bridge", "LeftRim", "RightRim")
+                if name in scene.geometry
+            ]
+            if frame_parts and len(temple_vertices):
+                from scipy.spatial import cKDTree
+                frame_vertices = np.vstack(frame_parts)
+                tree = cKDTree(frame_vertices)
+                distances, _ = tree.query(temple_vertices, k=1)
+                hinge = temple_vertices[int(np.argmin(distances))]
+                measured[f"{key}_temple_length_mm"] = float(
+                    np.max(np.linalg.norm(temple_vertices - hinge, axis=1)) * 1000.0
+                )
 
     return {
         "file_size_bytes": path.stat().st_size,
