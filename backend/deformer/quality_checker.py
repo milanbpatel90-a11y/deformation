@@ -72,7 +72,64 @@ class QualityChecker:
             report.passed = False
             report.warnings.append("Critical constraint failures detected.")
 
+        topology_warnings = self._topology_warnings(context)
+        if topology_warnings:
+            report.passed = False
+            report.warnings.extend(topology_warnings)
+
         return report
+
+    @staticmethod
+    def _topology_warnings(context: DeformationContext) -> list[str]:
+        """Return critical geometry integrity problems after deformation."""
+        warnings: list[str] = []
+        required = (
+            "Bridge",
+            "LeftRim",
+            "RightRim",
+            "LeftLens",
+            "RightLens",
+            "LeftTemple",
+            "RightTemple",
+        )
+        for name in required:
+            try:
+                mesh = context.mesh(name)
+            except KeyError:
+                warnings.append(f"{name} is missing from the final deformation context.")
+                continue
+
+            vertices = np.asarray(mesh.vertices, dtype=np.float64)
+            faces = np.asarray(mesh.faces, dtype=np.int64)
+            if not np.isfinite(vertices).all():
+                warnings.append(f"{name} contains non-finite vertex positions.")
+
+            if len(faces):
+                triangles = vertices[faces]
+                double_area = np.linalg.norm(
+                    np.cross(
+                        triangles[:, 1] - triangles[:, 0],
+                        triangles[:, 2] - triangles[:, 0],
+                    ),
+                    axis=1,
+                )
+                degenerate_count = int(np.count_nonzero(double_area <= 1e-12))
+                if degenerate_count:
+                    warnings.append(
+                        f"{name} contains {degenerate_count} degenerate triangles after deformation."
+                    )
+
+            normals = np.asarray(mesh.vertex_normals, dtype=np.float64)
+            if len(normals):
+                lengths = np.linalg.norm(normals, axis=1)
+                if not np.isfinite(normals).all():
+                    warnings.append(f"{name} contains non-finite vertex normals.")
+                zero_count = int(np.count_nonzero(lengths <= 1e-12))
+                if zero_count:
+                    warnings.append(
+                        f"{name} contains {zero_count} zero-length vertex normals."
+                    )
+        return warnings
 
     def _score_geometry(self, context: DeformationContext) -> float:
         score = 100.0
