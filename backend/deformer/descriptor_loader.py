@@ -9,6 +9,7 @@ from typing import Any
 
 import numpy as np
 import trimesh
+from scipy.spatial import cKDTree
 
 from backend.geometry_units import m_to_mm
 from backend.models import Measurements, TemplateDimensions, TemplateInfo
@@ -242,8 +243,9 @@ class DescriptorLoader:
             empty_name = payload.get("empty")
             pivot = empty_anchors.get(str(empty_name)) if empty_name else None
             if pivot is None:
-                pivot = self._infer_hinge_pivot(geom, side)
-            axis = self._infer_temple_axis(geom, pivot, side)
+                frame_geom = self._get_geometry(geometry, "Frame", f"hinge_frame:{side}")
+                pivot = self._infer_hinge_pivot(geom, frame_geom)
+            axis = self._infer_temple_axis(geom, pivot)
             hinges[side] = HingeDescriptor(
                 part=part,
                 pivot=pivot,
@@ -550,24 +552,33 @@ class DescriptorLoader:
         return geom
 
     @staticmethod
-    def _infer_hinge_pivot(mesh: trimesh.Trimesh, side: str) -> np.ndarray:
-        bounds = mesh.bounds
-        center = mesh.vertices.mean(axis=0)
-        pivot_x = bounds[1][0] if side == "left" else bounds[0][0]
-        return np.array([pivot_x, center[1], center[2]], dtype=np.float64)
+    def _infer_hinge_pivot(temple: trimesh.Trimesh, frame: trimesh.Trimesh) -> np.ndarray:
+        """Return the temple vertex closest to the actual frame surface."""
+        temple_vertices = temple.vertices.astype(np.float64)
+        frame_vertices = frame.vertices.astype(np.float64)
+        if len(temple_vertices) == 0 or len(frame_vertices) == 0:
+            raise ValueError("Cannot infer hinge pivot from empty geometry")
+        tree = cKDTree(frame_vertices)
+        distances, _ = tree.query(temple_vertices, k=1)
+        return temple_vertices[int(np.argmin(distances))].copy()
 
     @staticmethod
-    def _infer_temple_axis(mesh: trimesh.Trimesh, pivot: np.ndarray, side: str) -> np.ndarray:
+    def _infer_temple_axis(mesh: trimesh.Trimesh, pivot: np.ndarray) -> np.ndarray:
+        """Infer the temple length axis from the hinge toward the farthest tip."""
         verts = mesh.vertices.astype(np.float64)
-        if side == "left":
-            candidates = verts[np.argsort(verts[:, 0])[: max(3, len(verts) // 10)]]
-        else:
-            candidates = verts[np.argsort(verts[:, 0])[-max(3, len(verts) // 10) :]]
-        direction = candidates.mean(axis=0) - pivot
+        if len(verts) == 0:
+            raise ValueError("Cannot infer temple axis from empty geometry")
+        distances = np.linalg.norm(verts - pivot, axis=1)
+        farthest = verts[int(np.argmax(distances))]
+        direction = farthest - pivot
         norm = float(np.linalg.norm(direction))
-        if norm < 1e-6:
-            direction = np.array([-1.0, 0.0, 0.0] if side == "left" else [1.0, 0.0, 0.0], dtype=np.float64)
-            norm = 1.0
+        if norm < 1e-9:
+            centered = verts - verts.mean(axis=0)
+            _, _, vh = np.linalg.svd(centered, full_matrices=False)
+            direction = vh[0]
+            norm = float(np.linalg.norm(direction))
+        if norm < 1e-9:
+            raise ValueError("Cannot infer a stable temple axis")
         return direction / norm
 
     @staticmethod
