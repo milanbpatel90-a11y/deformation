@@ -95,30 +95,30 @@ class DeformationPipeline:
                 scene.geometry[logical_name] = scene.geometry[actual_name]
 
     @staticmethod
-    def _template_safety_warnings(descriptor) -> list[str]:
-        """Return structural warnings that make a template unsafe for automatic approval."""
-        raw_aliases = descriptor.raw.get("mesh_aliases", {})
-        if not isinstance(raw_aliases, dict):
-            return []
-
-        reverse: dict[str, list[str]] = {}
-        for logical, actual in raw_aliases.items():
-            if isinstance(logical, str) and isinstance(actual, str):
-                reverse.setdefault(actual, []).append(logical)
-
-        critical = {
+    def _runtime_safety_warnings(scene: trimesh.Scene) -> list[str]:
+        """Validate the resolved deformation scene rather than raw source aliases."""
+        required = {
             "Frame", "Bridge", "LeftRim", "RightRim",
             "LeftLens", "RightLens", "LeftTemple", "RightTemple",
         }
+        missing = sorted(required.difference(scene.geometry))
         warnings: list[str] = []
-        for actual, logical_names in reverse.items():
-            overlapping = sorted(critical.intersection(logical_names))
-            if len(overlapping) > 1:
-                warnings.append(
-                    "Template maps multiple deformable logical parts "
-                    f"({', '.join(overlapping)}) to the same mesh '{actual}'. "
-                    "Use a template with separated production geometry."
-                )
+        if missing:
+            warnings.append("Runtime scene is missing logical components: " + ", ".join(missing))
+            return warnings
+
+        if scene.geometry["LeftLens"] is scene.geometry["RightLens"]:
+            warnings.append("Left and right lenses still reference the same mesh object.")
+        if scene.geometry["LeftTemple"] is scene.geometry["RightTemple"]:
+            warnings.append("Left and right temples still reference the same mesh object.")
+
+        for name in required:
+            mesh = scene.geometry[name]
+            if not isinstance(mesh, trimesh.Trimesh) or len(mesh.vertices) == 0:
+                warnings.append(f"Logical component {name} has no usable mesh geometry.")
+                continue
+            if not np.isfinite(mesh.vertices).all():
+                warnings.append(f"Logical component {name} contains non-finite positions.")
         return warnings
 
     @staticmethod
@@ -197,7 +197,7 @@ class DeformationPipeline:
         deformed_ctx, quality = deformer.deform(ctx)
         deformed = deformed_ctx.template_scene
 
-        template_warnings = self._template_safety_warnings(descriptor)
+        template_warnings = self._runtime_safety_warnings(deformed)
         if template_warnings:
             quality.passed = False
             quality.warnings.extend(template_warnings)
@@ -562,7 +562,7 @@ class DeformationPipeline:
         deformed_ctx, quality = deformer.deform(ctx, front_lens_contour)
         deformed = deformed_ctx.template_scene
 
-        template_warnings = self._template_safety_warnings(descriptor)
+        template_warnings = self._runtime_safety_warnings(deformed)
         if template_warnings:
             quality.passed = False
             quality.warnings.extend(template_warnings)
