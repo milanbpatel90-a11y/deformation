@@ -15,7 +15,7 @@ from backend.deformer.engine import MeshDeformer
 from backend.exporter.glb_exporter import GLBExporter
 from backend.materials.pbr import apply_materials
 from backend.measurement.extractor import MeasurementExtractor
-from backend.models import ExportMetadata, Measurements, PipelineReport, StyleClassification
+from backend.models import ExportMetadata, FrameMaterial, FrameShape, Measurements, PipelineReport, StyleClassification
 from backend.segmentation.segmenter import GlassesSegmenter
 from backend.template_library.loader import TemplateLibrary
 from backend.template_matching import FeatureExtractor, TemplateMatcher
@@ -403,6 +403,8 @@ class DeformationPipeline:
         color: str = "#d9a7a2",
         template_override: str | None = None,
         manual_measurements: Measurements | None = None,
+        shape_override: FrameShape | None = None,
+        material_override: FrameMaterial | None = None,
     ) -> dict:
         """
         Run the full pipeline on 4-5 images.
@@ -464,8 +466,34 @@ class DeformationPipeline:
         )
         front_image = front_record["image"]
         front_mask = front_record["mask"]
-        front_style = front_record["style"]
+        front_style = front_record["style"].model_copy(deep=True)
         front_lens_contour = front_record["lens_contour"]
+
+        if shape_override is not None:
+            front_style.shape = shape_override
+        if material_override is not None:
+            front_style.material = material_override
+        if shape_override is not None or material_override is not None:
+            aspect_ratio = (
+                manual_measurements.lens_width / max(manual_measurements.lens_height, 1e-6)
+                if manual_measurements is not None
+                else front_style.lens_aspect_ratio
+            )
+            front_style.nose_pads = (
+                front_style.material in {FrameMaterial.METAL, FrameMaterial.TITANIUM}
+                and front_style.shape != FrameShape.RIMLESS
+            )
+            front_style.frame_family = self.classifier._infer_family(front_style.shape, aspect_ratio)
+            front_style.rim_type = self.classifier._infer_rim_type(front_style.shape, front_style.material)
+            front_style.bridge_type = self.classifier._infer_bridge_type(
+                front_style.shape,
+                front_style.material,
+                front_style.nose_pads,
+                aspect_ratio,
+            )
+            front_style.lens_aspect_ratio = aspect_ratio
+            front_style.metrics = dict(front_style.metrics)
+            front_style.metrics["manual_style_override"] = True
 
         if manual_measurements is not None:
             fused_measurements = manual_measurements.model_copy(deep=True)
