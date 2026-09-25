@@ -186,8 +186,9 @@ def detect_unit_scale(bbox_size: tuple[float, float, float]) -> float:
 
     Blender's default unit is the metre. GLB files written in centimetres will
     report widths of 13.5 instead of 0.135; we therefore probe the largest
-    extent. Returns 1.0 (already metres) for plausible eyewear widths in
-    0.05–0.5 m, 100 for centimetre-scale, 1000 for millimetre-scale.
+    extent. The return value is the multiplier that converts the imported
+    coordinates to metres: 1.0 for metres, 0.01 for centimetres, and 0.001
+    for millimetres.
     """
 
     width = max(bbox_size)
@@ -201,6 +202,44 @@ def detect_unit_scale(bbox_size: tuple[float, float, float]) -> float:
     if width < 50.0:
         return 0.01  # input is centimetres
     return 0.001  # input is millimetres
+
+
+def validate_no_scale_outlier_meshes(objects, *, ratio_limit: float = 4.0) -> None:
+    """Reject helper/outlier meshes that would corrupt global unit/width detection.
+
+    This is deliberately a validation gate, not an automatic deletion step.
+    Production geometry must be explicitly authored/selected rather than guessed.
+    """
+    require_blender()
+    extents: list[tuple[str, float]] = []
+    for obj in objects:
+        if obj.type != "MESH":
+            continue
+        bbox_min, bbox_max = _scene_bbox_world([obj])
+        size = tuple(bbox_max[i] - bbox_min[i] for i in range(3))
+        largest = max(size)
+        if largest > 0:
+            extents.append((obj.name, largest))
+
+    if len(extents) < 2:
+        return
+
+    values = sorted(value for _name, value in extents)
+    median = values[len(values) // 2]
+    if median <= 0:
+        return
+
+    outliers = [
+        (name, value)
+        for name, value in extents
+        if value > 0.5 and value > median * ratio_limit
+    ]
+    if outliers:
+        details = ", ".join(f"{name}={value:.3f}m" for name, value in outliers)
+        raise RuntimeError(
+            "Scale outlier mesh(es) would corrupt eyewear normalization: "
+            f"{details}. Remove or explicitly exclude helper geometry before template build."
+        )
 
 
 def center_at_origin(objects) -> None:
@@ -288,6 +327,8 @@ def run_stage1(
     meshes = collect_mesh_objects()
     if not meshes:
         raise RuntimeError(f"No mesh objects after import of {glb_path}")
+
+    validate_no_scale_outlier_meshes(meshes)
 
     # First pass: detect unit, scale if needed, then centre.
     bbox_min, bbox_max = _scene_bbox_world(meshes)
