@@ -9,6 +9,7 @@ import numpy as np
 
 from backend.deformer.base_deformer import BaseDeformer
 from backend.deformer.deformation_context import DeformationContext
+from backend.geometry_units import m_to_mm, mm_to_m
 
 
 @dataclass(frozen=True)
@@ -49,8 +50,8 @@ class BridgeDeformer(BaseDeformer):
         frame = frame_mesh[0]
         bridge_bounds = bridge.bounds.astype(np.float64)
         frame_vertices = frame.vertices.copy()
-        x_margin = self.falloff_margin
-        y_margin = self.falloff_margin * 1.2
+        x_margin = mm_to_m(self.falloff_margin)
+        y_margin = mm_to_m(self.falloff_margin * 1.2)
 
         frame_indices = np.where(
             (frame_vertices[:, 0] >= bridge_bounds[0, 0] - x_margin)
@@ -74,40 +75,52 @@ class BridgeDeformer(BaseDeformer):
     ) -> dict[str, Any]:
         constraints = context.descriptor.constraints
         current_bounds = selection.bridge_bounds
-        current_width = float(current_bounds[1, 0] - current_bounds[0, 0])
-        current_height = float(current_bounds[1, 1] - current_bounds[0, 1])
-        current_depth = float(current_bounds[1, 2] - current_bounds[0, 2])
+        current_width_m = float(current_bounds[1, 0] - current_bounds[0, 0])
+        current_height_m = float(current_bounds[1, 1] - current_bounds[0, 1])
+        current_depth_m = float(current_bounds[1, 2] - current_bounds[0, 2])
 
-        requested_width = float(context.measurements.bridge_width)
-        width_limits = constraints.get("bridge_width", {"min": requested_width, "max": requested_width})
-        clamped_width = float(np.clip(requested_width, width_limits["min"], width_limits["max"]))
+        requested_width_mm = float(context.measurements.bridge_width)
+        width_limits = constraints.get(
+            "bridge_width",
+            {"min": requested_width_mm, "max": requested_width_mm},
+        )
+        clamped_width_mm = float(
+            np.clip(requested_width_mm, width_limits["min"], width_limits["max"])
+        )
 
         bridge_payload = context.descriptor.raw.get("bridge", {})
-        bridge_type = str(bridge_payload.get("type") or context.descriptor.deformation_regions.get("bridge", {}).get("type", "straight"))
+        bridge_type = str(
+            bridge_payload.get("type")
+            or context.descriptor.deformation_regions.get("bridge", {}).get("type", "straight")
+        )
 
-        lens_clearance = self._max_safe_bridge_width(context, current_bounds)
-        target_width = min(clamped_width, lens_clearance)
+        lens_clearance_m = self._max_safe_bridge_width(context, current_bounds)
+        target_width_m = min(mm_to_m(clamped_width_mm), lens_clearance_m)
 
-        target_height = current_height
+        target_height_m = current_height_m
         if bridge_type == "keyhole":
-            target_height *= 1.1
+            target_height_m *= 1.1
         elif bridge_type == "saddle":
-            target_height *= 1.05
-        target_height = float(np.clip(target_height, current_height * 0.8, current_height * 1.25))
+            target_height_m *= 1.05
+        target_height_m = float(
+            np.clip(target_height_m, current_height_m * 0.8, current_height_m * 1.25)
+        )
 
-        min_thickness = float(constraints.get("minimum_wall_thickness", 0.8))
-        target_depth = float(max(current_depth, min_thickness))
+        min_thickness_m = mm_to_m(
+            float(constraints.get("minimum_wall_thickness", 0.8))
+        )
+        target_depth_m = float(max(current_depth_m, min_thickness_m))
 
         return {
-            "current_width": current_width,
-            "target_width": target_width,
-            "requested_width": requested_width,
-            "current_height": current_height,
-            "target_height": target_height,
-            "target_depth": target_depth,
+            "current_width_m": current_width_m,
+            "target_width_m": target_width_m,
+            "requested_width_mm": requested_width_mm,
+            "current_height_m": current_height_m,
+            "target_height_m": target_height_m,
+            "target_depth_m": target_depth_m,
             "bridge_type": bridge_type,
-            "width_clamped": not np.isclose(requested_width, target_width),
-            "lens_clearance_limit": lens_clearance,
+            "width_clamped": not np.isclose(requested_width_mm, m_to_mm(target_width_m)),
+            "lens_clearance_m": lens_clearance_m,
         }
 
     def _deform_bridge(
@@ -120,9 +133,9 @@ class BridgeDeformer(BaseDeformer):
         vertices = bridge_mesh.vertices.copy()
         center = vertices.mean(axis=0)
 
-        width_scale = target["target_width"] / max(target["current_width"], 1e-6)
-        height_scale = target["target_height"] / max(target["current_height"], 1e-6)
-        depth_scale = target["target_depth"] / max(selection.bridge_bounds[1, 2] - selection.bridge_bounds[0, 2], 1e-6)
+        width_scale = target["target_width_m"] / max(target["current_width_m"], 1e-6)
+        height_scale = target["target_height_m"] / max(target["current_height_m"], 1e-6)
+        depth_scale = target["target_depth_m"] / max(selection.bridge_bounds[1, 2] - selection.bridge_bounds[0, 2], 1e-6)
 
         weights_x, weights_y = self._compute_target_profile(vertices, selection, target)
 
@@ -170,9 +183,9 @@ class BridgeDeformer(BaseDeformer):
         original_bridge = selection.original_bridge
 
         bridge_center = original_bridge.mean(axis=0)
-        target_half_width = target["target_width"] * 0.5
-        current_half_width = target["current_width"] * 0.5
-        half_height = max(target["current_height"] * 0.5, 1e-6)
+        target_half_width = target["target_width_m"] * 0.5
+        current_half_width = target["current_width_m"] * 0.5
+        half_height = max(target["current_height_m"] * 0.5, 1e-6)
 
         # 1. Use cKDTree to build lookup maps once and find exact matching indices
         from scipy.spatial import cKDTree
@@ -184,9 +197,9 @@ class BridgeDeformer(BaseDeformer):
         influence = self._bridge_region_influence(frame_vertices, bridge_center, current_half_width, half_height)
         
         # Scale factors
-        width_scale = target["target_width"] / max(target["current_width"], 1e-6)
-        height_scale = target["target_height"] / max(target["current_height"], 1e-6)
-        depth_scale = target["target_depth"] / max(selection.bridge_bounds[1, 2] - selection.bridge_bounds[0, 2], 1e-6)
+        width_scale = target["target_width_m"] / max(target["current_width_m"], 1e-6)
+        height_scale = target["target_height_m"] / max(target["current_height_m"], 1e-6)
+        depth_scale = target["target_depth_m"] / max(selection.bridge_bounds[1, 2] - selection.bridge_bounds[0, 2], 1e-6)
 
         # Scale frame vertices relative to bridge center, weighted by influence
         frame_vertices[:, 0] += (frame_vertices[:, 0] - bridge_center[0]) * (width_scale - 1.0) * influence
@@ -232,9 +245,9 @@ class BridgeDeformer(BaseDeformer):
     ) -> dict[str, Any]:
         bridge_mesh = context.vertex_group_meshes("bridge")[0]
         updated_bounds = bridge_mesh.bounds.astype(np.float64)
-        final_width = float(updated_bounds[1, 0] - updated_bounds[0, 0])
-        final_height = float(updated_bounds[1, 1] - updated_bounds[0, 1])
-        final_depth = float(updated_bounds[1, 2] - updated_bounds[0, 2])
+        final_width_m = float(updated_bounds[1, 0] - updated_bounds[0, 0])
+        final_height_m = float(updated_bounds[1, 1] - updated_bounds[0, 1])
+        final_depth_m = float(updated_bounds[1, 2] - updated_bounds[0, 2])
 
         rims_unchanged = self._max_external_displacement(
             context,
@@ -246,35 +259,43 @@ class BridgeDeformer(BaseDeformer):
             },
         )
 
-        lens_clearance = self._lens_clearance_after(context)
-        valid = lens_clearance >= 0.0 and final_depth >= context.descriptor.constraints.get("minimum_wall_thickness", 0.8)
+        lens_clearance_m = self._lens_clearance_after(context)
+        min_wall_m = mm_to_m(
+            float(context.descriptor.constraints.get("minimum_wall_thickness", 0.8))
+        )
+        valid = lens_clearance_m >= 0.0 and final_depth_m >= min_wall_m
 
         return {
             "applied": True,
             "bridge_type": target["bridge_type"],
-            "requested_width": round(target["requested_width"], 4),
-            "target_width": round(target["target_width"], 4),
-            "final_width": round(final_width, 4),
-            "final_height": round(final_height, 4),
-            "final_depth": round(final_depth, 4),
+            "requested_width": round(target["requested_width_mm"], 4),
+            "target_width": round(m_to_mm(target["target_width_m"]), 4),
+            "final_width": round(m_to_mm(final_width_m), 4),
+            "final_height": round(m_to_mm(final_height_m), 4),
+            "final_depth": round(m_to_mm(final_depth_m), 4),
             "width_clamped": target["width_clamped"],
-            "lens_clearance": round(lens_clearance, 4),
-            "external_displacement": {key: round(value, 6) for key, value in rims_unchanged.items()},
-            "symmetry_error": round(float(abs(updated_bounds[0, 0] + updated_bounds[1, 0])), 6),
+            "lens_clearance": round(m_to_mm(lens_clearance_m), 4),
+            "external_displacement": {
+                key: round(m_to_mm(value), 6) for key, value in rims_unchanged.items()
+            },
+            "symmetry_error": round(
+                m_to_mm(abs(updated_bounds[0, 0] + updated_bounds[1, 0])), 6
+            ),
             "valid": bool(valid),
         }
 
     def _max_safe_bridge_width(self, context: DeformationContext, bridge_bounds: np.ndarray) -> float:
         left_lens = context.vertex_group_meshes("left_lens")
         right_lens = context.vertex_group_meshes("right_lens")
+        limits = context.descriptor.constraints["bridge_width"]
         if not left_lens or not right_lens:
-            return context.descriptor.constraints["bridge_width"]["max"]
+            return mm_to_m(limits["max"])
         left_max_x = float(left_lens[0].bounds[1, 0])
         right_min_x = float(right_lens[0].bounds[0, 0])
-        gap = max(right_min_x - left_max_x, 0.0)
-        if gap <= 0:
-            return context.descriptor.constraints["bridge_width"]["min"]
-        return min(gap * 0.95, context.descriptor.constraints["bridge_width"]["max"])
+        gap_m = max(right_min_x - left_max_x, 0.0)
+        if gap_m <= 0:
+            return mm_to_m(limits["min"])
+        return min(gap_m * 0.95, mm_to_m(limits["max"]))
 
     def _lens_clearance_after(self, context: DeformationContext) -> float:
         left_lens = context.vertex_group_meshes("left_lens")
@@ -313,7 +334,8 @@ class BridgeDeformer(BaseDeformer):
         half_width: float,
         half_height: float,
     ) -> np.ndarray:
-        x_norm = np.abs(vertices[:, 0] - center[0]) / max(half_width + self.falloff_margin, 1e-6)
-        y_norm = np.abs(vertices[:, 1] - center[1]) / max(half_height + self.falloff_margin, 1e-6)
+        margin_m = mm_to_m(self.falloff_margin)
+        x_norm = np.abs(vertices[:, 0] - center[0]) / max(half_width + margin_m, 1e-6)
+        y_norm = np.abs(vertices[:, 1] - center[1]) / max(half_height + margin_m, 1e-6)
         radial = np.sqrt(x_norm * x_norm + y_norm * y_norm)
         return self.apply_falloff(np.clip(1.0 - radial, 0.0, 1.0))
