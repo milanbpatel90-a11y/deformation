@@ -9,6 +9,7 @@ import numpy as np
 
 from backend.deformer.base_deformer import BaseDeformer
 from backend.deformer.deformation_context import DeformationContext
+from backend.geometry_units import m_to_mm, mm_to_m
 
 
 @dataclass(frozen=True)
@@ -199,11 +200,11 @@ class ConstraintSolver(BaseDeformer):
     def _solve_global_constraints(self, context: DeformationContext, report: ConstraintReport) -> dict[str, Any]:
         frame = context.mesh("Frame")
         bounds = frame.bounds.astype(float)
-        width = float(bounds[1, 0] - bounds[0, 0])
-        height = float(bounds[1, 1] - bounds[0, 1])
+        width = m_to_mm(float(bounds[1, 0] - bounds[0, 0]))
+        height = m_to_mm(float(bounds[1, 1] - bounds[0, 1]))
         target_width = float(context.measurements.frame_width)
         width_error = abs(width - target_width)
-        symmetry_error = abs(bounds[0, 0] + bounds[1, 0])
+        symmetry_error = m_to_mm(abs(bounds[0, 0] + bounds[1, 0]))
 
         if symmetry_error > 1.0:
             report.warnings.append(
@@ -231,7 +232,8 @@ class ConstraintSolver(BaseDeformer):
         if current_width <= 1e-6:
             return
         center_x = float(vertices[:, 0].mean())
-        scale = target_width / current_width
+        target_width_m = mm_to_m(target_width)
+        scale = target_width_m / current_width
         vertices[:, 0] = center_x + (vertices[:, 0] - center_x) * scale
         bridge_mesh.vertices = vertices
 
@@ -243,9 +245,10 @@ class ConstraintSolver(BaseDeformer):
         back_z = float(np.min(vertices[:, 2]))
         current_thickness = front_z - back_z
         if current_thickness <= 1e-6:
-            vertices[:, 2] = np.where(vertices[:, 2] >= front_z, front_z, front_z - target_thickness)
+            target_thickness_m = mm_to_m(target_thickness)
+            vertices[:, 2] = np.where(vertices[:, 2] >= front_z, front_z, front_z - target_thickness_m)
         else:
-            scale = target_thickness / current_thickness
+            scale = mm_to_m(target_thickness) / current_thickness
             center_z = (front_z + back_z) * 0.5
             vertices[:, 2] = center_z + (vertices[:, 2] - center_z) * scale
         mesh.vertices = vertices
