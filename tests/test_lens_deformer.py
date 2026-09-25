@@ -36,13 +36,29 @@ class LensDeformerTests(unittest.TestCase):
         left_before = ctx.mesh("LeftLens").vertices.copy()
         right_before = ctx.mesh("RightLens").vertices.copy()
         ctx = RimDeformer(contour_strength=0.8).apply(ctx, None)
-        ctx = LensDeformer().apply(ctx)
+        deformer = LensDeformer()
+        selections = {
+            "LeftLens": deformer._collect_lenses(ctx, "left"),
+            "RightLens": deformer._collect_lenses(ctx, "right"),
+        }
+        ctx = deformer.apply(ctx)
+
+        def local_thickness(vertices, selection):
+            origin, basis = deformer._lens_basis(selection)
+            local = deformer._to_local(vertices, origin, basis)
+            front_idx = deformer._surface_indices(local, front=True)
+            back_idx = deformer._surface_indices(local, front=False)
+            return float(
+                np.mean(local[front_idx, 2]) - np.mean(local[back_idx, 2])
+            )
+
         for part, before in (("LeftLens", left_before), ("RightLens", right_before)):
             after = ctx.mesh(part).vertices.copy()
             self.assertEqual(len(after), len(before))
-            thickness_before = float(np.max(before[:, 2]) - np.min(before[:, 2]))
-            thickness_after = float(np.max(after[:, 2]) - np.min(after[:, 2]))
-            self.assertAlmostEqual(thickness_after, thickness_before, places=5)
+            selection = selections[part]
+            thickness_before = local_thickness(before, selection)
+            thickness_after = local_thickness(after, selection)
+            self.assertAlmostEqual(thickness_after, thickness_before, places=6)
         self.assertTrue(ctx.metadata["lens_deformation"]["applied"])
         for side in ctx.metadata["lens_deformation"]["sides"]:
             self.assertTrue(side["valid"], side)
