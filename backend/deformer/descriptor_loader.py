@@ -59,11 +59,11 @@ class TemplateDescriptor:
     hinges: dict[str, HingeDescriptor]
     rim_loops: dict[str, RimLoopDescriptor]
     bridge_center: np.ndarray
-    empty_anchors: dict[str, np.ndarray]
     temple_axis: dict[str, np.ndarray]
     lens_planes: dict[str, LensPlaneDescriptor]
     vertex_groups: dict[str, list[str]]
     constraints: dict[str, Any]
+    empty_anchors: dict[str, np.ndarray] = field(default_factory=dict)
     symmetry_plane: dict[str, Any] = field(default_factory=dict)
     deformation_regions: dict[str, Any] = field(default_factory=dict)
     raw: dict[str, Any] = field(default_factory=dict)
