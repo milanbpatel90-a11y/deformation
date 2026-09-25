@@ -14,6 +14,7 @@ import numpy as np
 import pytest
 import trimesh
 
+from backend.geometry_units import mm_to_m
 from backend.deformer.symmetry import (
     SymmetrySolver,
     SymmetryReport,
@@ -31,8 +32,8 @@ def _box_mesh(
     extents: tuple[float, float, float] = (10.0, 6.0, 2.0),
 ) -> trimesh.Trimesh:
     """Return a simple box mesh centred at *center*."""
-    box = trimesh.creation.box(extents=extents)
-    box.vertices += np.array(center, dtype=np.float64)
+    box = trimesh.creation.box(extents=mm_to_m(np.array(extents, dtype=np.float64)))
+    box.vertices += mm_to_m(np.array(center, dtype=np.float64))
     return box
 
 
@@ -131,7 +132,7 @@ class TestSymmetrySolverMeasureError:
             left.vertices.astype(np.float64),
             right.vertices.astype(np.float64),
         )
-        assert left_errors.max() > 0.1, "Expected nonzero error for asymmetric mesh"
+        assert left_errors.max() > mm_to_m(0.1), "Expected nonzero error for asymmetric mesh"
 
 
 class TestSymmetrySolverPerfectSymmetry:
@@ -246,7 +247,7 @@ class TestSymmetrySolverVertexCountStability:
     def test_vertex_counts_unchanged(self):
         left, right = _make_symmetric_pair()
         # Introduce an asymmetry
-        right.vertices[0, 0] += 1.0
+        right.vertices[0, 0] += mm_to_m(1.0)
 
         n_left_before = len(left.vertices)
         n_right_before = len(right.vertices)
