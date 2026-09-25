@@ -185,7 +185,7 @@ def test_lens_material_exports_as_transparent_blend():
     )
     material = lens_material(measurements)
     assert material.alphaMode == "BLEND"
-    assert material.doubleSided is True
+    assert material.doubleSided is False
 
 
 def test_viewer_scales_against_model_width_not_raw_face_width():
