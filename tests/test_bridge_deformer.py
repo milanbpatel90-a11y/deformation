@@ -7,6 +7,7 @@ import trimesh
 from backend.deformer.bridge_deformer import BridgeDeformer
 from backend.deformer.deformation_context import DeformationContext
 from backend.deformer.descriptor_loader import DescriptorLoader
+from backend.geometry_units import m_to_mm
 from backend.models import FrameMaterial, FrameShape, Measurements
 from backend.template_library.loader import TemplateLibrary
 
@@ -36,9 +37,16 @@ class BridgeDeformerTests(unittest.TestCase):
         right_rim_before = ctx.mesh("RightRim").vertices.copy()
         left_temple_before = ctx.mesh("LeftTemple").vertices.copy()
         bridge_before = ctx.mesh("Bridge").bounds.copy()
+        before_width_mm = m_to_mm(float(bridge_before[1, 0] - bridge_before[0, 0]))
+        target_width_mm = float(ctx.measurements.bridge_width)
         ctx = BridgeDeformer().apply(ctx)
         bridge_after = ctx.mesh("Bridge").bounds.copy()
-        self.assertGreater(float(bridge_after[1, 0] - bridge_after[0, 0]), float(bridge_before[1, 0] - bridge_before[0, 0]))
+        after_width_mm = m_to_mm(float(bridge_after[1, 0] - bridge_after[0, 0]))
+        self.assertLess(
+            abs(after_width_mm - target_width_mm),
+            abs(before_width_mm - target_width_mm),
+            (before_width_mm, after_width_mm, target_width_mm),
+        )
         self.assertAlmostEqual(float(np.linalg.norm(ctx.mesh("LeftRim").vertices - left_rim_before, axis=1).max()), 0.0, places=6)
         self.assertAlmostEqual(float(np.linalg.norm(ctx.mesh("RightRim").vertices - right_rim_before, axis=1).max()), 0.0, places=6)
         self.assertAlmostEqual(float(np.linalg.norm(ctx.mesh("LeftTemple").vertices - left_temple_before, axis=1).max()), 0.0, places=6)
