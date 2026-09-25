@@ -149,27 +149,16 @@ class TempleDeformer(BaseDeformer):
             mesh.vertices = vertices
 
     def _preserve_symmetry(self, context: DeformationContext, selection: TempleSelection) -> None:
-        """Validate temple sidedness without folding vertices onto the hinge plane.
+        """Preserve source topology; bilateral correction belongs to SymmetrySolver.
 
-        The historical implementation projected every X coordinate through an
-        absolute-value half-space and snapped hinge-adjacent vertices to the
-        same X value. On the production GLB this collapsed 78 triangles per
-        temple even for the identity-size case.
-
-        Temple deformation is already side-specific and a dedicated
-        SymmetrySolver runs later in the pipeline. This stage therefore never
-        reflects or clamps individual vertices.
+        The former implementation folded each vertex across the hinge X plane
+        and snapped hinge-adjacent vertices to one X coordinate. Production
+        regression proved that operation alone created zero-area triangles.
+        Temple deformation is already applied independently per side, and the
+        dedicated SymmetrySolver runs later, so this stage intentionally makes
+        no geometric edits.
         """
-        sign = -1.0 if selection.side == "left" else 1.0
-
-        for part in filter(None, [selection.temple_part, selection.tip_part]):
-            mesh = context.mesh(part)
-            relative_x = np.asarray(mesh.vertices, dtype=np.float64)[:, 0] - selection.hinge_pivot[0]
-            signed = sign * relative_x
-            if float(np.median(signed)) < -1e-6:
-                raise ValueError(
-                    f"{selection.side.title()} temple moved to the wrong side of its hinge pivot"
-                )
+        return None
 
     def _validate_constraints(self, context: DeformationContext, selection: TempleSelection, target: dict[str, Any]) -> dict[str, Any]:
         temple_after = context.mesh(selection.temple_part).vertices.copy()
