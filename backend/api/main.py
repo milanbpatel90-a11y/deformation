@@ -62,7 +62,7 @@ def root():
         "service": "defirmation",
         "version": "1.0.0",
         "endpoints": {
-            "deform_from_images": "POST /api/deform",
+            "deform_from_images_legacy": "POST /api/deform (deprecated)",
             "deform_from_multi_view": "POST /api/deform/multi-view",
             "deform_from_measurements": "POST /api/deform/measurements",
             "templates": "GET /api/templates",
@@ -85,7 +85,7 @@ def list_templates():
     }
 
 
-@app.post("/api/deform")
+@app.post("/api/deform", deprecated=True)
 async def deform_from_images(
     front: UploadFile = File(..., description="Front product image"),
     side: UploadFile | None = File(None, description="Side product image"),
@@ -251,7 +251,7 @@ async def deform_from_measurements(
     nose_pads: bool = Form(True),
     temple_curve_angle: float = Form(28),
     color: str = Form("#d9a7a2"),
-    template: str = Form("rectangle_plastic"),
+    template: str | None = Form(None),
 ):
     """Deform template directly from known measurements (no images required)."""
     try:
