@@ -190,11 +190,41 @@ def build_geometric_metal_scene() -> trimesh.Scene:
 
 
 def main() -> None:
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        description="Generate the legacy procedural development template."
+    )
+    parser.add_argument(
+        "--output",
+        type=Path,
+        default=TEMPLATES_DIR / "geometric_metal.glb",
+        help="Output GLB path. The production template is protected from overwrite by default.",
+    )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Allow overwriting an existing output file. Never use this on a production template without a backup.",
+    )
+    args = parser.parse_args()
+
     TEMPLATES_DIR.mkdir(parents=True, exist_ok=True)
+    glb_path = args.output.resolve()
+    protected = (TEMPLATES_DIR / "geometric_metal.glb").resolve()
+    if glb_path.exists() and not args.force:
+        raise SystemExit(
+            f"Refusing to overwrite existing GLB: {glb_path}. "
+            "This script generates a procedural development asset; pass --force only if replacement is intentional."
+        )
+    if glb_path == protected and protected.exists() and not args.force:
+        raise SystemExit(
+            "Refusing to overwrite templates/geometric_metal.glb, which is the production audit asset."
+        )
+
     scene = build_geometric_metal_scene()
-    glb_path = TEMPLATES_DIR / "geometric_metal.glb"
+    glb_path.parent.mkdir(parents=True, exist_ok=True)
     scene.export(str(glb_path), file_type="glb")
-    print(f"Generated: {glb_path}")
+    print(f"Generated development template: {glb_path}")
 
     meta_path = TEMPLATES_DIR / "geometric_metal.json"
     if not meta_path.exists():
