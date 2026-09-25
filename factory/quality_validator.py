@@ -14,10 +14,12 @@ import numpy as np
 try:
     import bpy  # type: ignore
     import bmesh  # type: ignore
+    from mathutils.bvhtree import BVHTree  # type: ignore
     _BLENDER_AVAILABLE = True
 except ImportError:  # pragma: no cover
     bpy = None  # type: ignore[assignment]
     bmesh = None  # type: ignore[assignment]
+    BVHTree = None  # type: ignore[assignment]
     _BLENDER_AVAILABLE = False
 
 from .types import (
@@ -106,16 +108,30 @@ def _check_normals() -> tuple[bool, str | None]:
 
 
 def _check_uvs() -> tuple[bool, str | None]:
-    """At least one UV layer should exist on renderable meshes."""
+    """Require UVs only for meshes whose materials actually use image textures."""
     require_blender()
     missing = []
     for obj in bpy.data.objects:
         if obj.type != "MESH":
             continue
-        if not obj.data.uv_layers:
+
+        requires_uv = False
+        for slot in obj.material_slots:
+            material = slot.material
+            if material is None or not material.use_nodes or material.node_tree is None:
+                continue
+            for node in material.node_tree.nodes:
+                if node.type == "TEX_IMAGE" and getattr(node, "image", None) is not None:
+                    requires_uv = True
+                    break
+            if requires_uv:
+                break
+
+        if requires_uv and not obj.data.uv_layers:
             missing.append(obj.name)
+
     if missing:
-        return False, f"Missing UVs: {', '.join(missing)}"
+        return False, f"Textured meshes missing UVs: {', '.join(missing)}"
     return True, None
 
 
@@ -172,29 +188,54 @@ def _check_manifold() -> tuple[bool, str | None]:
 
 
 def _check_self_intersections() -> tuple[bool, str | None]:
-    """Quick BVH-based self-intersection test per object."""
+    """Conservative BVH self-overlap check for non-adjacent triangle candidates.
+
+    BVH overlap is a broad-phase test, so candidates are reported conservatively
+    rather than silently accepted. Adjacent faces sharing vertices are ignored.
+    """
     require_blender()
     intersected: list[str] = []
+    failures: list[str] = []
+
     for obj in bpy.data.objects:
         if obj.type != "MESH" or len(obj.data.vertices) < 4:
             continue
         try:
-            bvhtree = bmesh.types.BVHTree.FromObject(obj, bpy.context.evaluated_depsgraph_get())
-            hits = bvhtree.overlap(bvhtree)
-            if hits:
-                intersected.append(obj.name)
-        except Exception:
-            # BVH overlap can fail on very thin geometry; treat as pass.
-            pass
+            tree = BVHTree.FromObject(obj, bpy.context.evaluated_depsgraph_get())
+            hits = tree.overlap(tree)
+            polygons = obj.data.polygons
+
+            suspicious = 0
+            for left_index, right_index in hits:
+                if left_index >= right_index:
+                    continue
+                if left_index >= len(polygons) or right_index >= len(polygons):
+                    continue
+                left_vertices = set(polygons[left_index].vertices)
+                right_vertices = set(polygons[right_index].vertices)
+                if left_vertices.intersection(right_vertices):
+                    continue
+                suspicious += 1
+
+            if suspicious:
+                intersected.append(f"{obj.name} ({suspicious} non-adjacent overlap candidates)")
+        except Exception as exc:
+            failures.append(f"{obj.name}: {exc}")
+
+    if failures:
+        return False, "Self-intersection validation failed to execute: " + "; ".join(failures)
     if intersected:
-        return False, f"Self-intersections in: {', '.join(intersected)}"
+        return False, "Potential self-intersections in: " + ", ".join(intersected)
     return True, None
 
 
 def _check_mesh_count(classification: ComponentClassification) -> tuple[bool, str | None]:
-    """Must have at least Frame + 2 Temples + 2 Lenses (or Rims) + Bridge."""
+    """Require independently classified production deformation components."""
     required = {
         PartKind.FRAME: 1,
+        PartKind.BRIDGE: 1,
+        PartKind.LEFT_LENS: 1,
+        PartKind.RIGHT_LENS: 1,
         PartKind.LEFT_TEMPLE: 1,
         PartKind.RIGHT_TEMPLE: 1,
     }
@@ -202,8 +243,16 @@ def _check_mesh_count(classification: ComponentClassification) -> tuple[bool, st
     for kind, count in required.items():
         if len(classification.by_kind(kind)) < count:
             missing.append(kind.value)
+
+    # Full/semi-rim production templates also require independently
+    # classified left/right rims. Rimless authoring may intentionally omit them.
+    left_rims = classification.by_kind(PartKind.LEFT_RIM)
+    right_rims = classification.by_kind(PartKind.RIGHT_RIM)
+    if bool(left_rims) != bool(right_rims):
+        missing.append("paired_rims")
+
     if missing:
-        return False, f"Missing required parts: {', '.join(missing)}"
+        return False, f"Missing required independent parts: {', '.join(missing)}"
     return True, None
 
 
@@ -276,7 +325,7 @@ def run_stage9(
 ) -> ValidationResult:
     """Run all quality checks and compute aggregate score.
 
-    Weights (sum to 100):
+    Checks are normalized to a final 0–100 score:
       orientation         10
       scale               10
       normals             10
@@ -308,14 +357,17 @@ def run_stage9(
 
     results: dict[str, bool] = {}
     issues: list[str] = []
-    score = 0
+    earned_weight = 0
+    total_weight = sum(weight for _name, _result, weight in checks)
 
     for name, (ok, msg), weight in checks:
         results[name] = ok
         if ok:
-            score += weight
+            earned_weight += weight
         else:
             issues.append(f"{name}: {msg or 'failed'}")
+
+    score = int(round((earned_weight / max(total_weight, 1)) * 100.0))
 
     report = QualityReport(
         score=score,
@@ -330,5 +382,5 @@ def run_stage9(
         passed=score >= 70,
     )
 
-    LOG.info("Stage 9 done — score=%d passed=%s issues=%d", score, report.passed, len(issues))
+    LOG.info("Stage 9 done — score=%d/100 passed=%s issues=%d", score, report.passed, len(issues))
     return ValidationResult(report=report, passed=report.passed)

@@ -13,6 +13,7 @@ from PIL import Image
 from backend.classifier.shape_classifier import ShapeClassifier
 from backend.deformer.engine import MeshDeformer
 from backend.exporter.glb_exporter import GLBExporter
+from backend.exporter.glb_validator import validate_glb
 from backend.materials.pbr import apply_materials
 from backend.measurement.extractor import MeasurementExtractor
 from backend.models import ExportMetadata, FrameMaterial, FrameShape, Measurements, PipelineReport, StyleClassification
@@ -178,13 +179,13 @@ class DeformationPipeline:
         template_info = match.best.template
         template_name = template_info.name
 
-        scene = trimesh.load(template_info.glb_path, force="scene")
         descriptor = self.descriptor_loader.load(
             template_name,
             measurements=measurements,
             template_info=template_info,
+            require_independent_parts=True,
         )
-        self._inject_aliases_into_scene(scene, descriptor)
+        scene = self.descriptor_loader.build_deformation_scene(descriptor)
         ctx = DeformationContext(
             template_info=template_info,
             template_scene=scene,
@@ -206,9 +207,15 @@ class DeformationPipeline:
 
         out = Path(output_path)
         self.exporter.export(deformed, out, measurements, template_name)
+        glb_validation = validate_glb(out, measurements)
+        if not glb_validation.passed:
+            raise RuntimeError(
+                "Exported GLB failed production validation: "
+                + "; ".join(glb_validation.errors)
+            )
 
         meta_path = out.with_suffix(".metadata.json")
-        anchors = self.exporter._compute_anchors(deformed, measurements)
+        anchors = self.exporter.compute_anchors_meters(deformed, measurements)
 
         metadata = ExportMetadata(
             shape=measurements.shape.value,
@@ -224,6 +231,7 @@ class DeformationPipeline:
         return {
             "output_glb": str(out),
             "metadata_json": str(meta_path),
+            "glb_validation": glb_validation.to_dict(),
             "measurements": measurements.model_dump(),
             "template": template_name,
             "features": features.model_dump(mode="json"),
@@ -316,9 +324,13 @@ class DeformationPipeline:
 
         s6 = report.add("Template Deformation")
         t = s6.start()
-        scene = trimesh.load(template_info.glb_path, force="scene")
-        descriptor = self.descriptor_loader.load(template_name, measurements=measurements, template_info=template_info)
-        self._inject_aliases_into_scene(scene, descriptor)
+        descriptor = self.descriptor_loader.load(
+            template_name,
+            measurements=measurements,
+            template_info=template_info,
+            require_independent_parts=True,
+        )
+        scene = self.descriptor_loader.build_deformation_scene(descriptor)
         ctx = DeformationContext(
             template_info=template_info,
             template_scene=scene,
@@ -361,8 +373,14 @@ class DeformationPipeline:
         out = Path(output_path)
 
         self.exporter.export(deformed, out, measurements, template_name)
+        glb_validation = validate_glb(out, measurements)
+        if not glb_validation.passed:
+            raise RuntimeError(
+                "Exported GLB failed production validation: "
+                + "; ".join(glb_validation.errors)
+            )
         meta_path = out.with_suffix(".metadata.json")
-        anchors = self.exporter._compute_anchors(deformed, measurements)
+        anchors = self.exporter.compute_anchors_meters(deformed, measurements)
 
         metadata = ExportMetadata(
             shape=measurements.shape.value,
@@ -379,6 +397,7 @@ class DeformationPipeline:
         return {
             "output_glb": str(out),
             "metadata_json": str(meta_path),
+            "glb_validation": glb_validation.to_dict(),
             "measurements": measurements.model_dump(),
             "template": template_name,
             "features": features.model_dump(mode="json"),
@@ -545,13 +564,13 @@ class DeformationPipeline:
 
         s3 = report.add("Template Deformation")
         t = s3.start()
-        scene = trimesh.load(template_info.glb_path, force="scene")
         descriptor = self.descriptor_loader.load(
             template_name,
             measurements=fused_measurements,
             template_info=template_info,
+            require_independent_parts=True,
         )
-        self._inject_aliases_into_scene(scene, descriptor)
+        scene = self.descriptor_loader.build_deformation_scene(descriptor)
         ctx = DeformationContext(
             template_info=template_info,
             template_scene=scene,
@@ -603,16 +622,14 @@ class DeformationPipeline:
         out = Path(output_path)
 
         self.exporter.export(deformed, out, fused_measurements, template_name)
-        if not out.exists() or out.stat().st_size == 0:
-            raise RuntimeError("GLB export completed without a valid output file")
-
-        # Re-open the exported artifact before declaring success.
-        exported_scene = trimesh.load(out, force="scene")
-        if not exported_scene.geometry:
-            raise RuntimeError("Exported GLB contains no geometry")
-
+        glb_validation = validate_glb(out, fused_measurements)
+        if not glb_validation.passed:
+            raise RuntimeError(
+                "Exported GLB failed production validation: "
+                + "; ".join(glb_validation.errors)
+            )
         meta_path = out.with_suffix(".metadata.json")
-        anchors = self.exporter._compute_anchors(deformed, fused_measurements)
+        anchors = self.exporter.compute_anchors_meters(deformed, fused_measurements)
 
         metadata = ExportMetadata(
             shape=fused_measurements.shape.value,
@@ -631,6 +648,7 @@ class DeformationPipeline:
         return {
             "output_glb": str(out),
             "metadata_json": str(meta_path),
+            "glb_validation": glb_validation.to_dict(),
             "measurements": fused_measurements.model_dump(),
             "measurement_source": measurement_source,
             "image_estimates": [

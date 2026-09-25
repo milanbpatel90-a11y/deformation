@@ -186,8 +186,9 @@ def detect_unit_scale(bbox_size: tuple[float, float, float]) -> float:
 
     Blender's default unit is the metre. GLB files written in centimetres will
     report widths of 13.5 instead of 0.135; we therefore probe the largest
-    extent. Returns 1.0 (already metres) for plausible eyewear widths in
-    0.05–0.5 m, 100 for centimetre-scale, 1000 for millimetre-scale.
+    extent. The return value is the multiplier that converts the imported
+    coordinates to metres: 1.0 for metres, 0.01 for centimetres, and 0.001
+    for millimetres.
     """
 
     width = max(bbox_size)
@@ -201,6 +202,44 @@ def detect_unit_scale(bbox_size: tuple[float, float, float]) -> float:
     if width < 50.0:
         return 0.01  # input is centimetres
     return 0.001  # input is millimetres
+
+
+def validate_no_scale_outlier_meshes(objects, *, ratio_limit: float = 4.0) -> None:
+    """Reject helper/outlier meshes that would corrupt global unit/width detection.
+
+    This is deliberately a validation gate, not an automatic deletion step.
+    Production geometry must be explicitly authored/selected rather than guessed.
+    """
+    require_blender()
+    extents: list[tuple[str, float]] = []
+    for obj in objects:
+        if obj.type != "MESH":
+            continue
+        bbox_min, bbox_max = _scene_bbox_world([obj])
+        size = tuple(bbox_max[i] - bbox_min[i] for i in range(3))
+        largest = max(size)
+        if largest > 0:
+            extents.append((obj.name, largest))
+
+    if len(extents) < 2:
+        return
+
+    values = sorted(value for _name, value in extents)
+    median = values[len(values) // 2]
+    if median <= 0:
+        return
+
+    outliers = [
+        (name, value)
+        for name, value in extents
+        if value > 0.5 and value > median * ratio_limit
+    ]
+    if outliers:
+        details = ", ".join(f"{name}={value:.3f}m" for name, value in outliers)
+        raise RuntimeError(
+            "Scale outlier mesh(es) would corrupt eyewear normalization: "
+            f"{details}. Remove or explicitly exclude helper geometry before template build."
+        )
 
 
 def center_at_origin(objects) -> None:
@@ -289,6 +328,8 @@ def run_stage1(
     if not meshes:
         raise RuntimeError(f"No mesh objects after import of {glb_path}")
 
+    validate_no_scale_outlier_meshes(meshes)
+
     # First pass: detect unit, scale if needed, then centre.
     bbox_min, bbox_max = _scene_bbox_world(meshes)
     bbox_size = tuple(bbox_max[i] - bbox_min[i] for i in range(3))
@@ -356,57 +397,61 @@ def run_stage1(
 # ---------------------------------------------------------------------------
 
 def _orient_glasses_to_canonical(meshes) -> None:
-    """Rotate the meshes so the principal axes match the canonical frame.
+    """Bake a deterministic PCA orientation without confusing width with vertical.
 
     Canonical convention:
-      X — left↔right (temples extend along ±X)
-      Y — vertical
-      Z — depth (faces the camera)
+      X — dominant eyewear span (left/right)
+      Y — smallest principal span (vertical/thickness for typical eyewear)
+      Z — remaining span (front/back / temple depth)
+
+    The previous implementation aligned the *largest* principal spread to +Y,
+    which can rotate the frame width into the vertical axis. This implementation
+    maps the principal basis as a whole and chooses signs to minimize rotation
+    relative to the existing world axes.
     """
     require_blender()
     if not meshes:
         return
-    # Compute the principal axes from the combined point cloud.
+
     verts = _combined_world_vertices(meshes)
     if verts.shape[0] < 3:
         return
-    centroid = verts.mean(axis=0)
-    centered = verts - centroid
-    # Use SVD on the covariance to find dominant axes.
-    _, _, vh = np.linalg_svd_3x3(centered)
-    # We want the world "up" axis to align with our +Y. If the source uses
-    # +Y or +Z as up, rotate to bring up onto +Y.
-    rows = vh
-    x_axis, y_axis, z_axis = rows[0], rows[1], rows[2]
-    # Decide which axis is vertical (largest absolute spread).
-    spreads = [
-        (float(np_ptp(centered @ x_axis)), x_axis, 0),
-        (float(np_ptp(centered @ y_axis)), y_axis, 1),
-        (float(np_ptp(centered @ z_axis)), z_axis, 2),
-    ]
-    spreads.sort(reverse=True)
-    vertical_axis = spreads[0][1]
-    horizontal_axis = spreads[1][1]
-    depth_axis = spreads[2][1]
-    # Build a rotation matrix that maps world axes onto canonical.
-    target_up = np.array((0.0, 1.0, 0.0))
-    rot = _rotation_aligning_pair(vertical_axis, target_up)
-    if horizontal_axis is not None:
-        # Make sure horizontal axis is roughly along X (positive).
-        candidate = rot @ np.array((1.0, 0.0, 0.0))
-        if float(candidate[0]) < 0.0:
-            # Reflect along X (flip via rotation 180° around Y).
-            flip = _y_flip_matrix()
-            rot = flip @ rot
-    bpy.ops.object.select_all(action="DESELECT")
+
+    centered = verts - verts.mean(axis=0)
+    _u, _s, vh = np.linalg.svd(centered, full_matrices=False)
+    axes = [vh[i].astype(np.float64) for i in range(3)]
+    spreads = [float(np.ptp(centered @ axis)) for axis in axes]
+
+    order = np.argsort(spreads)[::-1]
+    x_axis = axes[int(order[0])]
+    y_axis = axes[int(order[2])]
+
+    # Keep signs close to the source/world orientation to avoid gratuitous
+    # 180-degree flips from PCA's arbitrary eigenvector signs.
+    if float(np.dot(x_axis, np.array([1.0, 0.0, 0.0]))) < 0.0:
+        x_axis = -x_axis
+    if float(np.dot(y_axis, np.array([0.0, 1.0, 0.0]))) < 0.0:
+        y_axis = -y_axis
+
+    x_axis /= max(float(np.linalg.norm(x_axis)), 1e-9)
+    y_axis -= x_axis * float(np.dot(x_axis, y_axis))
+    y_axis /= max(float(np.linalg.norm(y_axis)), 1e-9)
+    z_axis = np.cross(x_axis, y_axis)
+    z_axis /= max(float(np.linalg.norm(z_axis)), 1e-9)
+
+    # Rows project world vectors onto the canonical axes.
+    rotation = np.vstack([x_axis, y_axis, z_axis])
+    rot4 = mathutils.Matrix(
+        (
+            (float(rotation[0, 0]), float(rotation[0, 1]), float(rotation[0, 2]), 0.0),
+            (float(rotation[1, 0]), float(rotation[1, 1]), float(rotation[1, 2]), 0.0),
+            (float(rotation[2, 0]), float(rotation[2, 1]), float(rotation[2, 2]), 0.0),
+            (0.0, 0.0, 0.0, 1.0),
+        )
+    )
+
     for obj in meshes:
-        obj.select_set(True)
-    bpy.context.view_layer.objects.active = meshes[0]
-    # Convert to Euler XYZ.
-    eul = _matrix_to_euler_xyz(rot)
-    bpy.ops.transform.rotate(value=eul[0], orient_axis="X")
-    bpy.ops.transform.rotate(value=eul[1], orient_axis="Y")
-    bpy.ops.transform.rotate(value=eul[2], orient_axis="Z")
+        obj.matrix_world = rot4 @ obj.matrix_world
 
 
 def _combined_world_vertices(meshes) -> "numpy.ndarray":

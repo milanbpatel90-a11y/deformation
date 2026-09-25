@@ -1,0 +1,61 @@
+name: GLB Production Audit
+
+on:
+  push:
+    branches:
+      - codex/glb-production-audit
+  pull_request:
+    paths:
+      - "backend/deformer/**"
+      - "backend/exporter/**"
+      - "backend/pipeline/**"
+      - "factory/**"
+      - "tests/test_*deformer.py"
+      - "tests/test_constraint_solver.py"
+      - "tests/test_symmetry_solver.py"
+      - "tests/test_smoother.py"
+      - "tests/test_quality_checker.py"
+      - "tests/test_production_glb_contract.py"
+      - "templates/**"
+
+jobs:
+  glb-regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install focused test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install pytest numpy scipy trimesh pydantic opencv-python-headless
+
+      - name: Compile modified Python packages
+        run: python -m compileall -q backend factory scripts tests
+
+      - name: Verify known-bad historical GLB is rejected
+        run: |
+          set +e
+          python scripts/audit_production_glb.py output/4352529fd07b.glb \
+            --frame-width 135 \
+            --lens-width 50 \
+            --lens-height 40 \
+            --bridge-width 16.2 \
+            --temple-length 160 > /tmp/historical-audit.json
+          code=$?
+          set -e
+          cat /tmp/historical-audit.json
+          if [ "$code" -ne 1 ]; then
+            echo "Expected historical GLB audit to fail with exit code 1, got $code"
+            exit 1
+          fi
+
+      - name: Run real-asset and deformation regression tests
+        run: |
+          pytest -q             tests/test_production_glb_contract.py             tests/test_bridge_deformer.py             tests/test_rim_deformer.py             tests/test_lens_deformer.py             tests/test_temple_deformer.py             tests/test_constraint_solver.py             tests/test_symmetry_solver.py             tests/test_smoother.py             tests/test_quality_checker.py \
+            tests/test_fusion.py \
+            tests/test_template_loading.py

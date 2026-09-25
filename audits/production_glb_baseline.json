@@ -1,0 +1,100 @@
+{
+  "branch_base": "chatgpt/dashboard-multiview-api",
+  "production_source_asset": "templates/rectangle_plastic.glb",
+  "source_sha": "0690c1e391374353d976a7c48a27107643232398",
+  "source_file_size_bytes": 759336,
+  "gltf": {
+    "version": "2.0",
+    "generator": "Khronos glTF Blender I/O v5.1.20",
+    "nodes": 21,
+    "meshes": 7,
+    "materials": 5,
+    "textures": 0,
+    "images": 0,
+    "accessors": 28,
+    "bufferViews": 28,
+    "extensionsUsed": [
+      "KHR_materials_transmission"
+    ]
+  },
+  "source_geometry": {
+    "vertices": 17790,
+    "triangles": 30180,
+    "degenerate_triangles": 0,
+    "unreferenced_vertices": 0,
+    "duplicate_position_vertices": 2688,
+    "invalid_normals": 0,
+    "all_primitives_have_normals": true,
+    "all_primitives_have_texcoord0": true
+  },
+  "source_world_measurements_m": {
+    "frame_width": 0.132334,
+    "scene_with_helper_bounds_min": [
+      -1,
+      -1,
+      -1
+    ],
+    "scene_with_helper_bounds_max": [
+      1,
+      1,
+      1
+    ],
+    "scene_with_helper_size": [
+      2,
+      2,
+      2
+    ]
+  },
+  "declared_template_measurements_mm": {
+    "frame_width": 140,
+    "lens_width": 53,
+    "lens_height": 42,
+    "bridge_width": 17.2,
+    "temple_length": 145,
+    "rim_thickness": 1.2
+  },
+  "confirmed_source_defects": [
+    "Root Cube helper mesh spans 2x2x2 meters and corrupts whole-scene bounds.",
+    "Left_Hinge and Right_Hinge empties have identical world translations.",
+    "Repeated +/-90 degree X transforms coexist with non-uniform scales; transforms must be flattened rather than blindly removed.",
+    "Transparent transmission material is assigned to Temple_Left_Mesh while Lens_Left_Mesh and Lens_Right_Mesh are opaque.",
+    "Descriptor has no explicit mesh_aliases although the GLB uses generic mesh names.",
+    "The production descriptor expects independently addressable Bridge/Rims/Lenses/Temples but the source GLB does not expose those eight required logical meshes.",
+    "Actual frame world width is about 132.334 mm while template metadata declares 140 mm."
+  ],
+  "historical_export": {
+    "path": "output/4352529fd07b.glb",
+    "size_bytes": 16192,
+    "vertices": 388,
+    "triangles": 608,
+    "degenerate_triangles": 0,
+    "unreferenced_vertices": 0,
+    "normal_attributes_present": false,
+    "texcoord0_present": false,
+    "world_bounds_min": [
+      -312.9987,
+      -50.8469,
+      -14.0011
+    ],
+    "world_bounds_max": [
+      205.1587,
+      13.1836,
+      18.7792
+    ],
+    "frame_width_exported_coordinate_units": 122.0411,
+    "gltf_treats_coordinates_as_meters": true,
+    "metadata_defects": [
+      "scene.extras.extras nesting",
+      "project generator typo defirmation/1.0",
+      "no explicit units metadata"
+    ],
+    "material_defects": [
+      "lens alpha exists in base color but alphaMode defaults to OPAQUE"
+    ]
+  },
+  "inaccessible_large_generated_asset": {
+    "path": "output/47f03f6bb3ef.glb",
+    "size_bytes": 2900148,
+    "reason": "GitHub connector does not return binary body for this object and execution sandbox cannot resolve raw GitHub DNS. Binary-level metrics were not claimed."
+  }
+}
