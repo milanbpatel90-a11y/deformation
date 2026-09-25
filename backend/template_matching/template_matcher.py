@@ -35,10 +35,10 @@ class TemplateMatcher:
         if override:
             try:
                 template = self.library.load(override)
-                scored = self.scorer.score(features, template)
-                return TemplateMatchResult(best=scored, candidates=[scored])
-            except FileNotFoundError:
-                pass
+            except (FileNotFoundError, KeyError, ValueError) as exc:
+                raise ValueError(f"Unknown or invalid template override: {override}") from exc
+            scored = self.scorer.score(features, template)
+            return TemplateMatchResult(best=scored, candidates=[scored])
 
         candidates = []
         for template in self._load_candidates():
@@ -84,6 +84,14 @@ class TemplateMatcher:
                         name = item.get("name") or item.get("template_name") or item.get("template_id")
                         if isinstance(name, str) and name:
                             names.append(name)
+            elif isinstance(payload, dict):
+                for key, item in payload.items():
+                    if isinstance(item, dict):
+                        name = item.get("name") or item.get("template_name") or item.get("template_id") or key
+                    else:
+                        name = key
+                    if isinstance(name, str) and name:
+                        names.append(name)
         if names:
             return names
         return self.library.list_templates()
