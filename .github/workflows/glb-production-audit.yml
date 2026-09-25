@@ -36,4 +36,6 @@ jobs:
 
       - name: Run real-asset and deformation regression tests
         run: |
-          pytest -q             tests/test_production_glb_contract.py             tests/test_bridge_deformer.py             tests/test_rim_deformer.py             tests/test_lens_deformer.py             tests/test_temple_deformer.py             tests/test_constraint_solver.py             tests/test_symmetry_solver.py             tests/test_smoother.py             tests/test_quality_checker.py
+          pytest -q             tests/test_production_glb_contract.py             tests/test_bridge_deformer.py             tests/test_rim_deformer.py             tests/test_lens_deformer.py             tests/test_temple_deformer.py             tests/test_constraint_solver.py             tests/test_symmetry_solver.py             tests/test_smoother.py             tests/test_quality_checker.py \
+            tests/test_fusion.py \
+            tests/test_template_loading.py
