@@ -1,0 +1,33 @@
+name: production-glb-audit
+
+on:
+  push:
+    branches:
+      - chatgpt/glb-production-audit
+  workflow_dispatch:
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: chatgpt/glb-production-audit
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install audit dependencies
+        run: python -m pip install --upgrade pip numpy trimesh
+
+      - name: Audit actual production GLBs
+        run: |
+          python scripts/audit_production_glb.py             templates/geometric_metal.glb             templates/rectangle_plastic.glb             --output output/glb_audit_baseline.json
+
+      - name: Upload baseline audit
+        uses: actions/upload-artifact@v4
+        with:
+          name: production-glb-baseline
+          path: output/glb_audit_baseline.json
+          if-no-files-found: error
