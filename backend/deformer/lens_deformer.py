@@ -136,24 +136,27 @@ class LensDeformer(BaseDeformer):
         # target-edge positions improves silhouette fidelity without adding
         # vertices or collapsing dense interior surfaces.
         for surface_front in (True, False):
-            surface_idx = self._surface_indices(local, front=surface_front)
-            surface_points = local[surface_idx, :2]
-            hull = ConvexHull(surface_points)
-            perimeter_idx = surface_idx[np.asarray(hull.vertices, dtype=np.int64)]
+            perimeter_idx = self._surface_boundary_loop(
+                lens_mesh,
+                local,
+                front=surface_front,
+            )
             template_perimeter = local[perimeter_idx, :2]
             target_samples = self._resample_boundary_linear(target, len(perimeter_idx))
             target_samples = self._align_boundary_exact(template_perimeter, target_samples)
             local[perimeter_idx, :2] = target_samples
 
         # Numerical tolerance only: radial mapping should already be contained.
-        candidate_boundary = self._convex_boundary(local[front_idx, :2])
+        front_loop = self._surface_boundary_loop(lens_mesh, local, front=True)
+        candidate_boundary = local[front_loop, :2]
         candidate_polygon = Polygon(candidate_boundary).buffer(0)
         if not target_polygon.buffer(1e-10).covers(candidate_polygon):
             lo, hi = 0.0, 1.0
             for _ in range(40):
                 mid = (lo + hi) * 0.5
                 candidate = target_center + (local[:, :2] - target_center) * mid
-                poly = Polygon(self._convex_boundary(candidate[front_idx])).buffer(0)
+                loop = self._surface_boundary_loop(lens_mesh, np.column_stack([candidate, local[:, 2]]), front=True)
+                poly = Polygon(candidate[loop]).buffer(0)
                 if target_polygon.buffer(1e-10).covers(poly):
                     lo = mid
                 else:
@@ -247,7 +250,8 @@ class LensDeformer(BaseDeformer):
 
         front_idx = self._surface_indices(lens_local, front=True)
         back_idx = self._surface_indices(lens_local, front=False)
-        lens_boundary = self._convex_boundary(lens_local[front_idx, :2])
+        front_loop = self._surface_boundary_loop(lens_mesh, lens_local, front=True)
+        lens_boundary = lens_local[front_loop, :2]
         target_boundary = self._convex_boundary(target_boundary)
 
         # Measure continuous boundary-to-boundary distance. Point-to-point
@@ -296,6 +300,91 @@ class LensDeformer(BaseDeformer):
                 "valid": bool(fit_error < 2.5 and thickness > 0.0 and inside_rim),
             }
         )
+
+    @classmethod
+    def _surface_boundary_loop(
+        cls,
+        mesh,
+        local_vertices: np.ndarray,
+        front: bool,
+    ) -> np.ndarray:
+        """Return the largest true topological boundary loop of a lens surface."""
+        surface_idx = cls._surface_indices(local_vertices, front=front)
+        if len(surface_idx) < 3:
+            raise ValueError("Lens surface has fewer than three vertices")
+
+        candidate = np.zeros(len(local_vertices), dtype=bool)
+        candidate[surface_idx] = True
+        faces = np.asarray(mesh.faces, dtype=np.int64)
+        surface_faces = faces[np.all(candidate[faces], axis=1)]
+
+        if len(surface_faces):
+            edges = np.vstack(
+                [
+                    surface_faces[:, [0, 1]],
+                    surface_faces[:, [1, 2]],
+                    surface_faces[:, [2, 0]],
+                ]
+            )
+            undirected = np.sort(edges, axis=1)
+            unique_edges, counts = np.unique(undirected, axis=0, return_counts=True)
+            boundary_edges = unique_edges[counts == 1]
+        else:
+            boundary_edges = np.empty((0, 2), dtype=np.int64)
+
+        if len(boundary_edges) < 3:
+            points = local_vertices[surface_idx, :2]
+            hull = ConvexHull(points)
+            return surface_idx[np.asarray(hull.vertices, dtype=np.int64)]
+
+        adjacency: dict[int, list[int]] = {}
+        for a, b in boundary_edges:
+            adjacency.setdefault(int(a), []).append(int(b))
+            adjacency.setdefault(int(b), []).append(int(a))
+
+        unused = set(adjacency)
+        loops: list[list[int]] = []
+        while unused:
+            start = min(unused)
+            loop = [start]
+            previous = None
+            current = start
+            for _ in range(len(adjacency) + 1):
+                neighbours = adjacency.get(current, [])
+                next_candidates = [n for n in neighbours if n != previous]
+                if not next_candidates:
+                    break
+                nxt = next_candidates[0]
+                if nxt == start:
+                    break
+                if nxt in loop:
+                    break
+                loop.append(nxt)
+                previous, current = current, nxt
+            for vertex in loop:
+                unused.discard(vertex)
+            if len(loop) >= 3:
+                loops.append(loop)
+
+        if not loops:
+            points = local_vertices[surface_idx, :2]
+            hull = ConvexHull(points)
+            return surface_idx[np.asarray(hull.vertices, dtype=np.int64)]
+
+        def area(loop: list[int]) -> float:
+            points = local_vertices[np.asarray(loop, dtype=np.int64), :2]
+            x = points[:, 0]
+            y = points[:, 1]
+            return abs(
+                0.5
+                * float(
+                    np.dot(x, np.roll(y, -1))
+                    - np.dot(y, np.roll(x, -1))
+                )
+            )
+
+        best = max(loops, key=area)
+        return np.asarray(best, dtype=np.int64)
 
     @staticmethod
     def _surface_indices(local_vertices: np.ndarray, front: bool) -> np.ndarray:
