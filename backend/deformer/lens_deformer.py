@@ -109,14 +109,12 @@ class LensDeformer(BaseDeformer):
         resampled_target = self._align_boundary(template_front, resampled_target)
         local[ordered_front_idx, :2] = resampled_target
 
-        template_front_center = template_front.mean(axis=0)
-        template_back_center = template_back.mean(axis=0)
-        target_center = resampled_target.mean(axis=0)
-        front_radius = np.linalg.norm(template_front - template_front_center, axis=1)
-        target_radius = np.linalg.norm(resampled_target - target_center, axis=1)
-        radial_scale = np.divide(target_radius, np.maximum(front_radius, 1e-9))
-        back_relative = template_back - template_back_center
-        local[ordered_back_idx, :2] = target_center + back_relative * radial_scale[:, None]
+        # Fit the back surface independently because production lenses may
+        # have a different vertex count on front and back. Reusing the front
+        # scale array would corrupt or fail on asymmetric tessellation.
+        back_target = self._resample_boundary(target_boundary, len(ordered_back_idx))
+        back_target = self._align_boundary(template_back, back_target)
+        local[ordered_back_idx, :2] = back_target
 
         lens_mesh.vertices = self._from_local(local, origin, basis)
 
