@@ -10,7 +10,9 @@ from typing import Any
 import numpy as np
 import trimesh
 
+from backend.geometry_units import m_to_mm
 from backend.models import Measurements, TemplateDimensions, TemplateInfo
+from backend.scene_utils import load_world_baked_scene
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
 _TEMPLATES_DIR = _PROJECT_ROOT / "templates"
@@ -122,7 +124,8 @@ class DescriptorLoader:
         payload = json.loads(resolved_descriptor.read_text(encoding="utf-8"))
         self._validate_payload(payload, resolved_descriptor)
 
-        scene = trimesh.load(resolved_template, force="scene")
+        source_scene = trimesh.load(resolved_template, force="scene", process=False)
+        scene = load_world_baked_scene(resolved_template)
         raw_geometry = {
             name: mesh for name, mesh in scene.geometry.items() if isinstance(mesh, trimesh.Trimesh) and len(mesh.vertices) > 0
         }
@@ -135,7 +138,7 @@ class DescriptorLoader:
         #   2. Auto-inference when GLB has no structured names (fallback heuristic)
         geometry = self._resolve_geometry_aliases(raw_geometry, payload)
 
-        empty_anchors = self._load_empty_anchors(payload, scene)
+        empty_anchors = self._load_empty_anchors(payload, source_scene)
         hinges = self._load_hinges(payload["hinges"], geometry, empty_anchors)
         rim_loops = self._load_rim_loops(payload["rim_loops"], geometry)
         bridge_center = self._load_bridge_center(payload["bridge"], geometry, empty_anchors)
@@ -333,8 +336,8 @@ class DescriptorLoader:
                 part=part,
                 origin=origin,
                 normal=normal,
-                width_mm=float(payload.get("aspect_width_mm", geom.extents[0])),
-                height_mm=float(payload.get("aspect_height_mm", geom.extents[1])),
+                width_mm=float(payload.get("aspect_width_mm", m_to_mm(geom.extents[0]))),
+                height_mm=float(payload.get("aspect_height_mm", m_to_mm(geom.extents[1]))),
             )
         return planes
 
