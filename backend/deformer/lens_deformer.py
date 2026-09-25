@@ -241,7 +241,7 @@ class LensDeformer(BaseDeformer):
         # because they ignore the intervening line segments.
         target_polygon = Polygon(target_boundary).buffer(0)
         fit_error = m_to_mm(
-            float(lens_polygon_boundary.shape[0] and Polygon(lens_polygon_boundary).boundary.hausdorff_distance(target_polygon.boundary))
+            float(Polygon(lens_boundary).boundary.hausdorff_distance(target_polygon.boundary))
         )
 
         rim_boundary = self._convex_boundary(rim_local[:, :2])
