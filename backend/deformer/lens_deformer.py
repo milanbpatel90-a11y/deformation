@@ -60,8 +60,9 @@ class LensDeformer(BaseDeformer):
 
     def _extract_rim_boundary(self, context: DeformationContext, selection: LensSelection) -> np.ndarray:
         rim_mesh = context.mesh(selection.rim_part)
-        rim_vertices = np.asarray(rim_mesh.vertices, dtype=np.float64)
-        return self._convex_boundary(rim_vertices[:, :2])
+        origin, basis = self._lens_basis(selection)
+        rim_local = self._to_local(np.asarray(rim_mesh.vertices, dtype=np.float64), origin, basis)
+        return self._convex_boundary(rim_local[:, :2])
 
     def _generate_target_boundary(
         self,
@@ -88,33 +89,36 @@ class LensDeformer(BaseDeformer):
         target_boundary: np.ndarray,
     ) -> None:
         lens_mesh = context.mesh(selection.lens_part)
-        vertices = lens_mesh.vertices.copy()
-        front_idx = self._surface_indices(vertices, front=True)
-        back_idx = self._surface_indices(vertices, front=False)
+        vertices = np.asarray(lens_mesh.vertices, dtype=np.float64).copy()
+        origin, basis = self._lens_basis(selection)
+        local = self._to_local(vertices, origin, basis)
+        front_idx = self._surface_indices(local, front=True)
+        back_idx = self._surface_indices(local, front=False)
 
-        front_boundary = vertices[front_idx][:, :2]
+        front_boundary = local[front_idx, :2]
         front_order = self._loop_order(front_boundary)
-        back_boundary = vertices[back_idx][:, :2]
+        back_boundary = local[back_idx, :2]
         back_order = self._loop_order(back_boundary)
 
         ordered_front_idx = front_idx[front_order]
         ordered_back_idx = back_idx[back_order]
-        template_front = vertices[ordered_front_idx][:, :2]
-        template_back = vertices[ordered_back_idx][:, :2]
+        template_front = local[ordered_front_idx, :2]
+        template_back = local[ordered_back_idx, :2]
 
         resampled_target = self._resample_boundary(target_boundary, len(ordered_front_idx))
         resampled_target = self._align_boundary(template_front, resampled_target)
-        vertices[ordered_front_idx, :2] = resampled_target
+        local[ordered_front_idx, :2] = resampled_target
 
         template_front_center = template_front.mean(axis=0)
         template_back_center = template_back.mean(axis=0)
         target_center = resampled_target.mean(axis=0)
         front_radius = np.linalg.norm(template_front - template_front_center, axis=1)
         target_radius = np.linalg.norm(resampled_target - target_center, axis=1)
-        radial_scale = np.divide(target_radius, np.maximum(front_radius, 1e-6))
+        radial_scale = np.divide(target_radius, np.maximum(front_radius, 1e-9))
         back_relative = template_back - template_back_center
-        vertices[ordered_back_idx, :2] = target_center + back_relative * radial_scale[:, None]
-        lens_mesh.vertices = vertices
+        local[ordered_back_idx, :2] = target_center + back_relative * radial_scale[:, None]
+
+        lens_mesh.vertices = self._from_local(local, origin, basis)
 
     def _preserve_uvs(self, context: DeformationContext, selection: LensSelection) -> None:
         lens_mesh = context.mesh(selection.lens_part)
@@ -123,26 +127,51 @@ class LensDeformer(BaseDeformer):
 
     def _preserve_thickness(self, context: DeformationContext, selection: LensSelection) -> None:
         lens_mesh = context.mesh(selection.lens_part)
-        vertices = lens_mesh.vertices.copy()
-        front_idx = self._surface_indices(vertices, front=True)
-        back_idx = self._surface_indices(vertices, front=False)
-        original_thickness = float(np.mean(selection.lens_before[front_idx, 2] - selection.lens_before[back_idx, 2]))
-        front_z = float(np.max(vertices[front_idx, 2]))
-        vertices[front_idx, 2] = front_z
-        vertices[back_idx, 2] = front_z - original_thickness
-        lens_mesh.vertices = vertices
+        vertices = np.asarray(lens_mesh.vertices, dtype=np.float64).copy()
+        origin, basis = self._lens_basis(selection)
+        local = self._to_local(vertices, origin, basis)
+        original_local = self._to_local(selection.lens_before, origin, basis)
+
+        front_idx = self._surface_indices(local, front=True)
+        back_idx = self._surface_indices(local, front=False)
+        original_front_idx = self._surface_indices(original_local, front=True)
+        original_back_idx = self._surface_indices(original_local, front=False)
+
+        original_thickness = float(
+            np.mean(original_local[original_front_idx, 2])
+            - np.mean(original_local[original_back_idx, 2])
+        )
+        front_n = float(np.mean(local[front_idx, 2]))
+        local[front_idx, 2] = front_n
+        local[back_idx, 2] = front_n - original_thickness
+        lens_mesh.vertices = self._from_local(local, origin, basis)
 
     def _preserve_curvature(self, context: DeformationContext, selection: LensSelection) -> None:
         lens_mesh = context.mesh(selection.lens_part)
-        vertices = lens_mesh.vertices.copy()
-        original = selection.lens_before
-        front_idx = self._surface_indices(vertices, front=True)
-        back_idx = self._surface_indices(vertices, front=False)
-        original_front_profile = original[front_idx, 2] - np.mean(original[front_idx, 2])
-        original_back_profile = original[back_idx, 2] - np.mean(original[back_idx, 2])
-        vertices[front_idx, 2] = np.mean(vertices[front_idx, 2]) + original_front_profile
-        vertices[back_idx, 2] = np.mean(vertices[back_idx, 2]) + original_back_profile
-        lens_mesh.vertices = vertices
+        vertices = np.asarray(lens_mesh.vertices, dtype=np.float64).copy()
+        origin, basis = self._lens_basis(selection)
+        local = self._to_local(vertices, origin, basis)
+        original_local = self._to_local(selection.lens_before, origin, basis)
+
+        front_idx = self._surface_indices(local, front=True)
+        back_idx = self._surface_indices(local, front=False)
+        original_front_idx = self._surface_indices(original_local, front=True)
+        original_back_idx = self._surface_indices(original_local, front=False)
+
+        if len(front_idx) == len(original_front_idx):
+            profile = (
+                original_local[original_front_idx, 2]
+                - np.mean(original_local[original_front_idx, 2])
+            )
+            local[front_idx, 2] = np.mean(local[front_idx, 2]) + profile
+        if len(back_idx) == len(original_back_idx):
+            profile = (
+                original_local[original_back_idx, 2]
+                - np.mean(original_local[original_back_idx, 2])
+            )
+            local[back_idx, 2] = np.mean(local[back_idx, 2]) + profile
+
+        lens_mesh.vertices = self._from_local(local, origin, basis)
 
     def _validate(
         self,
@@ -152,15 +181,23 @@ class LensDeformer(BaseDeformer):
     ) -> dict[str, Any]:
         lens_mesh = context.mesh(selection.lens_part)
         rim_mesh = context.mesh(selection.rim_part)
-        lens_vertices = lens_mesh.vertices.copy()
-        rim_vertices = rim_mesh.vertices.copy()
-        front_idx = self._surface_indices(lens_vertices, front=True)
-        back_idx = self._surface_indices(lens_vertices, front=False)
-        lens_boundary = lens_vertices[front_idx][:, :2][self._loop_order(lens_vertices[front_idx][:, :2])]
+        lens_vertices = np.asarray(lens_mesh.vertices, dtype=np.float64)
+        rim_vertices = np.asarray(rim_mesh.vertices, dtype=np.float64)
+        origin, basis = self._lens_basis(selection)
+        lens_local = self._to_local(lens_vertices, origin, basis)
+        rim_local = self._to_local(rim_vertices, origin, basis)
+
+        front_idx = self._surface_indices(lens_local, front=True)
+        back_idx = self._surface_indices(lens_local, front=False)
+        lens_boundary = lens_local[front_idx, :2]
+        lens_boundary = lens_boundary[self._loop_order(lens_boundary)]
         fitted_target = self._resample_boundary(target_boundary, len(lens_boundary))
         fitted_target = self._align_boundary(lens_boundary, fitted_target)
-        fit_error = m_to_mm(float(np.mean(np.linalg.norm(lens_boundary - fitted_target, axis=1))))
-        rim_boundary = self._convex_boundary(rim_vertices[:, :2])
+        fit_error = m_to_mm(
+            float(np.mean(np.linalg.norm(lens_boundary - fitted_target, axis=1)))
+        )
+
+        rim_boundary = self._convex_boundary(rim_local[:, :2])
         lens_polygon_boundary = self._convex_boundary(lens_boundary)
         rim_polygon = Polygon(rim_boundary).buffer(0)
         lens_polygon = Polygon(lens_polygon_boundary).buffer(0)
@@ -169,9 +206,18 @@ class LensDeformer(BaseDeformer):
             and not lens_polygon.is_empty
             and rim_polygon.covers(lens_polygon)
         )
+
         thickness = m_to_mm(
-            float(np.mean(lens_vertices[front_idx, 2] - lens_vertices[back_idx, 2]))
+            float(
+                np.mean(lens_local[front_idx, 2])
+                - np.mean(lens_local[back_idx, 2])
+            )
         )
+        original_local = self._to_local(selection.lens_before, origin, basis)
+        curvature_delta = float(
+            np.std(lens_local[:, 2]) - np.std(original_local[:, 2])
+        )
+
         uv_count = 0
         if hasattr(lens_mesh.visual, "uv") and lens_mesh.visual.uv is not None:
             uv_count = int(len(lens_mesh.visual.uv))
@@ -182,17 +228,55 @@ class LensDeformer(BaseDeformer):
                 "uv_count": uv_count,
                 "fit_error_mm": round(fit_error, 6),
                 "thickness_mm": round(thickness, 6),
-                "curvature_delta": round(float(np.std(lens_vertices[:, 2]) - np.std(selection.lens_before[:, 2])), 6),
+                "curvature_delta": round(curvature_delta, 9),
                 "inside_rim": inside_rim,
                 "valid": bool(fit_error < 2.5 and thickness > 0.0 and inside_rim),
             }
         )
 
     @staticmethod
-    def _surface_indices(vertices: np.ndarray, front: bool) -> np.ndarray:
-        z_values = vertices[:, 2]
-        z_target = float(np.max(z_values) if front else np.min(z_values))
-        return np.where(np.isclose(z_values, z_target))[0]
+    def _surface_indices(local_vertices: np.ndarray, front: bool) -> np.ndarray:
+        normal_values = local_vertices[:, 2]
+        target = float(np.max(normal_values) if front else np.min(normal_values))
+        span = max(float(np.ptp(normal_values)), 1e-9)
+        tolerance = max(span * 0.08, 1e-8)
+        indices = np.where(np.abs(normal_values - target) <= tolerance)[0]
+        if len(indices) < 3:
+            count = min(max(3, len(local_vertices) // 12), len(local_vertices))
+            order = np.argsort(normal_values)
+            indices = order[-count:] if front else order[:count]
+        return np.asarray(indices, dtype=np.int64)
+
+    @staticmethod
+    def _lens_basis(selection: LensSelection) -> tuple[np.ndarray, np.ndarray]:
+        """Return stable world→lens-local PCA basis from source lens geometry."""
+        vertices = np.asarray(selection.lens_before, dtype=np.float64)
+        origin = vertices.mean(axis=0)
+        centered = vertices - origin
+        covariance = centered.T @ centered / max(len(centered), 1)
+        values, vectors = np.linalg.eigh(covariance)
+        order = np.argsort(values)[::-1]
+        plane_u = vectors[:, order[0]]
+        plane_v = vectors[:, order[1]]
+        normal = vectors[:, order[2]]
+
+        # Keep a right-handed orthonormal basis and stable normal orientation.
+        plane_u = plane_u / max(np.linalg.norm(plane_u), 1e-12)
+        normal = normal / max(np.linalg.norm(normal), 1e-12)
+        plane_v = np.cross(normal, plane_u)
+        plane_v = plane_v / max(np.linalg.norm(plane_v), 1e-12)
+        normal = np.cross(plane_u, plane_v)
+        normal = normal / max(np.linalg.norm(normal), 1e-12)
+        basis = np.column_stack([plane_u, plane_v, normal])
+        return origin, basis
+
+    @staticmethod
+    def _to_local(vertices: np.ndarray, origin: np.ndarray, basis: np.ndarray) -> np.ndarray:
+        return (np.asarray(vertices, dtype=np.float64) - origin) @ basis
+
+    @staticmethod
+    def _from_local(local: np.ndarray, origin: np.ndarray, basis: np.ndarray) -> np.ndarray:
+        return np.asarray(local, dtype=np.float64) @ basis.T + origin
 
     @staticmethod
     def _convex_boundary(points_2d: np.ndarray) -> np.ndarray:
