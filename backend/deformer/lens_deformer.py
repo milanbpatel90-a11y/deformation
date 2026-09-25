@@ -10,6 +10,7 @@ from scipy import interpolate
 
 from backend.deformer.base_deformer import BaseDeformer
 from backend.deformer.deformation_context import DeformationContext
+from backend.geometry_units import m_to_mm, mm_to_m
 
 
 @dataclass(frozen=True)
@@ -72,9 +73,12 @@ class LensDeformer(BaseDeformer):
         center = rim_boundary.mean(axis=0)
         radial = rim_boundary - center
         lengths = np.linalg.norm(radial, axis=1, keepdims=True)
-        safe_lengths = np.maximum(lengths, 1e-6)
-        inset = np.minimum(self.rim_inset, lengths - 0.25)
-        inset = np.maximum(inset, 0.15)
+        safe_lengths = np.maximum(lengths, 1e-9)
+        rim_inset_m = mm_to_m(self.rim_inset)
+        minimum_edge_m = mm_to_m(0.25)
+        minimum_inset_m = mm_to_m(0.15)
+        inset = np.minimum(rim_inset_m, lengths - minimum_edge_m)
+        inset = np.maximum(inset, minimum_inset_m)
         target = center + radial * ((safe_lengths - inset) / safe_lengths)
         return target
 
@@ -156,13 +160,15 @@ class LensDeformer(BaseDeformer):
         lens_boundary = lens_vertices[front_idx][:, :2][self._loop_order(lens_vertices[front_idx][:, :2])]
         fitted_target = self._resample_boundary(target_boundary, len(lens_boundary))
         fitted_target = self._align_boundary(lens_boundary, fitted_target)
-        fit_error = float(np.mean(np.linalg.norm(lens_boundary - fitted_target, axis=1)))
+        fit_error = m_to_mm(float(np.mean(np.linalg.norm(lens_boundary - fitted_target, axis=1))))
         rim_boundary = rim_vertices[self._surface_indices(rim_vertices, front=True)][:, :2]
         rim_center = rim_boundary.mean(axis=0)
         lens_center = lens_boundary.mean(axis=0)
         rim_radius = np.linalg.norm(rim_boundary - rim_center, axis=1).mean()
         lens_radius = np.linalg.norm(lens_boundary - lens_center, axis=1).mean()
-        thickness = float(np.mean(lens_vertices[front_idx, 2] - lens_vertices[back_idx, 2]))
+        thickness = m_to_mm(
+            float(np.mean(lens_vertices[front_idx, 2] - lens_vertices[back_idx, 2]))
+        )
         uv_count = 0
         if hasattr(lens_mesh.visual, "uv") and lens_mesh.visual.uv is not None:
             uv_count = int(len(lens_mesh.visual.uv))
