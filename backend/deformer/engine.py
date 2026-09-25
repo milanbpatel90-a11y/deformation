@@ -14,6 +14,7 @@ from backend.models import LensContour, Measurements, TemplateDimensions
 
 # We load deformers individually in the main orchestration class.
 from backend.deformer.bridge_deformer import BridgeDeformer
+from backend.deformer.dimension_calibrator import DimensionCalibrator
 from backend.deformer.constraints import ConstraintSolver
 from backend.deformer.lens_deformer import LensDeformer
 from backend.deformer.rim_deformer import RimDeformer
@@ -50,6 +51,7 @@ class MeshDeformer:
             ConstraintSolver(),
             SymmetrySolver(),
             MeshSmoother(),
+            DimensionCalibrator(),
         ]
         self.quality_checker = QualityChecker()
 
