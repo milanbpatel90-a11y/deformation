@@ -375,19 +375,25 @@ def stage_trace(measurements: Measurements) -> list[dict]:
     trace.append({"stage": "refresh_normals", "temples": _topology_snapshot(context)})
     return trace
 
-def run_case(name: str, measurements: Measurements, output_dir: Path) -> dict:
+def run_case(
+    name: str,
+    measurements: Measurements,
+    output_dir: Path,
+    template_name: str = "geometric_metal",
+) -> dict:
     pipeline = DeformationPipeline(Path("templates"))
     out = output_dir / f"{name}.glb"
     result = {
         "name": name,
         "measurements": measurements.model_dump(mode="json"),
+        "template_name": template_name,
         "success": False,
     }
     try:
         payload = pipeline.run_from_measurements(
             measurements,
             out,
-            template_name="geometric_metal",
+            template_name=template_name,
         )
         result["success"] = True
         result["pipeline_result"] = payload
@@ -434,6 +440,21 @@ def main() -> int:
                 nose_pads=True,
             ),
         ),
+        (
+            "rectangle_plastic_identity",
+            Measurements(
+                frame_width=140.0,
+                lens_width=53.0,
+                lens_height=42.0,
+                bridge_width=17.2,
+                temple_length=145.0,
+                rim_thickness=1.2,
+                material=FrameMaterial.PLASTIC,
+                shape=FrameShape.RECTANGLE,
+                nose_pads=False,
+            ),
+            "rectangle_plastic",
+        ),
     ]
 
     source = Path("templates/geometric_metal.glb")
@@ -441,9 +462,24 @@ def main() -> int:
     source_triangle_count = sum(
         geom["triangles"] for geom in source_metrics["geometries"].values()
     )
-    case_results = [run_case(name, measurements, output_dir) for name, measurements in cases]
+    case_results = []
+    for item in cases:
+        if len(item) == 2:
+            name, measurements = item
+            template_name = "geometric_metal"
+        else:
+            name, measurements, template_name = item
+        case_results.append(run_case(name, measurements, output_dir, template_name))
+
     for case in case_results:
-        case["acceptance_errors"] = _accept_case(case, source_triangle_count)
+        if case["template_name"] == "geometric_metal":
+            case["acceptance_errors"] = _accept_case(case, source_triangle_count)
+        else:
+            # Keep the second production asset diagnostic until its 2 m source
+            # scale and hierarchy are understood; never treat export success as
+            # proof of production readiness.
+            case["acceptance_errors"] = []
+            case["diagnostic_only"] = True
 
     report = {
         "source": source_metrics,
