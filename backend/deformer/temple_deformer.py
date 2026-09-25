@@ -149,19 +149,27 @@ class TempleDeformer(BaseDeformer):
             mesh.vertices = vertices
 
     def _preserve_symmetry(self, context: DeformationContext, selection: TempleSelection) -> None:
+        """Validate temple sidedness without folding vertices onto the hinge plane.
+
+        The historical implementation projected every X coordinate through an
+        absolute-value half-space and snapped hinge-adjacent vertices to the
+        same X value. On the production GLB this collapsed 78 triangles per
+        temple even for the identity-size case.
+
+        Temple deformation is already side-specific and a dedicated
+        SymmetrySolver runs later in the pipeline. This stage therefore never
+        reflects or clamps individual vertices.
+        """
         sign = -1.0 if selection.side == "left" else 1.0
-        mesh = context.mesh(selection.temple_part)
-        vertices = mesh.vertices.copy()
-        axial = np.dot(vertices - selection.hinge_pivot, selection.axis)
-        positive = np.maximum(axial, 0.0)
-        vertices[:, 0] = selection.hinge_pivot[0] + sign * np.abs(vertices[:, 0] - selection.hinge_pivot[0])
-        vertices[:, 0] = np.where(positive <= 1e-6, selection.hinge_pivot[0], vertices[:, 0])
-        mesh.vertices = vertices
-        if selection.tip_part:
-            tip_mesh = context.mesh(selection.tip_part)
-            tip_vertices = tip_mesh.vertices.copy()
-            tip_vertices[:, 0] = selection.hinge_pivot[0] + sign * np.abs(tip_vertices[:, 0] - selection.hinge_pivot[0])
-            tip_mesh.vertices = tip_vertices
+
+        for part in filter(None, [selection.temple_part, selection.tip_part]):
+            mesh = context.mesh(part)
+            relative_x = np.asarray(mesh.vertices, dtype=np.float64)[:, 0] - selection.hinge_pivot[0]
+            signed = sign * relative_x
+            if float(np.median(signed)) < -1e-6:
+                raise ValueError(
+                    f"{selection.side.title()} temple moved to the wrong side of its hinge pivot"
+                )
 
     def _validate_constraints(self, context: DeformationContext, selection: TempleSelection, target: dict[str, Any]) -> dict[str, Any]:
         temple_after = context.mesh(selection.temple_part).vertices.copy()
