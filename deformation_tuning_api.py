@@ -6,6 +6,7 @@ Runs on port 8001 (main VTO API uses 8000).
 from __future__ import annotations
 
 import base64
+import hashlib
 import logging
 import os
 import tempfile
@@ -25,7 +26,7 @@ import cv2
 import numpy as np
 
 from backend.fusion.view_classifier import ViewClassifier
-from backend.models import Measurements
+from backend.models import FrameMaterial, FrameShape, Measurements
 from backend.pipeline import DeformationPipeline
 from eyewear_vto_toolkit import DeformationCalibrationWorkflow, TemplateManager
 
@@ -37,7 +38,9 @@ TEMPLATES_DIR = PROJECT_ROOT / "templates"
 RECONSTRUCTION_DIR = PROJECT_ROOT / "output" / "reconstructions"
 RECONSTRUCTION_DIR.mkdir(parents=True, exist_ok=True)
 MAX_IMAGE_BYTES = int(os.environ.get("DEFIRM_MAX_IMAGE_BYTES", str(15 * 1024 * 1024)))
+MAX_IMAGE_PIXELS = int(os.environ.get("DEFIRM_MAX_IMAGE_PIXELS", str(20_000_000)))
 MODEL_RETENTION_HOURS = int(os.environ.get("DEFIRM_MODEL_RETENTION_HOURS", "24"))
+REQUIRE_YOLO = os.environ.get("DEFIRM_REQUIRE_YOLO", "1") != "0"
 ALLOWED_ORIGINS = [
     origin.strip()
     for origin in os.environ.get(
@@ -112,10 +115,29 @@ def _overlay_png_data_uri(image: np.ndarray, mask: np.ndarray) -> str:
     tint = np.zeros_like(image)
     tint[mask > 0] = (0, 200, 110)
     overlay = cv2.addWeighted(image, 0.72, tint, 0.28, 0)
-    ok, encoded = cv2.imencode(".png", overlay)
+
+    height, width = overlay.shape[:2]
+    longest = max(height, width)
+    if longest > 1280:
+        scale = 1280.0 / longest
+        overlay = cv2.resize(
+            overlay,
+            (max(1, int(width * scale)), max(1, int(height * scale))),
+            interpolation=cv2.INTER_AREA,
+        )
+
+    ok, encoded = cv2.imencode(".jpg", overlay, [int(cv2.IMWRITE_JPEG_QUALITY), 84])
     if not ok:
         raise ValueError("Failed to encode segmentation overlay")
-    return "data:image/png;base64," + base64.b64encode(encoded.tobytes()).decode("ascii")
+    return "data:image/jpeg;base64," + base64.b64encode(encoded.tobytes()).decode("ascii")
+
+
+def _detect_frame_color(image: np.ndarray, mask: np.ndarray) -> str:
+    pixels = image[mask > 0]
+    if len(pixels) == 0:
+        return "#000000"
+    b, g, r = np.median(pixels, axis=0)
+    return f"#{int(r):02x}{int(g):02x}{int(b):02x}"
 
 
 def _agreement(per_view: list[dict[str, Any]]) -> tuple[dict[str, dict[str, Any]], list[str]]:
@@ -176,17 +198,26 @@ def _run_multiview_reconstruction(
     template_name: str | None,
     job_id: str,
     manual_measurements: Measurements,
-    color: str,
+    color: str | None,
+    shape_override: FrameShape | None,
+    material_override: FrameMaterial | None,
 ) -> dict[str, Any]:
     pipeline = _get_reconstruction_pipeline()
     view_classifier = ViewClassifier()
     per_view: list[dict[str, Any]] = []
     warnings: list[str] = []
+    detected_color: str | None = None
 
     for filename, path in zip(original_names, image_paths):
         image = pipeline._imread(path)
         if image is None:
             raise ValueError(f"Cannot decode {filename}")
+        height, width = image.shape[:2]
+        if height * width > MAX_IMAGE_PIXELS:
+            raise ValueError(
+                f"{filename} is too large after decoding "
+                f"({width}x{height}); maximum is {MAX_IMAGE_PIXELS:,} pixels"
+            )
 
         masks = pipeline.segmenter.segment(image)
         mask = masks["front"]
@@ -205,9 +236,17 @@ def _run_multiview_reconstruction(
         confidence = float(masks.get("confidence", 0.0))
         model_type = str(masks.get("model_type", "unknown"))
         if model_type == "opencv_fallback":
+            if REQUIRE_YOLO:
+                raise RuntimeError(
+                    "Production reconstruction requires the trained YOLO segmentation model; "
+                    "OpenCV fallback is disabled"
+                )
             warnings.append(f"{filename}: YOLO unavailable; OpenCV fallback used")
         elif confidence < 0.75:
             warnings.append(f"{filename}: low mask confidence ({confidence:.2f})")
+
+        if detected_color is None and view_type in {"front", "perspective"}:
+            detected_color = _detect_frame_color(image, mask)
 
         per_view.append(
             {
@@ -225,13 +264,18 @@ def _run_multiview_reconstruction(
             }
         )
 
+    resolved_color = color or detected_color or "#000000"
+    manual_measurements.color = resolved_color
+
     glb_path = RECONSTRUCTION_DIR / f"{job_id}.glb"
     result = pipeline.run_from_multiple_images(
         image_paths,
         glb_path,
-        color,
+        resolved_color,
         template_name,
         manual_measurements=manual_measurements,
+        shape_override=shape_override,
+        material_override=material_override,
     )
 
     agreement, agreement_warnings = _agreement(per_view)
@@ -261,6 +305,7 @@ def _run_multiview_reconstruction(
         "views": per_view,
         "consolidated_measurements": consolidated,
         "measurement_source": result.get("measurement_source", "manual"),
+        "resolved_color": resolved_color,
         "image_estimate_agreement": agreement,
         "measurement_agreement": agreement,
         "warnings": warnings,
@@ -441,7 +486,9 @@ async def reconstruct_multi_view(
     temple_length: float = Form(...),
     rim_thickness: float = Form(1.2),
     temple_curve_angle: float = Form(28.0),
-    color: str = Form("#d9a7a2"),
+    color: str | None = Form(None),
+    shape: str | None = Form(None),
+    material: str | None = Form(None),
     template_name: str | None = Form(None),
 ):
     """Dashboard-compatible multi-view reconstruction endpoint."""
@@ -449,6 +496,8 @@ async def reconstruct_multi_view(
         raise HTTPException(status_code=400, detail="Upload exactly 4 or 5 images")
 
     try:
+        shape_override = FrameShape(shape) if shape else None
+        material_override = FrameMaterial(material) if material else None
         manual_measurements = Measurements(
             frame_width=frame_width,
             lens_width=lens_width,
@@ -457,10 +506,10 @@ async def reconstruct_multi_view(
             temple_length=temple_length,
             rim_thickness=rim_thickness,
             temple_curve_angle=temple_curve_angle,
-            color=color,
+            color=color or "#000000",
         )
     except Exception as exc:
-        raise HTTPException(status_code=422, detail=f"Invalid manual measurements: {exc}") from exc
+        raise HTTPException(status_code=422, detail=f"Invalid reconstruction input: {exc}") from exc
 
     _prune_reconstruction_models()
     job_id = uuid.uuid4().hex[:12]
@@ -470,6 +519,7 @@ async def reconstruct_multi_view(
             work_dir = Path(tmp_dir)
             image_paths: list[Path] = []
             original_names: list[str] = []
+            seen_hashes: set[str] = set()
 
             for index, upload in enumerate(images):
                 raw = await upload.read()
@@ -481,6 +531,13 @@ async def reconstruct_multi_view(
                         detail=f"{upload.filename or f'Image {index + 1}'} exceeds "
                         f"{MAX_IMAGE_BYTES // (1024 * 1024)}MB limit",
                     )
+                digest = hashlib.sha256(raw).hexdigest()
+                if digest in seen_hashes:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"{upload.filename or f'Image {index + 1}'} duplicates another uploaded image",
+                    )
+                seen_hashes.add(digest)
                 suffix = Path(upload.filename or "").suffix.lower()
                 if suffix not in {".jpg", ".jpeg", ".png", ".webp"}:
                     suffix = ".jpg"
@@ -497,6 +554,8 @@ async def reconstruct_multi_view(
                 job_id,
                 manual_measurements,
                 color,
+                shape_override,
+                material_override,
             )
     except HTTPException:
         raise
