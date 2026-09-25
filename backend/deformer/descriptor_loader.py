@@ -149,6 +149,14 @@ class DescriptorLoader:
         )
         scene.apply_scale(source_to_mm_scale)
 
+        if require_independent_parts:
+            self._validate_template_dimensions(
+                resolved_template,
+                geometry,
+                dims,
+                tolerance_mm=3.0,
+            )
+
         # Alias dictionaries reference the same mesh objects contained in scene,
         # so scaling the scene also scales the resolved logical geometry.
         empty_anchors = self._load_empty_anchors(payload, source_scene, source_to_mm_scale)
@@ -642,6 +650,26 @@ class DescriptorLoader:
                 f"source frame width={frame_width_source:.6f}, expected={expected_width_mm:.3f} mm"
             )
         return float(scale), units
+
+    @staticmethod
+    def _validate_template_dimensions(
+        template_path: Path,
+        geometry: dict[str, trimesh.Trimesh],
+        dimensions: TemplateDimensions,
+        *,
+        tolerance_mm: float,
+    ) -> None:
+        frame = geometry.get("Frame")
+        if frame is None or len(frame.vertices) == 0:
+            raise ValueError(f"Production template {template_path} has no Frame geometry")
+        actual_width = float(frame.extents[0])
+        error = abs(actual_width - float(dimensions.frame_width))
+        if error > tolerance_mm:
+            raise ValueError(
+                f"Production template {template_path} frame width does not match metadata: "
+                f"geometry={actual_width:.3f} mm, metadata={dimensions.frame_width:.3f} mm, "
+                f"error={error:.3f} mm"
+            )
 
     @staticmethod
     def _validate_independent_components(
