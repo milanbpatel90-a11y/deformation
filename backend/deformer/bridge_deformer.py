@@ -142,6 +142,15 @@ class BridgeDeformer(BaseDeformer):
         vertices[:, 0] = center[0] + (vertices[:, 0] - center[0]) * (1.0 + (width_scale - 1.0) * weights_x)
         vertices[:, 1] = center[1] + (vertices[:, 1] - center[1]) * (1.0 + (height_scale - 1.0) * weights_y)
         vertices[:, 2] = center[2] + (vertices[:, 2] - center[2]) * depth_scale
+
+        # The weighted profile can under/overshoot the requested physical
+        # width. Normalize the isolated bridge component to the already-clamped
+        # safe target before blending nearby frame vertices.
+        width_now = float(vertices[:, 0].max() - vertices[:, 0].min())
+        if width_now > 1e-9:
+            center_x = float((vertices[:, 0].max() + vertices[:, 0].min()) * 0.5)
+            exact_scale = target["target_width_m"] / width_now
+            vertices[:, 0] = center_x + (vertices[:, 0] - center_x) * exact_scale
         vertices[:, 0] -= vertices[:, 0].mean()
 
         bridge_mesh.vertices = vertices
