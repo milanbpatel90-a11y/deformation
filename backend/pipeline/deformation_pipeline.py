@@ -14,6 +14,7 @@ from backend.classifier.shape_classifier import ShapeClassifier
 from backend.deformer.engine import MeshDeformer
 from backend.exporter.glb_exporter import GLBExporter
 from backend.materials.pbr import apply_materials
+from backend.materials.appearance import apply_image_appearance
 from backend.measurement.extractor import MeasurementExtractor
 from backend.models import ExportMetadata, Measurements, PipelineReport, StyleClassification
 from backend.segmentation.segmenter import GlassesSegmenter
@@ -42,6 +43,18 @@ class DeformationPipeline:
         self.exporter = GLBExporter()
         self.descriptor_loader = DescriptorLoader(self.library.templates_dir)
 
+    def _deform_template(self, info, measurements, contour=None):
+        if info.deformation_mode == "basis":
+            from backend.deformer.basis_deformer import BasisDeformer
+            return BasisDeformer(Path(info.glb_path).parents[1]).deform(measurements)
+        scene = trimesh.load(info.glb_path, force="scene")
+        descriptor = self.descriptor_loader.load(info.name, measurements=measurements, template_info=info)
+        context = DeformationContext(template_info=info, template_scene=scene,
+                                     descriptor=descriptor, measurements=measurements)
+        engine = MeshDeformer(scene, info.dimensions, rim_pull_strength=self.library.rim_pull_strength(info.name))
+        context, quality = engine.deform(context, contour)
+        return context.template_scene, quality
+
     def _style_from_measurements(self, measurements: Measurements) -> StyleClassification:
         aspect_ratio = measurements.lens_width / max(measurements.lens_height, 1e-6)
         return StyleClassification(
@@ -60,40 +73,6 @@ class DeformationPipeline:
             confidence=1.0,
             metrics={"source": "measurements"},
         )
-
-    @staticmethod
-    def _inject_aliases_into_scene(scene: trimesh.Scene, descriptor) -> None:
-        """Add logical mesh names into scene.geometry so DeformationContext can find them.
-
-        The descriptor_loader resolves aliases (e.g. 'LeftRim' -> 'Plane_glasses_mat_0')
-        but the scene itself only has the original GLB names. The DeformationContext builds
-        its meshes dict straight from scene.geometry, so logical names must be present there.
-        """
-        from copy import deepcopy
-
-        # Collect all unique actual→logical mappings from vertex_groups + descriptor parts
-        alias_map: dict[str, str] = {}  # logical_name -> actual_glb_name
-
-        # Pull from descriptor raw mesh_aliases if present
-        raw_aliases = descriptor.raw.get("mesh_aliases", {})
-        if isinstance(raw_aliases, dict):
-            for logical, actual in raw_aliases.items():
-                if actual in scene.geometry and logical not in scene.geometry:
-                    alias_map[logical] = actual
-
-        # Also cover any logical names derived from vertex_groups that aren't in scene yet
-        for group_parts in descriptor.vertex_groups.values():
-            for logical_name in group_parts:
-                if logical_name not in scene.geometry:
-                    # Find the actual mesh this logical name maps to via raw_aliases
-                    actual = raw_aliases.get(logical_name)
-                    if actual and actual in scene.geometry:
-                        alias_map[logical_name] = actual
-
-        # Inject: add logical-named references into scene.geometry
-        for logical_name, actual_name in alias_map.items():
-            if logical_name not in scene.geometry:
-                scene.geometry[logical_name] = scene.geometry[actual_name]
 
     @staticmethod
     def _optimize_scene(scene: trimesh.Scene) -> trimesh.Scene:
@@ -131,6 +110,8 @@ class DeformationPipeline:
         color: str = "#d9a7a2",
         template_override: str | None = None,
         top_path: Path | str | None = None,
+        manual_measurements: Measurements | None = None,
+        automatic_appearance: bool = True,
     ) -> dict:
         front = self._imread(front_path)
         if front is None:
@@ -139,7 +120,7 @@ class DeformationPipeline:
         side = self._imread(side_path) if side_path else None
         top = self._imread(top_path) if top_path else None
 
-        return self.run_from_arrays(front, side, output_path, color, template_override, top=top)
+        return self.run_from_arrays(front, side, output_path, color, template_override, top=top, manual_measurements=manual_measurements, automatic_appearance=automatic_appearance)
 
     def run_from_measurements(
         self,
@@ -149,34 +130,14 @@ class DeformationPipeline:
     ) -> dict:
         style = self._style_from_measurements(measurements)
         features = self.feature_extractor.from_measurements(measurements, style)
-        match = self.matcher.match(features, template_name)
+        match = self.matcher.match(features, template_name, measurements=measurements)
         template_info = match.best.template
         template_name = template_info.name
 
-        scene = trimesh.load(template_info.glb_path, force="scene")
-        
-        # Try to load descriptor, fall back to simple deformation if template not properly prepared
-        try:
-            descriptor = self.descriptor_loader.load(template_name, measurements=measurements, template_info=template_info)
-            ctx = DeformationContext(
-                template_info=template_info,
-                template_scene=scene,
-                descriptor=descriptor,
-                measurements=measurements,
-            )
-            rim_pull = self.library.rim_pull_strength(template_name)
-            deformer = MeshDeformer(scene, template_info.dimensions, rim_pull_strength=rim_pull)
-            deformed_ctx, quality = deformer.deform(ctx)
-            deformed = deformed_ctx.template_scene
-        except (ValueError, KeyError) as e:
-            # Fallback to old simple deformation without descriptors
-            import warnings
-            warnings.warn(f"Template {template_name} not properly prepared (descriptor error: {e}). Using simple deformation fallback.")
-            from backend.deformer.engine import MeshDeformer as OldDeformer
-            rim_pull = self.library.rim_pull_strength(template_name)
-            deformer = OldDeformer(scene, template_info.dimensions, rim_pull_strength=rim_pull)
-            deformed = deformer.deform(measurements)
-        
+        deformed, quality = self._deform_template(template_info, measurements)
+
+        if measurements.shape != template_info.shape:
+            quality.warnings.append(f"Detected/requested shape: {measurements.shape.value}; available template geometry: {template_info.shape.value}. Exact silhouette requires a matching template.")
         deformed = apply_materials(deformed, measurements)
 
         out = Path(output_path)
@@ -193,10 +154,13 @@ class DeformationPipeline:
             temple_length=measurements.temple_length,
             template_used=template_name,
             color=measurements.color,
+            lens_color=measurements.lens_color,
+            lens_opacity=measurements.lens_opacity,
         )
         self.exporter.export_metadata_json(metadata, anchors, meta_path)
 
         return {
+            "quality": quality.to_dict(),
             "output_glb": str(out),
             "metadata_json": str(meta_path),
             "measurements": measurements.model_dump(),
@@ -222,6 +186,8 @@ class DeformationPipeline:
         color: str = "#d9a7a2",
         template_override: str | None = None,
         top: np.ndarray | None = None,
+        manual_measurements: Measurements | None = None,
+        automatic_appearance: bool = True,
     ) -> dict:
         report = PipelineReport()
 
@@ -245,18 +211,27 @@ class DeformationPipeline:
             metrics=style.metrics,
         )
 
-        s3 = report.add("Measurement Extraction")
+        s3 = report.add("Manual Measurements" if manual_measurements is not None else "Measurement Extraction")
         t = s3.start()
-        measurements, lens_contour = self.measurer.extract_from_images(
-            front,
-            side,
-            masks["front"],
-            style.shape,
-            style.material,
-            style.nose_pads,
-            color,
-            top=top,
-        )
+        if manual_measurements is not None:
+            measurements = manual_measurements.model_copy(deep=True)
+            style = self._style_from_measurements(measurements)
+            lens_contour = self.measurer.extract_lens_contour(front, masks["front"])
+        else:
+            measurements, lens_contour = self.measurer.extract_from_images(
+                front,
+                side,
+                masks["front"],
+                style.shape,
+                style.material,
+                style.nose_pads,
+                color,
+                top=top,
+            )
+        if automatic_appearance:
+            measurements, style, appearance_mask = apply_image_appearance(self, measurements, front, masks["front"])
+            lens_contour = self.measurer.extract_lens_contour(front, appearance_mask)
+
         s3.finish(
             t,
             frame_width=measurements.frame_width,
@@ -273,7 +248,7 @@ class DeformationPipeline:
 
         s5 = report.add("Template Scoring")
         t = s5.start()
-        match = self.matcher.match(features, template_override)
+        match = self.matcher.match(features, template_override, measurements=measurements)
         template_info = match.best.template
         template_name = template_info.name
         s5.finish(
@@ -290,35 +265,28 @@ class DeformationPipeline:
 
         s6 = report.add("Template Deformation")
         t = s6.start()
-        scene = trimesh.load(template_info.glb_path, force="scene")
-        descriptor = self.descriptor_loader.load(template_name, measurements=measurements, template_info=template_info)
-        self._inject_aliases_into_scene(scene, descriptor)
-        ctx = DeformationContext(
-            template_info=template_info,
-            template_scene=scene,
-            descriptor=descriptor,
-            measurements=measurements,
-        )
         rim_pull = self.library.rim_pull_strength(template_name)
-        deformer = MeshDeformer(scene, template_info.dimensions, rim_pull_strength=rim_pull)
-        deformed_ctx, quality = deformer.deform(ctx, lens_contour)
-        deformed = deformed_ctx.template_scene
+        deformed, quality = self._deform_template(template_info, measurements, lens_contour)
         s6.finish(
             t,
             rim_pull_strength=rim_pull,
-            deformation_mode="template_vertex_groups",
+            deformation_mode=template_info.deformation_mode,
             contour_used=False,
             scale_factors=self._scale_summary(measurements, template_info.dimensions),
         )
 
         s7 = report.add("Texture Mapping")
         t = s7.start()
+        if measurements.shape != template_info.shape:
+            quality.warnings.append(f"Detected/requested shape: {measurements.shape.value}; available template geometry: {template_info.shape.value}. Exact silhouette requires a matching template.")
         deformed = apply_materials(deformed, measurements)
         frame_parts = [name for name in deformed.geometry if name not in {"LeftLens", "RightLens"}]
         s7.finish(
             t,
             material=measurements.material.value,
             color=measurements.color,
+            lens_color=measurements.lens_color,
+            lens_opacity=measurements.lens_opacity,
             frame_parts=frame_parts,
             lens_parts=["LeftLens", "RightLens"],
         )
@@ -346,11 +314,14 @@ class DeformationPipeline:
             temple_length=measurements.temple_length,
             template_used=template_name,
             color=measurements.color,
+            lens_color=measurements.lens_color,
+            lens_opacity=measurements.lens_opacity,
         )
         self.exporter.export_metadata_json(metadata, anchors, meta_path)
         s9.finish(t, output=str(out), size_kb=round(out.stat().st_size / 1024, 1))
 
         return {
+            "quality": quality.to_dict(),
             "output_glb": str(out),
             "metadata_json": str(meta_path),
             "measurements": measurements.model_dump(),
@@ -376,6 +347,8 @@ class DeformationPipeline:
         output_path: Path | str | None = None,
         color: str = "#d9a7a2",
         template_override: str | None = None,
+        manual_measurements: Measurements | None = None,
+        automatic_appearance: bool = True,
     ) -> dict:
         """
         Run the full pipeline on 4-6 images:
@@ -389,68 +362,79 @@ class DeformationPipeline:
         report = PipelineReport()
         s1 = report.add("Multi-View Classification and Extraction")
         t = s1.start()
-        
+
         view_classifier = ViewClassifier()
         fuser = MeasurementFuser()
         opacity_detector = OpacityDetector()
-        
+
         extracted_views = []
         front_image = None
         front_lens_contour = None
-        
+        first_valid = None
+
         for path in image_paths:
             img = self._imread(path)
             if img is None:
                 continue
-            
+
             masks = self.segmenter.segment(img)
             view_type = view_classifier.classify_view(img, masks["front"])
-            
+
             style = self.classifier.classify_style(img, masks["front"])
-            measurements, lens_contour = self.measurer.extract_from_images(
-                img,
-                side=None,
-                mask=masks["front"],
-                shape=style.shape,
-                material=style.material,
-                nose_pads=style.nose_pads,
-                color=color,
-            )
-            
+            if manual_measurements is not None:
+                measurements = manual_measurements.model_copy(deep=True)
+                lens_contour = self.measurer.extract_lens_contour(img, masks["front"])
+            else:
+                measurements, lens_contour = self.measurer.extract_from_images(
+                    img,
+                    side=None,
+                    mask=masks["front"],
+                    shape=style.shape,
+                    material=style.material,
+                    nose_pads=style.nose_pads,
+                    color=color,
+                )
+
+            if first_valid is None:
+                first_valid = (img, lens_contour)
             extracted_views.append((view_type, measurements))
-            
+
             if view_type == "front" and front_image is None:
                 front_image = img
                 front_lens_contour = lens_contour
-                
+
         if not extracted_views:
             raise ValueError("No valid images could be processed")
-            
+
         # If no front view was classified, pick the first view as front fallback
         if front_image is None:
             first_view_type, first_ms = extracted_views[0]
-            front_image = self._imread(image_paths[0])
+            front_image, front_lens_contour = first_valid
             extracted_views[0] = ("front", first_ms)
-            masks = self.segmenter.segment(front_image)
-            front_lens_contour = self.measurer.extract_lens_contour(front_image, masks["front"])
-            
+
         # Fuse measurements
-        fused_measurements = fuser.fuse(extracted_views)
-        
+        fused_measurements = manual_measurements.model_copy(deep=True) if manual_measurements is not None else fuser.fuse(extracted_views)
+
+        if automatic_appearance:
+            fused_measurements, _, appearance_mask = apply_image_appearance(self, fused_measurements, front_image)
+            front_lens_contour = self.measurer.extract_lens_contour(front_image, appearance_mask)
+
         # Detect lens opacity and dominant color
         lens_opacity, lens_color = opacity_detector.detect(front_image, front_lens_contour)
-        fused_measurements.lens_color = lens_color
-        fused_measurements.lens_opacity = lens_opacity
-        
+        if fused_measurements.lens_color is None:
+            fused_measurements.lens_color = lens_color
+        if fused_measurements.lens_opacity is None:
+            fused_measurements.lens_opacity = lens_opacity
+
         s1.finish(t, views=[v[0] for v in extracted_views])
-        
+
         # Run template selection, deformation, material mapping, and export
         s2 = report.add("Template Scoring")
         t = s2.start()
-        
+
         style = self._style_from_measurements(fused_measurements)
         features = self.feature_extractor.from_measurements(fused_measurements, style)
-        match = self.matcher.match(features, template_override)
+        match = self.matcher.match(features, template_override, measurements=fused_measurements)
         template_info = match.best.template
         template_name = template_info.name
         s2.finish(
@@ -467,29 +451,20 @@ class DeformationPipeline:
 
         s3 = report.add("Template Deformation")
         t = s3.start()
-        scene = trimesh.load(template_info.glb_path, force="scene")
-        descriptor = self.descriptor_loader.load(template_name, measurements=fused_measurements, template_info=template_info)
-        self._inject_aliases_into_scene(scene, descriptor)
-        ctx = DeformationContext(
-            template_info=template_info,
-            template_scene=scene,
-            descriptor=descriptor,
-            measurements=fused_measurements,
-        )
         rim_pull = self.library.rim_pull_strength(template_name)
-        deformer = MeshDeformer(scene, template_info.dimensions, rim_pull_strength=rim_pull)
-        deformed_ctx, quality = deformer.deform(ctx, front_lens_contour)
-        deformed = deformed_ctx.template_scene
+        deformed, quality = self._deform_template(template_info, fused_measurements, front_lens_contour)
         s3.finish(
             t,
             rim_pull_strength=rim_pull,
-            deformation_mode="template_vertex_groups",
+            deformation_mode=template_info.deformation_mode,
             scale_factors=self._scale_summary(fused_measurements, template_info.dimensions),
         )
 
         s4 = report.add("Texture Mapping")
         t = s4.start()
         deformed = apply_materials(deformed, fused_measurements)
+        if fused_measurements.shape != template_info.shape:
+            quality.warnings.append(f"Detected/requested shape: {fused_measurements.shape.value}; available template geometry: {template_info.shape.value}. Exact silhouette requires a matching template.")
         frame_parts = [name for name in deformed.geometry if name not in {"LeftLens", "RightLens"}]
         s4.finish(
             t,
@@ -531,6 +506,7 @@ class DeformationPipeline:
         s6.finish(t, output=str(out), size_kb=round(out.stat().st_size / 1024, 1))
 
         return {
+            "quality": quality.to_dict(),
             "output_glb": str(out),
             "metadata_json": str(meta_path),
             "measurements": fused_measurements.model_dump(),

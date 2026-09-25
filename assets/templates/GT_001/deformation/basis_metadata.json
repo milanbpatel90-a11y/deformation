@@ -1,0 +1,93 @@
+{
+  "parameters": [
+    {
+      "name": "frame_width",
+      "units": "mm",
+      "default": 140.0,
+      "min": 110,
+      "max": 170,
+      "affected_parts": [
+        "Frame",
+        "LeftFrameInsert",
+        "RightFrameInsert",
+        "LeftDecoration",
+        "RightDecoration",
+        "LeftLens",
+        "RightLens",
+        "LeftTemple",
+        "RightTemple",
+        "LeftHinge",
+        "RightHinge",
+        "LeftTempleJoint",
+        "RightTempleJoint"
+      ],
+      "generation_rule": "Frame/insert/decoration: exact affine X-scale about X=0 (dX/dp = X/frame_width_default). Lens/temple/hinge/joint assemblies: rigid outward translation of frame_width_delta/2 per side."
+    },
+    {
+      "name": "lens_width",
+      "units": "mm",
+      "default": 55.79,
+      "min": 40,
+      "max": 70,
+      "affected_parts": [
+        "LeftLens",
+        "RightLens",
+        "Frame (rim region, smooth falloff)"
+      ],
+      "generation_rule": "Lens: exact affine X-scale about own LM_*LensCenter.x. Frame: SAME formula applied to every Frame vertex, weighted by smoothstep(1 - d/12mm) where d = distance to nearest vertex of that lens. 12mm falloff radius measured from actual geometry (90th/99th percentile of Frame-to-lens distance at rest, see build_basis.py docstring).",
+      "known_limitation": null,
+      "quality_metric": "lens_rim_boundary_error_mm (engine.lens_rim_boundary_error_mm) - measured 0.0005mm at +5% (target: stay near the 0.02mm rest-state gap)"
+    },
+    {
+      "name": "lens_height",
+      "units": "mm",
+      "default": 36.92,
+      "min": 25,
+      "max": 50,
+      "affected_parts": [
+        "LeftLens",
+        "RightLens",
+        "Frame (rim region, smooth falloff)"
+      ],
+      "generation_rule": "Same method as lens_width, applied to Z about LM_*LensCenter.z.",
+      "known_limitation": null,
+      "quality_metric": "lens_rim_boundary_error_mm - measured 0.0011mm at +5%"
+    },
+    {
+      "name": "bridge_width",
+      "units": "mm",
+      "default": 17.9,
+      "min": 12,
+      "max": 28,
+      "affected_parts": [
+        "LeftLens",
+        "RightLens",
+        "Frame (bridge region, smooth falloff, 22mm radius)"
+      ],
+      "generation_rule": "Lens: rigid +-0.5*delta X-shift (unchanged from v1). Frame: rigid-direction X-shift weighted by smoothstep(1 - d_to_bridge_center/22mm), so Frame moves with the lens near the nasal/bridge area and tapers to exactly 0 well before the hinge (measured: nearest Frame vertex to LM_LeftHinge is 45mm+ from bridge center, radius is 22mm, so zero overlap risk).",
+      "known_limitation": "At large deltas (tested at max range, 28mm) local edge stretch in the bridge falloff band reaches ~18mm distortion - the smoothstep falloff is C1-continuous but not shape-preserving under large pushes. Acceptable for the +-5% test range (1.6mm measured) but a proper ARAP/biharmonic solve would be needed for full-range production quality.",
+      "quality_metric": "bridge_continuity_error_mm (engine.bridge_continuity_error_mm) - measured 1.6mm at +5% (delta=0.9mm), 18.0mm at max range (delta=10.1mm)"
+    },
+    {
+      "name": "temple_length",
+      "units": "mm",
+      "default": 155.02,
+      "min": 120,
+      "max": 180,
+      "affected_parts": [
+        "LeftTemple",
+        "RightTemple"
+      ],
+      "generation_rule": "Affine scale along each temple's root->tip axis (LM_*TempleRoot -> LM_*TempleTip), pivoting at the root so the hinge attachment point never moves.",
+      "known_limitation": "LeftTempleJoint/RightTempleJoint are rigid and do not stretch with the temple - large deltas could visually separate temple from joint housing."
+    }
+  ],
+  "formula": "V(p) = V0 + sum_i( B[:,:,i] * (p_i - default_i) ),  p_i in mm, default in mm",
+  "unified_vertex_order": "matches masks.json part_masks (index ranges), which matches part_order in _part_order.json and the GLB node order",
+  "symmetry_note": "All 5 basis vectors are constructed from geometry that was pre-verified as mirror-symmetric to <1e-6mm, and each rule treats Left/Right identically (same formula, mirrored sign or mirrored landmark) - symmetry is structurally preserved by construction, not just checked after the fact.",
+  "version": "1.1",
+  "changelog": [
+    "v1.1: lens_width, lens_height, bridge_width now couple the Frame rim (previously Frame was completely unaffected by these 3 params - the lens visibly separated from the rim at any nontrivial delta).",
+    "v1.1: bridge_width no longer moves Hinge/Temple/TempleJoint (was incorrectly duplicating frame_width's job) - it is now a local nasal/rim parameter only. frame_width remains the whole-assembly parameter."
+  ]
+}

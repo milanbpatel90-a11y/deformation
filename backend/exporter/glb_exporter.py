@@ -27,6 +27,12 @@ class GLBExporter:
     ) -> Path:
         output_path = Path(output_path)
         output_path.parent.mkdir(parents=True, exist_ok=True)
+        if not scene.geometry or any(
+            not isinstance(mesh, trimesh.Trimesh) or len(mesh.vertices) == 0
+            or not np.isfinite(mesh.vertices).all()
+            for mesh in scene.geometry.values()
+        ):
+            raise ValueError("Cannot export empty or non-finite geometry")
 
         metadata = ExportMetadata(
             shape=measurements.shape.value,
@@ -36,6 +42,8 @@ class GLBExporter:
             temple_length=measurements.temple_length,
             template_used=template_name,
             color=measurements.color,
+            lens_color=measurements.lens_color,
+            lens_opacity=measurements.lens_opacity,
         )
 
         export_scene = scene.copy()
@@ -49,6 +57,8 @@ class GLBExporter:
         self, scene: trimesh.Scene, measurements: Measurements
     ) -> dict[str, list[float]]:
         """Compute VTO attachment points from deformed geometry."""
+        if "vto_anchors" in scene.metadata:
+            return scene.metadata["vto_anchors"]
         bridge = scene.geometry.get("Bridge") or scene.geometry.get("Frame")
         left_temple = scene.geometry.get("LeftTemple")
         right_temple = scene.geometry.get("RightTemple")
@@ -59,12 +69,12 @@ class GLBExporter:
             nose = np.array([0.0, 0.0, 0.0])
 
         left_hinge = (
-            left_temple.vertices[left_temple.vertices[:, 0].argmin()]
+            left_temple.vertices[left_temple.vertices[:, 0].argmax()]
             if left_temple is not None and len(left_temple.vertices) > 0
             else np.array([-measurements.frame_width / 2, 0.0, 0.0])
         )
         right_hinge = (
-            right_temple.vertices[right_temple.vertices[:, 0].argmax()]
+            right_temple.vertices[right_temple.vertices[:, 0].argmin()]
             if right_temple is not None and len(right_temple.vertices) > 0
             else np.array([measurements.frame_width / 2, 0.0, 0.0])
         )

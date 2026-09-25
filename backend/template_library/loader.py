@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 from backend.models import (
@@ -23,7 +24,8 @@ class TemplateLibrary:
     """Load template metadata and resolve the backing GLB for deformation."""
 
     def __init__(self, templates_dir: Path | None = None):
-        self.templates_dir = templates_dir or TEMPLATES_DIR
+        self.templates_dir = Path(templates_dir or TEMPLATES_DIR)
+        self.bundle_dir = self.templates_dir.parent / "assets" / "templates"
         self._cache: dict[str, TemplateInfo] = {}
 
     _NON_TEMPLATE_STEMS = {"templates", "registry"}
@@ -41,11 +43,32 @@ class TemplateLibrary:
             if not isinstance(data, dict) or "dimensions" not in data:
                 continue
             names.append(path.stem)
-        return sorted(names)
+        for metadata in self.bundle_dir.glob("*/deformation/basis_metadata.json"):
+            if (metadata.parents[1] / "geometry/template.glb").is_file():
+                names.append(metadata.parents[1].name)
+        return sorted(set(names))
 
     def load(self, name: str) -> TemplateInfo:
+        if not re.fullmatch(r"[A-Za-z0-9_-]+", name):
+            raise ValueError("Invalid template name")
         if name in self._cache:
             return self._cache[name]
+
+        bundle = self.bundle_dir / name
+        if (bundle / "deformation/basis_metadata.json").is_file():
+            params = json.loads((bundle / "deformation/basis_metadata.json").read_text(encoding="utf-8"))["parameters"]
+            dimensions = TemplateDimensions(**{p["name"]: p["default"] for p in params})
+            info = TemplateInfo(
+                name=name, deformation_mode="basis", shape=FrameShape.RECTANGLE,
+                material=FrameMaterial.PLASTIC, glb_path=str(bundle / "geometry/template.glb"),
+                dimensions=dimensions,
+                parts=["Frame", "LeftLens", "RightLens", "LeftTemple", "RightTemple"],
+                profile=TemplateProfile(frame_family=FrameFamily.RECTANGLE, material=FrameMaterial.PLASTIC,
+                    rim_type=RimType.FULL_RIM, bridge_type=BridgeType.SADDLE,
+                    lens_aspect_ratio=dimensions.lens_aspect_ratio, tags=["gold", "rectangle"]),
+            )
+            self._cache[name] = info
+            return info
 
         meta_path = self.templates_dir / f"{name}.json"
         if not meta_path.exists():

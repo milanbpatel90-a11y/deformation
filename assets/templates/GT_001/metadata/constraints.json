@@ -1,30 +1,247 @@
 {
-  "version": "1.0",
-  "constraints": {
-    "symmetry": {
-      "enabled": true,
-      "pairs": [
-        {"left": "Lens_L", "right": "Lens_R"},
-        {"left": "Rim_L", "right": "Rim_R"},
-        {"left": "Temple_L", "right": "Temple_R"}
-      ]
+  "schema_version": "1.1",
+  "note": "Pivot/axis geometry below is measured directly from LM_* landmarks (exact). Angle ranges are ENGINEERING DEFAULTS, not measured/verified against real hinge hardware - see rotation_range_source. Equality/inequality constraints below are the current mesh-quality/attachment rules the deform() and validator enforce.",
+  "hinges": {
+    "left": {
+      "pivot": "LM_LeftHinge",
+      "pivot_position": [
+        69.999268,
+        0.0,
+        2.97169
+      ],
+      "axis_reference_point": "LM_LeftHingeAxis",
+      "axis_unit_vector": [
+        -0.9981199537856897,
+        0.05970144226153175,
+        -0.013867070589910525
+      ],
+      "default_angle_deg": 0,
+      "min_angle_deg": 0,
+      "max_angle_deg": 100,
+      "rotation_range_source": "CONFIGURABLE_ENGINEERING_DEFAULT - not derived from this model; edit here to match your real hinge hardware spec.",
+      "moved_by_bridge_width": false,
+      "moved_by_frame_width": true
     },
-    "topology": {
-      "preserve_connectivity": true,
-      "prevent_self_intersection": true
-    },
-    "geometry": {
-      "min_edge_length": 0.1,
-      "max_edge_length": 10.0,
-      "smoothness_weight": 0.5
-    },
-    "measurements": {
-      "frame_width": {"min": 120, "max": 160},
-      "lens_width": {"min": 45, "max": 65},
-      "lens_height": {"min": 30, "max": 50},
-      "bridge_width": {"min": 14, "max": 24},
-      "temple_length": {"min": 135, "max": 155}
+    "right": {
+      "pivot": "LM_RightHinge",
+      "pivot_position": [
+        -69.999268,
+        0.0,
+        2.97169
+      ],
+      "axis_reference_point": "LM_RightHingeAxis",
+      "axis_unit_vector": [
+        0.9981199537856897,
+        0.05970144226153175,
+        -0.013867070589910525
+      ],
+      "default_angle_deg": 0,
+      "min_angle_deg": 0,
+      "max_angle_deg": 100,
+      "rotation_range_source": "CONFIGURABLE_ENGINEERING_DEFAULT - not derived from this model; edit here to match your real hinge hardware spec.",
+      "moved_by_bridge_width": false,
+      "moved_by_frame_width": true
     }
   },
-  "notes": "Placeholder constraints. Replace with actual Gold Template constraints."
+  "rigidity_policy": {
+    "Frame": {
+      "deform": true,
+      "rotate": true,
+      "scale": "limited"
+    },
+    "LeftLens": {
+      "deform": "follows_frame_v2_not_yet",
+      "rotate": true,
+      "scale": "limited"
+    },
+    "RightLens": {
+      "deform": "follows_frame_v2_not_yet",
+      "rotate": true,
+      "scale": "limited"
+    },
+    "LeftTemple": {
+      "deform": "temple_length_basis",
+      "rotate": "about left hinge axis",
+      "scale": "limited"
+    },
+    "RightTemple": {
+      "deform": "temple_length_basis",
+      "rotate": "about right hinge axis",
+      "scale": "limited"
+    },
+    "LeftHinge": {
+      "deform": false,
+      "rotate": "drives temple rotation",
+      "scale": false
+    },
+    "RightHinge": {
+      "deform": false,
+      "rotate": "drives temple rotation",
+      "scale": false
+    },
+    "LeftTempleJoint": {
+      "deform": false,
+      "rotate": "follows LeftHinge",
+      "scale": false
+    },
+    "RightTempleJoint": {
+      "deform": false,
+      "rotate": "follows RightHinge",
+      "scale": false
+    },
+    "LeftFrameInsert": {
+      "deform": "follows_parent(Frame)",
+      "rotate": false,
+      "scale": false
+    },
+    "RightFrameInsert": {
+      "deform": "follows_parent(Frame)",
+      "rotate": false,
+      "scale": false
+    },
+    "LeftDecoration": {
+      "deform": "follows_parent(Frame)",
+      "rotate": false,
+      "scale": false
+    },
+    "RightDecoration": {
+      "deform": "follows_parent(Frame)",
+      "rotate": false,
+      "scale": false
+    }
+  },
+  "equality_constraints": [
+    {
+      "id": "EQ_BRIDGE_CENTERING",
+      "type": "equality",
+      "affected_parts": [
+        "Frame"
+      ],
+      "parameters": {
+        "target": "LM_BridgeCenter",
+        "value": [
+          0,
+          0,
+          0
+        ]
+      },
+      "units": "mm",
+      "tolerance": 0.01,
+      "implementation_notes": "Enforced structurally: all basis rules are symmetric about X=0 by construction, so LM_BridgeCenter never moves under any of the 5 parameters. Checked in validate_template.py."
+    },
+    {
+      "id": "EQ_LR_SYMMETRY",
+      "type": "equality",
+      "affected_parts": [
+        "all"
+      ],
+      "parameters": {
+        "pairs": [
+          "LensCenter",
+          "LensTop",
+          "LensBottom",
+          "LensNasal",
+          "LensTemporal",
+          "Hinge",
+          "HingeAxis",
+          "TempleRoot",
+          "TempleTip",
+          "BridgeAttach"
+        ]
+      },
+      "units": "mm",
+      "tolerance": 1e-05,
+      "implementation_notes": "Verified on template load and after every deform() call by mirroring X and comparing Y/Z."
+    },
+    {
+      "id": "EQ_HINGE_ATTACHMENT",
+      "type": "equality",
+      "affected_parts": [
+        "LeftTemple",
+        "RightTemple",
+        "LeftHinge",
+        "RightHinge"
+      ],
+      "parameters": {
+        "description": "temple root vertex must coincide with hinge pivot after any deformation"
+      },
+      "units": "mm",
+      "tolerance": 0.05,
+      "implementation_notes": "Guaranteed by construction for temple_length (pivots at root) and frame_width/bridge_width (hinge+temple translate together, same rigid shift). NOT guaranteed if you compose rotate_hinge() with a stale pre-deform vertex array - always rotate AFTER deform()."
+    },
+    {
+      "id": "EQ_TEMPLE_ROOT_ATTACHMENT",
+      "type": "equality",
+      "affected_parts": [
+        "LeftTemple",
+        "RightTemple",
+        "LeftTempleJoint",
+        "RightTempleJoint"
+      ],
+      "parameters": {
+        "description": "temple root stays adjacent to its (rigid) TempleJoint housing"
+      },
+      "units": "mm",
+      "tolerance": 0.5,
+      "implementation_notes": "NOT actively enforced - TempleJoint is rigid while temple_length can stretch the temple. Flagged as a known gap in basis_metadata.json."
+    }
+  ],
+  "inequality_constraints": [
+    {
+      "id": "INEQ_LENS_INSIDE_RIM",
+      "type": "inequality",
+      "affected_parts": [
+        "LeftLens",
+        "RightLens",
+        "Frame"
+      ],
+      "parameters": {
+        "description": "lens boundary should remain within/at the frame rim opening"
+      },
+      "units": "mm",
+      "tolerance": "not enforced",
+      "implementation_notes": "NOT implemented - lens_width/lens_height/bridge_width move the lens independently of the frame rim (documented limitation in basis_metadata.json). This constraint exists here as a placeholder for the v2 rim-following basis."
+    },
+    {
+      "id": "INEQ_HINGE_ANGLE_LIMITS",
+      "type": "inequality",
+      "affected_parts": [
+        "LeftTemple",
+        "RightTemple"
+      ],
+      "parameters": {
+        "min": 0,
+        "max": 100,
+        "units": "deg"
+      },
+      "units": "deg",
+      "tolerance": 0,
+      "implementation_notes": "Enforced in rotate_hinge() callers should clamp angle_deg to [min_angle_deg, max_angle_deg] before calling; the engine itself does not currently clamp - caller responsibility, flagged for v2."
+    },
+    {
+      "id": "INEQ_EDGE_LENGTH_LIMIT",
+      "type": "inequality",
+      "affected_parts": [
+        "all"
+      ],
+      "parameters": {
+        "max_stretch_factor": 3.0
+      },
+      "units": "ratio",
+      "tolerance": "n/a",
+      "implementation_notes": "Checked in validate_template.py mesh-quality pass: flags any edge whose deformed length exceeds 3x its rest length as severe stretching."
+    },
+    {
+      "id": "INEQ_SELF_INTERSECTION",
+      "type": "inequality",
+      "affected_parts": [
+        "all"
+      ],
+      "parameters": {},
+      "units": "n/a",
+      "tolerance": "n/a",
+      "implementation_notes": "NOT implemented - true self-intersection testing (e.g. BVH-based triangle-triangle intersection) is expensive and was out of scope for this pass. Flagged as an open gap."
+    }
+  ],
+  "design_change_v1_1": "bridge_width no longer rigidly shifts LeftHinge/RightHinge/LeftTempleJoint/RightTempleJoint - see deformation/build_basis.py docstring. bridge_width is now a local nasal/rim parameter; frame_width remains the whole-assembly-width parameter that does move the hinge/temple."
 }

@@ -19,7 +19,7 @@ _MODEL_EXTENSIONS = {".pt", ".pth", ".onnx", ".engine", ".xml", ".mlpackage", ".
 _CANDIDATE_PATHS = [
     os.environ.get("DEFIRM_YOLO_MODEL"),
     _PROJECT_ROOT / "models" / "glasses_seg.pt",
-    _PROJECT_ROOT / "yolov8n-seg.pt",
+    _PROJECT_ROOT / "models" / "best.pt",
     _PROJECT_ROOT / "runs" / "segment" / "train" / "weights" / "best.pt",
 ]
 
