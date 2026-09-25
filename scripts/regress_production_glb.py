@@ -16,8 +16,12 @@ import trimesh
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from backend.deformer.deformation_context import DeformationContext
+from backend.deformer.engine import MeshDeformer
+from backend.deformer.rim_deformer import RimDeformer
 from backend.models import FrameMaterial, FrameShape, Measurements
 from backend.pipeline import DeformationPipeline
+from backend.scene_utils import load_world_baked_scene
 
 
 _REQUIRED = (
@@ -157,6 +161,76 @@ def _dimension_errors(metrics: dict, measurements: Measurements) -> dict:
     return errors
 
 
+
+def _topology_snapshot(context: DeformationContext) -> dict:
+    snapshot = {}
+    for name in ("LeftTemple", "RightTemple"):
+        mesh = context.mesh(name)
+        vertices = np.asarray(mesh.vertices, dtype=np.float64)
+        faces = np.asarray(mesh.faces, dtype=np.int64)
+        triangles = vertices[faces] if len(faces) else np.empty((0, 3, 3))
+        area2 = (
+            np.linalg.norm(
+                np.cross(triangles[:, 1] - triangles[:, 0], triangles[:, 2] - triangles[:, 0]),
+                axis=1,
+            )
+            if len(triangles)
+            else np.empty(0)
+        )
+        normals = np.asarray(mesh.vertex_normals) if len(vertices) else np.empty((0, 3))
+        normal_lengths = np.linalg.norm(normals, axis=1) if len(normals) else np.empty(0)
+        snapshot[name] = {
+            "vertices": int(len(vertices)),
+            "triangles": int(len(faces)),
+            "degenerate_triangles": int(np.count_nonzero(area2 <= 1e-12)),
+            "min_double_area": float(area2.min()) if len(area2) else None,
+            "zero_normals": int(np.count_nonzero(normal_lengths <= 1e-12)) if len(normal_lengths) else 0,
+            "finite": bool(np.isfinite(vertices).all()),
+        }
+    return snapshot
+
+
+def stage_trace(measurements: Measurements) -> list[dict]:
+    pipeline = DeformationPipeline(Path("templates"))
+    style = pipeline._style_from_measurements(measurements)
+    features = pipeline.feature_extractor.from_measurements(measurements, style)
+    match = pipeline.matcher.match(features, "geometric_metal")
+    template_info = match.best.template
+
+    scene = load_world_baked_scene(template_info.glb_path)
+    descriptor = pipeline.descriptor_loader.load(
+        "geometric_metal",
+        measurements=measurements,
+        template_info=template_info,
+    )
+    context = DeformationContext(
+        template_info=template_info,
+        template_scene=scene,
+        descriptor=descriptor,
+        measurements=measurements.model_copy(deep=True),
+        feature_set=features,
+    )
+    deformer = MeshDeformer(
+        scene,
+        template_info.dimensions,
+        rim_pull_strength=pipeline.library.rim_pull_strength("geometric_metal"),
+    )
+
+    trace = [{"stage": "resolved_components", "temples": _topology_snapshot(context)}]
+    for stage in deformer.stages:
+        if isinstance(stage, RimDeformer):
+            context = stage.apply(context, None)
+        else:
+            context = stage.apply(context)
+        trace.append({
+            "stage": getattr(stage, "stage_name", type(stage).__name__),
+            "temples": _topology_snapshot(context),
+        })
+
+    deformer._refresh_normals(context)
+    trace.append({"stage": "refresh_normals", "temples": _topology_snapshot(context)})
+    return trace
+
 def run_case(name: str, measurements: Measurements, output_dir: Path) -> dict:
     pipeline = DeformationPipeline(Path("templates"))
     out = output_dir / f"{name}.glb"
@@ -221,12 +295,15 @@ def main() -> int:
     source = Path("templates/geometric_metal.glb")
     report = {
         "source": scene_metrics(source),
+        "stage_trace_identity": stage_trace(cases[0][1]),
         "cases": [run_case(name, measurements, output_dir) for name, measurements in cases],
     }
     path = output_dir / "regression.json"
     path.write_text(json.dumps(report, indent=2, default=str), encoding="utf-8")
 
     print("SOURCE", json.dumps(report["source"], sort_keys=True))
+    for stage in report["stage_trace_identity"]:
+        print("STAGE_TRACE", stage["stage"], json.dumps(stage["temples"], sort_keys=True))
     for case in report["cases"]:
         print("CASE", case["name"], "success", case["success"])
         if case["success"]:
