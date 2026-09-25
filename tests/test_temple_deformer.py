@@ -50,17 +50,33 @@ class TempleDeformerTests(unittest.TestCase):
     def test_temple_deformation_keeps_frame_fixed_and_extends_temples(self) -> None:
         ctx = self._context()
         frame_before = ctx.mesh("Frame").vertices.copy()
-        left_before = ctx.mesh("LeftTemple").bounds.copy()
-        right_before = ctx.mesh("RightTemple").bounds.copy()
+        left_before = ctx.mesh("LeftTemple").vertices.copy()
+        right_before = ctx.mesh("RightTemple").vertices.copy()
+        deformer = TempleDeformer()
+        left_selection = deformer._collect_temples(ctx, "left")
+        right_selection = deformer._collect_temples(ctx, "right")
+        left_length_before = deformer._temple_length(
+            left_before, left_selection.hinge_pivot, left_selection.axis
+        )
+        right_length_before = deformer._temple_length(
+            right_before, right_selection.hinge_pivot, right_selection.axis
+        )
         left_degenerate_before = _degenerate_triangle_count(ctx.mesh("LeftTemple"))
         right_degenerate_before = _degenerate_triangle_count(ctx.mesh("RightTemple"))
-        ctx = TempleDeformer().apply(ctx)
+        ctx = deformer.apply(ctx)
         frame_after = ctx.mesh("Frame").vertices.copy()
-        left_after = ctx.mesh("LeftTemple").bounds.copy()
-        right_after = ctx.mesh("RightTemple").bounds.copy()
+        left_after = ctx.mesh("LeftTemple").vertices.copy()
+        right_after = ctx.mesh("RightTemple").vertices.copy()
+        left_length_after = deformer._temple_length(
+            left_after, left_selection.hinge_pivot, left_selection.axis
+        )
+        right_length_after = deformer._temple_length(
+            right_after, right_selection.hinge_pivot, right_selection.axis
+        )
+        target_m = ctx.measurements.temple_length / 1000.0
         self.assertAlmostEqual(float(np.linalg.norm(frame_after - frame_before, axis=1).max()), 0.0, places=6)
-        self.assertGreater(abs(float(left_after[0, 0])), abs(float(left_before[0, 0])))
-        self.assertGreater(abs(float(right_after[1, 0])), abs(float(right_before[1, 0])))
+        self.assertLess(abs(left_length_after - target_m), abs(left_length_before - target_m))
+        self.assertLess(abs(right_length_after - target_m), abs(right_length_before - target_m))
         self.assertTrue(ctx.metadata["temple_deformation"]["applied"])
         self.assertEqual(_degenerate_triangle_count(ctx.mesh("LeftTemple")), left_degenerate_before)
         self.assertEqual(_degenerate_triangle_count(ctx.mesh("RightTemple")), right_degenerate_before)
