@@ -29,6 +29,11 @@
     .secondary { padding:9px 12px; background:#22313c; color:var(--text); }
     .danger { background:#432329; color:#ffd9dd; }
     .row { display:flex; gap:8px; align-items:center; }
+    .fields { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; }
+    .field label { display:block; font-size:11px; color:var(--muted); margin-bottom:5px; }
+    .field input { width:100%; padding:9px 10px; border-radius:8px; border:1px solid var(--line); background:#0c141b; color:var(--text); }
+    .field input:focus { outline:none; border-color:var(--accent); }
+    .field input.invalid { border-color:var(--danger); }
     .between { display:flex; justify-content:space-between; gap:10px; align-items:center; }
     .counter { font-size:12px; color:var(--muted); }
     .counter.good { color:var(--ok); }
@@ -87,6 +92,22 @@
     </section>
 
     <section class="card">
+      <div class="between">
+        <h2>Physical measurements</h2>
+        <span id="measurementState" class="counter bad">Required</span>
+      </div>
+      <div class="sub" style="margin:0 0 12px">Enter the customer/product measurements in millimetres. These values are the source of truth for 3D deformation.</div>
+      <div class="fields">
+        <div class="field"><label for="frameWidth">Frame width (100–180 mm)</label><input id="frameWidth" type="number" min="100" max="180" step="0.1" inputmode="decimal" /></div>
+        <div class="field"><label for="lensWidth">Lens width (20–80 mm)</label><input id="lensWidth" type="number" min="20" max="80" step="0.1" inputmode="decimal" /></div>
+        <div class="field"><label for="lensHeight">Lens height (15–70 mm)</label><input id="lensHeight" type="number" min="15" max="70" step="0.1" inputmode="decimal" /></div>
+        <div class="field"><label for="bridgeWidth">Bridge width (5–35 mm)</label><input id="bridgeWidth" type="number" min="5" max="35" step="0.1" inputmode="decimal" /></div>
+        <div class="field"><label for="templeLength">Temple length (100–180 mm)</label><input id="templeLength" type="number" min="100" max="180" step="0.1" inputmode="decimal" /></div>
+        <div class="field"><label for="rimThickness">Rim thickness (optional, mm)</label><input id="rimThickness" type="number" min="0.2" max="10" step="0.1" value="1.2" inputmode="decimal" /></div>
+      </div>
+    </section>
+
+    <section class="card">
       <h2>Reconstruction</h2>
       <button id="generate" class="primary" disabled type="button">Generate 3D model</button>
       <div class="row" style="margin-top:8px">
@@ -117,8 +138,8 @@
       <div id="empty" class="empty">Reconstruction QA will appear here after the backend completes.</div>
       <div id="results" class="hidden">
         <div class="card">
-          <div class="between"><h2>Consolidated measurements</h2><span id="templatePill" class="pill"></span></div>
-          <table><thead><tr><th>Measurement</th><th>Value</th><th>Agreement</th></tr></thead><tbody id="measurementRows"></tbody></table>
+          <div class="between"><h2>Authoritative measurements</h2><div class="row"><span id="qualityPill" class="pill"></span><span id="templatePill" class="pill"></span></div></div>
+          <table><thead><tr><th>Measurement</th><th>Value</th><th>Source</th></tr></thead><tbody id="measurementRows"></tbody></table>
           <div id="warnings"></div>
         </div>
         <div>
@@ -143,6 +164,14 @@
   const MIN_FILES = 4;
   const MAX_BYTES = 15 * 1024 * 1024;
   const ALLOWED = new Set(['image/jpeg','image/png','image/webp']);
+  const MEASUREMENT_RULES = {
+    frameWidth: [100, 180, 'frame_width'],
+    lensWidth: [20, 80, 'lens_width'],
+    lensHeight: [15, 70, 'lens_height'],
+    bridgeWidth: [5, 35, 'bridge_width'],
+    templeLength: [100, 180, 'temple_length'],
+    rimThickness: [0.2, 10, 'rim_thickness']
+  };
   const METRICS = [
     ['frame_width','Frame width'],
     ['lens_width','Lens width'],
@@ -237,9 +266,28 @@
     $('count').className = 'counter ' + (good ? 'good' : 'bad');
   }
 
+  function readMeasurements(markInvalid=true) {
+    const values = {};
+    let valid = true;
+    for (const [id, [min, max, apiName]] of Object.entries(MEASUREMENT_RULES)) {
+      const input = $(id);
+      const raw = input.value.trim();
+      const number = Number(raw);
+      const optionalDefault = id === 'rimThickness' && raw === '';
+      const ok = optionalDefault || (raw !== '' && Number.isFinite(number) && number >= min && number <= max);
+      input.classList.toggle('invalid', markInvalid && !ok);
+      if (!ok) valid = false;
+      values[apiName] = optionalDefault ? 1.2 : number;
+    }
+    $('measurementState').textContent = valid ? 'Valid' : 'Required';
+    $('measurementState').className = 'counter ' + (valid ? 'good' : 'bad');
+    return valid ? values : null;
+  }
+
   function updateControls() {
     const countOk = state.files.length >= MIN_FILES && state.files.length <= MAX_FILES;
-    $('generate').disabled = state.busy || !countOk;
+    const measurementsOk = Boolean(readMeasurements(false));
+    $('generate').disabled = state.busy || !countOk || !measurementsOk;
     $('pickBtn').disabled = state.busy;
     $('reset').disabled = state.busy;
     $('cancel').classList.toggle('hidden', !state.busy);
@@ -262,6 +310,8 @@
     state.urls = [];
     $('picker').value = '';
     $('files').replaceChildren();
+    ['frameWidth','lensWidth','lensHeight','bridgeWidth','templeLength'].forEach((id) => { $(id).value = ''; $(id).classList.remove('invalid'); });
+    $('rimThickness').value = '1.2';
     $('count').textContent = '0 / 4–5';
     $('count').className = 'counter bad';
     state.busy = false;
@@ -295,6 +345,10 @@
     $('results').classList.remove('hidden');
 
     $('templatePill').textContent = data.template ? 'Template: ' + data.template : 'Template: auto';
+    const quality = data.quality || {};
+    const score = Number(quality.score);
+    $('qualityPill').className = 'pill ' + (quality.passed ? 'ok' : 'bad');
+    $('qualityPill').textContent = Number.isFinite(score) ? ('Mesh QA: ' + score.toFixed(0) + '/100') : 'Mesh QA: unavailable';
 
     const tbody = $('measurementRows');
     tbody.replaceChildren();
@@ -306,9 +360,12 @@
       tdValue.className = 'metricv';
       const v = data.consolidated_measurements && data.consolidated_measurements[key];
       tdValue.textContent = Number.isFinite(Number(v)) ? Number(v).toFixed(1) + ' mm' : '—';
-      const tdAgree = document.createElement('td');
-      tdAgree.appendChild(agreementCell(data.measurement_agreement && data.measurement_agreement[key]));
-      tr.append(tdLabel, tdValue, tdAgree);
+      const tdSource = document.createElement('td');
+      const sourcePill = document.createElement('span');
+      sourcePill.className = 'pill ok';
+      sourcePill.textContent = data.measurement_source === 'manual' ? 'Manual input' : 'Image estimate';
+      tdSource.appendChild(sourcePill);
+      tr.append(tdLabel, tdValue, tdSource);
       tbody.appendChild(tr);
     });
 
@@ -378,15 +435,22 @@
 
   async function reconstruct() {
     if (state.busy || state.files.length < MIN_FILES || state.files.length > MAX_FILES) return;
+    const measurements = readMeasurements(true);
+    if (!measurements) {
+      setStatus('Enter valid physical measurements before reconstruction.', 'error');
+      updateControls();
+      return;
+    }
     state.busy = true;
     state.controller = new AbortController();
     updateControls();
     clearResult();
     $('progress').classList.remove('hidden');
-    setStatus('Processing 4–5 views. The request stays active until segmentation, fusion, deformation, and GLB export finish.');
+    setStatus('Processing 4–5 views. Photos drive shape/appearance; your manual measurements drive physical deformation.');
 
     const form = new FormData();
     state.files.forEach((file) => form.append('images', file));
+    Object.entries(measurements).forEach(([key, value]) => form.append(key, String(value)));
 
     try {
       const response = await fetch('/api/reconstruct/multi-view', {
@@ -401,7 +465,13 @@
         throw new Error('Backend returned an incomplete reconstruction response.');
       }
       renderResults(data);
-      setStatus('Reconstruction completed. Review QA before using the model for try-on.', 'ok');
+      const qualityPassed = !data.quality || data.quality.passed !== false;
+      setStatus(
+        qualityPassed
+          ? 'Reconstruction completed. Manual measurements were used for model dimensions.'
+          : 'Reconstruction completed but mesh QA requires review before try-on.',
+        qualityPassed ? 'ok' : 'error'
+      );
     } catch (error) {
       if (error && error.name === 'AbortError') {
         setStatus('Request cancelled in the browser. Server-side work may finish if it had already started.', 'error');
@@ -424,6 +494,10 @@
     $('viewerTab').classList.toggle('active', !qa);
   }
 
+  Object.keys(MEASUREMENT_RULES).forEach((id) => {
+    $(id).addEventListener('input', updateControls);
+    $(id).addEventListener('blur', () => readMeasurements(true));
+  });
   $('pickBtn').addEventListener('click', () => $('picker').click());
   $('picker').addEventListener('change', (e) => setFiles(Array.from(e.target.files || [])));
   $('generate').addEventListener('click', reconstruct);
