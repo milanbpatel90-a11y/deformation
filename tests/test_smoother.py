@@ -27,6 +27,7 @@ def test_smoother_preserves_vertex_count():
             lens_planes={},
             vertex_groups={},
             constraints={},
+            empty_anchors={},
             deformation_regions={"smooth": ["Frame"]},
         ),
         measurements=None,
