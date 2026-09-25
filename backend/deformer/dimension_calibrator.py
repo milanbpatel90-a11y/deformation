@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
+from scipy.spatial import cKDTree
 
 from backend.deformer.base_deformer import BaseDeformer
 from backend.deformer.deformation_context import DeformationContext
@@ -73,6 +74,10 @@ class DimensionCalibrator(BaseDeformer):
         left_temple.apply_translation([left_outer_after - left_outer_before, 0.0, 0.0])
         right_temple.apply_translation([right_outer_after - right_outer_before, 0.0, 0.0])
 
+        frame_vertices = np.vstack([left_rim.vertices, bridge.vertices, right_rim.vertices])
+        self._fit_temple_length(left_temple, frame_vertices, m.temple_length)
+        self._fit_temple_length(right_temple, frame_vertices, m.temple_length)
+
         # Frame is a runtime-only deformation/quality proxy. Keep its width
         # consistent with the exported component union without exporting it.
         frame = context.mesh("Frame")
@@ -94,6 +99,8 @@ class DimensionCalibrator(BaseDeformer):
                 "right_lens_width_mm": m.lens_width,
                 "left_lens_height_mm": m.lens_height,
                 "right_lens_height_mm": m.lens_height,
+                "left_temple_length_mm": m.temple_length,
+                "right_temple_length_mm": m.temple_length,
             }.items()
         }
         return self.update_context(
@@ -212,6 +219,31 @@ class DimensionCalibrator(BaseDeformer):
         lens.vertices = lens_vertices
 
     @staticmethod
+    def _fit_temple_length(mesh, frame_vertices: np.ndarray, target_length_mm: float) -> None:
+        """Adjust hinge-to-tip distance while keeping the hinge fixed."""
+        vertices = mesh.vertices.copy()
+        if len(vertices) == 0:
+            raise ValueError("Temple geometry is empty")
+        tree = cKDTree(np.asarray(frame_vertices, dtype=np.float64))
+        distances, _ = tree.query(vertices, k=1)
+        hinge = vertices[int(np.argmin(distances))].copy()
+
+        radial = vertices - hinge
+        radial_distances = np.linalg.norm(radial, axis=1)
+        tip_index = int(np.argmax(radial_distances))
+        current_length = float(radial_distances[tip_index])
+        if current_length <= 1e-9:
+            raise ValueError("Temple hinge-to-tip length is zero")
+
+        axis = radial[tip_index] / current_length
+        target_length = mm_to_m(target_length_mm)
+        delta = target_length - current_length
+        axial = np.maximum(np.dot(radial, axis), 0.0)
+        progress = np.clip(axial / current_length, 0.0, 1.0)
+        vertices += (delta * progress)[:, None] * axis[None, :]
+        mesh.vertices = vertices
+
+    @staticmethod
     def _measure(context: DeformationContext) -> dict[str, float]:
         bridge = context.mesh("Bridge")
         left_rim = context.mesh("LeftRim")
@@ -222,6 +254,15 @@ class DimensionCalibrator(BaseDeformer):
         frame_min = min(float(left_rim.bounds[0, 0]), float(bridge.bounds[0, 0]))
         frame_max = max(float(right_rim.bounds[1, 0]), float(bridge.bounds[1, 0]))
 
+        frame_vertices = np.vstack([left_rim.vertices, bridge.vertices, right_rim.vertices])
+
+        def temple_length_mm(name: str) -> float:
+            temple = context.mesh(name)
+            tree = cKDTree(frame_vertices)
+            distances, _ = tree.query(temple.vertices, k=1)
+            hinge = temple.vertices[int(np.argmin(distances))]
+            return m_to_mm(float(np.max(np.linalg.norm(temple.vertices - hinge, axis=1))))
+
         return {
             "frame_width_mm": round(m_to_mm(frame_max - frame_min), 6),
             "bridge_width_mm": round(m_to_mm(bridge.extents[0]), 6),
@@ -229,4 +270,6 @@ class DimensionCalibrator(BaseDeformer):
             "right_lens_width_mm": round(m_to_mm(right_lens.extents[0]), 6),
             "left_lens_height_mm": round(m_to_mm(left_lens.extents[1]), 6),
             "right_lens_height_mm": round(m_to_mm(right_lens.extents[1]), 6),
+            "left_temple_length_mm": round(temple_length_mm("LeftTemple"), 6),
+            "right_temple_length_mm": round(temple_length_mm("RightTemple"), 6),
         }
