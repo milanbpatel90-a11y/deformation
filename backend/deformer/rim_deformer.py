@@ -103,20 +103,19 @@ class RimDeformer(BaseDeformer):
         resampled_target = self._align_contour_to_template(template_front, resampled_target)
         blended_target = self._blend_template_and_target(template_front, resampled_target)
 
-        front_centroid = template_front.mean(axis=0)
-        target_centroid = blended_target.mean(axis=0)
-        front_radial = np.linalg.norm(template_front - front_centroid, axis=1)
-        target_radial = np.linalg.norm(blended_target - target_centroid, axis=1)
-        radial_ratio = np.divide(target_radial, np.maximum(front_radial, 1e-6))
-
         vertices[ordered_front_idx, 0:2] = blended_target
-        thickness = self._target_depth(vertices, ordered_front_idx, ordered_back_idx, target_thickness)
+        thickness = self._target_depth(
+            vertices, ordered_front_idx, ordered_back_idx, target_thickness
+        )
 
+        # Front and back surfaces may use different tessellation counts.
+        # Resample and align the same target contour independently instead of
+        # assuming a one-to-one front/back vertex correspondence.
         back_template = vertices[ordered_back_idx][:, :2]
-        back_centroid = back_template.mean(axis=0)
-        centered_back = back_template - back_centroid
-        scaled_back = centered_back * radial_ratio[:, None]
-        vertices[ordered_back_idx, 0:2] = target_centroid + scaled_back
+        back_target = self._resample_contour(target_contour, len(ordered_back_idx))
+        back_target = self._align_contour_to_template(back_template, back_target)
+        blended_back = self._blend_template_and_target(back_template, back_target)
+        vertices[ordered_back_idx, 0:2] = blended_back
 
         front_z = float(np.max(vertices[ordered_front_idx, 2]))
         vertices[ordered_front_idx, 2] = front_z
