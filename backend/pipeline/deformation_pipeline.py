@@ -69,8 +69,6 @@ class DeformationPipeline:
         but the scene itself only has the original GLB names. The DeformationContext builds
         its meshes dict straight from scene.geometry, so logical names must be present there.
         """
-        from copy import deepcopy
-
         # Collect all unique actual→logical mappings from vertex_groups + descriptor parts
         alias_map: dict[str, str] = {}  # logical_name -> actual_glb_name
 
@@ -94,6 +92,33 @@ class DeformationPipeline:
         for logical_name, actual_name in alias_map.items():
             if logical_name not in scene.geometry:
                 scene.geometry[logical_name] = scene.geometry[actual_name]
+
+    @staticmethod
+    def _template_safety_warnings(descriptor) -> list[str]:
+        """Return structural warnings that make a template unsafe for automatic approval."""
+        raw_aliases = descriptor.raw.get("mesh_aliases", {})
+        if not isinstance(raw_aliases, dict):
+            return []
+
+        reverse: dict[str, list[str]] = {}
+        for logical, actual in raw_aliases.items():
+            if isinstance(logical, str) and isinstance(actual, str):
+                reverse.setdefault(actual, []).append(logical)
+
+        critical = {
+            "Frame", "Bridge", "LeftRim", "RightRim",
+            "LeftLens", "RightLens", "LeftTemple", "RightTemple",
+        }
+        warnings: list[str] = []
+        for actual, logical_names in reverse.items():
+            overlapping = sorted(critical.intersection(logical_names))
+            if len(overlapping) > 1:
+                warnings.append(
+                    "Template maps multiple deformable logical parts "
+                    f"({', '.join(overlapping)}) to the same mesh '{actual}'. "
+                    "Use a template with separated production geometry."
+                )
+        return warnings
 
     @staticmethod
     def _optimize_scene(scene: trimesh.Scene) -> trimesh.Scene:
@@ -154,29 +179,29 @@ class DeformationPipeline:
         template_name = template_info.name
 
         scene = trimesh.load(template_info.glb_path, force="scene")
-        
-        # Try to load descriptor, fall back to simple deformation if template not properly prepared
-        try:
-            descriptor = self.descriptor_loader.load(template_name, measurements=measurements, template_info=template_info)
-            ctx = DeformationContext(
-                template_info=template_info,
-                template_scene=scene,
-                descriptor=descriptor,
-                measurements=measurements,
-            )
-            rim_pull = self.library.rim_pull_strength(template_name)
-            deformer = MeshDeformer(scene, template_info.dimensions, rim_pull_strength=rim_pull)
-            deformed_ctx, quality = deformer.deform(ctx)
-            deformed = deformed_ctx.template_scene
-        except (ValueError, KeyError) as e:
-            # Fallback to old simple deformation without descriptors
-            import warnings
-            warnings.warn(f"Template {template_name} not properly prepared (descriptor error: {e}). Using simple deformation fallback.")
-            from backend.deformer.engine import MeshDeformer as OldDeformer
-            rim_pull = self.library.rim_pull_strength(template_name)
-            deformer = OldDeformer(scene, template_info.dimensions, rim_pull_strength=rim_pull)
-            deformed = deformer.deform(measurements)
-        
+        descriptor = self.descriptor_loader.load(
+            template_name,
+            measurements=measurements,
+            template_info=template_info,
+        )
+        self._inject_aliases_into_scene(scene, descriptor)
+        ctx = DeformationContext(
+            template_info=template_info,
+            template_scene=scene,
+            descriptor=descriptor,
+            measurements=measurements,
+            feature_set=features,
+        )
+        rim_pull = self.library.rim_pull_strength(template_name)
+        deformer = MeshDeformer(scene, template_info.dimensions, rim_pull_strength=rim_pull)
+        deformed_ctx, quality = deformer.deform(ctx)
+        deformed = deformed_ctx.template_scene
+
+        template_warnings = self._template_safety_warnings(descriptor)
+        if template_warnings:
+            quality.passed = False
+            quality.warnings.extend(template_warnings)
+
         deformed = apply_materials(deformed, measurements)
 
         out = Path(output_path)
@@ -212,6 +237,7 @@ class DeformationPipeline:
                 ],
             },
             "scale_factors": self._scale_summary(measurements, template_info.dimensions),
+            "quality": quality.to_dict(),
         }
 
     def run_from_arrays(
@@ -307,7 +333,7 @@ class DeformationPipeline:
             t,
             rim_pull_strength=rim_pull,
             deformation_mode="template_vertex_groups",
-            contour_used=False,
+            contour_used=bool(lens_contour.left or lens_contour.right),
             scale_factors=self._scale_summary(measurements, template_info.dimensions),
         )
 
@@ -509,6 +535,12 @@ class DeformationPipeline:
         deformer = MeshDeformer(scene, template_info.dimensions, rim_pull_strength=rim_pull)
         deformed_ctx, quality = deformer.deform(ctx, front_lens_contour)
         deformed = deformed_ctx.template_scene
+
+        template_warnings = self._template_safety_warnings(descriptor)
+        if template_warnings:
+            quality.passed = False
+            quality.warnings.extend(template_warnings)
+
         s3.finish(
             t,
             rim_pull_strength=rim_pull,
