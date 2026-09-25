@@ -22,6 +22,7 @@ from backend.deformer.rim_deformer import RimDeformer
 from backend.models import FrameMaterial, FrameShape, Measurements
 from backend.pipeline import DeformationPipeline
 from backend.scene_utils import load_world_baked_scene
+from scripts.audit_production_glb import parse_glb
 
 
 _REQUIRED = (
@@ -140,6 +141,119 @@ def scene_metrics(path: Path) -> dict:
             and scene.geometry["LeftTemple"] is not scene.geometry["RightTemple"]
         ),
     }
+
+
+_DIMENSION_TOLERANCE_MM = {
+    "frame_width": 2.0,
+    "bridge_width": 1.5,
+    "left_lens_width": 1.5,
+    "right_lens_width": 1.5,
+    "left_lens_height": 1.5,
+    "right_lens_height": 1.5,
+    "left_temple_length": 2.0,
+    "right_temple_length": 2.0,
+}
+
+
+def _gltf_contract(path: Path) -> dict:
+    doc, _ = parse_glb(path)
+    scene_index = int(doc.get("scene", 0))
+    scene_doc = doc.get("scenes", [])[scene_index]
+    extras = scene_doc.get("extras", {}) if isinstance(scene_doc, dict) else {}
+    anchors = extras.get("anchors", {}) if isinstance(extras, dict) else {}
+    units = extras.get("units", {}) if isinstance(extras, dict) else {}
+
+    nodes = {node.get("name"): node for node in doc.get("nodes", []) if node.get("name")}
+    pivot_errors = {}
+    for temple_name, anchor_name in (("LeftTemple", "LeftHinge"), ("RightTemple", "RightHinge")):
+        node = nodes.get(temple_name, {})
+        translation = np.asarray(node.get("translation", [0.0, 0.0, 0.0]), dtype=np.float64)
+        anchor = np.asarray(anchors.get(anchor_name, [np.nan, np.nan, np.nan]), dtype=np.float64)
+        pivot_errors[temple_name] = (
+            float(np.linalg.norm(translation - anchor))
+            if translation.shape == (3,) and anchor.shape == (3,)
+            else float("inf")
+        )
+
+    return {
+        "generator": doc.get("asset", {}).get("generator"),
+        "scene_extras_keys": sorted(extras.keys()) if isinstance(extras, dict) else [],
+        "has_nested_extras": isinstance(extras, dict) and "extras" in extras,
+        "has_legacy_defirmation": isinstance(extras, dict) and "defirmation" in extras,
+        "units": units,
+        "anchors": anchors,
+        "temple_node_pivot_error_m": pivot_errors,
+        "node_names": sorted(nodes),
+    }
+
+
+def _accept_case(case: dict, source_triangle_count: int) -> list[str]:
+    errors: list[str] = []
+    if not case.get("success"):
+        return [case.get("error", "deformation case failed")]
+
+    output = case["output"]
+    for name, present in output["required_components"].items():
+        if not present:
+            errors.append(f"missing required component {name}")
+    if not output["independent_lenses"]:
+        errors.append("left/right lenses are not independently addressable")
+    if not output["independent_temples"]:
+        errors.append("left/right temples are not independently addressable")
+
+    triangle_count = sum(g["triangles"] for g in output["geometries"].values())
+    if triangle_count != source_triangle_count:
+        errors.append(
+            f"triangle count changed unexpectedly: output={triangle_count} source={source_triangle_count}"
+        )
+
+    for name in _REQUIRED:
+        geom = output["geometries"].get(name)
+        if not geom:
+            continue
+        if not geom["finite"]:
+            errors.append(f"{name} has non-finite positions")
+        if geom["degenerate_triangles"]:
+            errors.append(f"{name} has {geom['degenerate_triangles']} degenerate triangles")
+        if not geom["normals_finite"]:
+            errors.append(f"{name} has non-finite normals")
+        if geom["zero_normals"]:
+            errors.append(f"{name} has {geom['zero_normals']} zero-length normals")
+        if not geom["winding_consistent"]:
+            errors.append(f"{name} has inconsistent face winding")
+
+    for key, value in case["dimension_errors_mm"].items():
+        tolerance = _DIMENSION_TOLERANCE_MM[key]
+        if value is None or abs(value) > tolerance:
+            errors.append(f"{key} error {value} mm exceeds tolerance {tolerance} mm")
+
+    quality = case["pipeline_result"].get("quality") or {}
+    if quality.get("passed") is not True:
+        errors.append(f"mesh quality did not pass: {quality}")
+
+    contract = _gltf_contract(Path(case["pipeline_result"]["output_glb"]))
+    case["gltf_contract"] = contract
+    if contract["generator"] != "deformation/1.0":
+        errors.append(f"unexpected generator: {contract['generator']}")
+    if contract["has_nested_extras"]:
+        errors.append("scene extras are nested unexpectedly")
+    if contract["has_legacy_defirmation"]:
+        errors.append("legacy defirmation metadata remains")
+    if contract["units"] != {
+        "geometry": "meter",
+        "anchors": "meter",
+        "measurements": "millimeter",
+    }:
+        errors.append(f"unexpected units metadata: {contract['units']}")
+    if set(contract["anchors"]) != {"NoseBridge", "LeftHinge", "RightHinge"}:
+        errors.append(f"unexpected authoritative anchor set: {sorted(contract['anchors'])}")
+    for temple_name, pivot_error in contract["temple_node_pivot_error_m"].items():
+        if not np.isfinite(pivot_error) or pivot_error > 1e-7:
+            errors.append(
+                f"{temple_name} node pivot does not match authoritative hinge: {pivot_error} m"
+            )
+
+    return errors
 
 
 def _dimension_errors(metrics: dict, measurements: Measurements) -> dict:
@@ -323,10 +437,19 @@ def main() -> int:
     ]
 
     source = Path("templates/geometric_metal.glb")
+    source_metrics = scene_metrics(source)
+    source_triangle_count = sum(
+        geom["triangles"] for geom in source_metrics["geometries"].values()
+    )
+    case_results = [run_case(name, measurements, output_dir) for name, measurements in cases]
+    for case in case_results:
+        case["acceptance_errors"] = _accept_case(case, source_triangle_count)
+
     report = {
-        "source": scene_metrics(source),
+        "source": source_metrics,
+        "source_triangle_count": source_triangle_count,
         "stage_trace_identity": stage_trace(cases[0][1]),
-        "cases": [run_case(name, measurements, output_dir) for name, measurements in cases],
+        "cases": case_results,
     }
     path = output_dir / "regression.json"
     path.write_text(json.dumps(report, indent=2, default=str), encoding="utf-8")
@@ -345,9 +468,19 @@ def main() -> int:
             print(" independent_lenses", case["output"]["independent_lenses"])
             print(" independent_temples", case["output"]["independent_temples"])
             print(" quality", json.dumps(case["pipeline_result"].get("quality"), sort_keys=True))
+            print(" gltf_contract", json.dumps(case.get("gltf_contract"), sort_keys=True))
         else:
             print(" error", case.get("error"))
+        print(" acceptance_errors", json.dumps(case.get("acceptance_errors", []), sort_keys=True))
+
+    failed = [case for case in report["cases"] if case.get("acceptance_errors")]
+    report["passed"] = not failed
+    path.write_text(json.dumps(report, indent=2, default=str), encoding="utf-8")
     print("Wrote", path)
+    if failed:
+        print("PRODUCTION_REGRESSION_FAILED", [case["name"] for case in failed])
+        return 1
+    print("PRODUCTION_REGRESSION_PASSED")
     return 0
 
 
