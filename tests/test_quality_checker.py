@@ -1,42 +1,32 @@
-"""Tests for the quality checker."""
+"""Quality regression using the actual production geometric GLB."""
 
-import numpy as np
-import trimesh
+from pathlib import Path
 
-from backend.deformer.deformation_context import DeformationContext
-from backend.deformer.descriptor_loader import TemplateDescriptor
-from backend.deformer.quality_checker import QualityChecker
+from backend.models import FrameMaterial, FrameShape, Measurements
+from backend.pipeline import DeformationPipeline
 
 
-def test_quality_checker_high_score():
-    mesh = trimesh.creation.box(extents=(140.0, 45.0, 30.0))
-
-    context = DeformationContext(
-        template_info=None,
-        template_scene=trimesh.Scene({"Frame": mesh}),
-        descriptor=TemplateDescriptor(
-            template_name="test",
-            template_path=None,
-            descriptor_path=None,
-            metadata_path=None,
-            hinges={},
-            rim_loops={},
-            bridge_center=np.array([0, 0, 0]),
-            temple_axis={},
-            lens_planes={},
-            vertex_groups={},
-            constraints={},
-        ),
-        measurements=None,
-    )
-    # Give it some fake successful metadata
-    context.update_metadata(
-        constraint_solver={"failures": [], "corrections": []},
-        symmetry_solver={"max_error_mm": 0.1},
+def test_quality_checker_high_score_on_production_glb(tmp_path):
+    measurements = Measurements(
+        frame_width=135.0,
+        lens_width=50.0,
+        lens_height=46.0,
+        bridge_width=16.0,
+        temple_length=135.0,
+        rim_thickness=1.0,
+        material=FrameMaterial.METAL,
+        shape=FrameShape.GEOMETRIC,
+        nose_pads=True,
     )
 
-    checker = QualityChecker()
-    report = checker.evaluate(context)
+    pipeline = DeformationPipeline(Path("templates"))
+    result = pipeline.run_from_measurements(
+        measurements,
+        tmp_path / "quality_identity.glb",
+        "geometric_metal",
+    )
 
-    assert report.passed is True
-    assert report.score >= 90.0
+    quality = result["quality"]
+    assert quality["passed"] is True, quality
+    assert quality["score"] >= 90.0, quality
+    assert quality["warnings"] == [], quality
