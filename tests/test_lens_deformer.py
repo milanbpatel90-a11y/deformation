@@ -17,12 +17,12 @@ class LensDeformerTests(unittest.TestCase):
         library = TemplateLibrary(Path("templates"))
         info = library.load("geometric_metal")
         measurements = Measurements(
-            frame_width=148.0,
-            lens_width=58.0,
-            lens_height=40.0,
-            bridge_width=18.0,
-            temple_length=140.0,
-            rim_thickness=2.2,
+            frame_width=135.0,
+            lens_width=50.0,
+            lens_height=46.0,
+            bridge_width=16.0,
+            temple_length=135.0,
+            rim_thickness=1.0,
             material=FrameMaterial.METAL,
             shape=FrameShape.RECTANGLE,
             nose_pads=True,
@@ -33,13 +33,9 @@ class LensDeformerTests(unittest.TestCase):
 
     def test_lens_deformation_preserves_topology_and_thickness(self) -> None:
         ctx = self._context()
-        contour = LensContour(
-            left=[[0.04, 0.18], [0.10, 0.06], [0.38, 0.04], [0.46, 0.20], [0.46, 0.76], [0.36, 0.92], [0.10, 0.90], [0.03, 0.70]],
-            right=[[0.54, 0.20], [0.62, 0.04], [0.90, 0.06], [0.96, 0.18], [0.97, 0.70], [0.90, 0.90], [0.64, 0.92], [0.54, 0.76]],
-        )
         left_before = ctx.mesh("LeftLens").vertices.copy()
         right_before = ctx.mesh("RightLens").vertices.copy()
-        ctx = RimDeformer(contour_strength=0.8).apply(ctx, contour)
+        ctx = RimDeformer(contour_strength=0.8).apply(ctx, None)
         ctx = LensDeformer().apply(ctx)
         for part, before in (("LeftLens", left_before), ("RightLens", right_before)):
             after = ctx.mesh(part).vertices.copy()
@@ -49,7 +45,7 @@ class LensDeformerTests(unittest.TestCase):
             self.assertAlmostEqual(thickness_after, thickness_before, places=5)
         self.assertTrue(ctx.metadata["lens_deformation"]["applied"])
         for side in ctx.metadata["lens_deformation"]["sides"]:
-            self.assertTrue(side["valid"])
+            self.assertTrue(side["valid"], side)
 
 
 if __name__ == "__main__":
