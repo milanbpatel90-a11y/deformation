@@ -311,11 +311,21 @@ class DescriptorLoader:
 
         anchors: dict[str, np.ndarray] = {}
         nodes = set(scene.graph.nodes)
+        optional_roles = {"left_temple_tip", "right_temple_tip"}
+
         for role, node_name in declared.items():
             if not isinstance(node_name, str):
                 raise ValueError(f"Empty '{role}' must name a scene node")
             if node_name not in nodes:
-                raise ValueError(f"Descriptor empty '{role}' references missing scene node '{node_name}'")
+                if role in optional_roles:
+                    # Older production descriptors may name temple-tip empties
+                    # that were not exported. The current deformation engine
+                    # derives temple length/axis from actual temple geometry,
+                    # so do not synthesize or require unused control nodes.
+                    continue
+                raise ValueError(
+                    f"Descriptor empty '{role}' references missing scene node '{node_name}'"
+                )
             transform, _ = scene.graph.get(node_name)
             anchors[node_name] = np.asarray(transform[:3, 3], dtype=np.float64)
         return anchors
