@@ -1,5 +1,13 @@
 from pathlib import Path
+from types import SimpleNamespace
 
+import pytest
+from pydantic import ValidationError
+
+from backend.models import Measurements
+from backend.pipeline import DeformationPipeline
+from backend.template_library.loader import TemplateLibrary
+from backend.template_matching.template_matcher import TemplateMatcher
 from deformation_tuning_api import _agreement
 
 
@@ -80,3 +88,70 @@ def test_dashboard_has_production_input_guards():
     assert "AbortController" in dashboard
     assert "/api/reconstruct/multi-view" in dashboard
     assert "sampleResponse" not in dashboard
+
+
+
+def test_manual_measurements_have_production_bounds():
+    valid = Measurements(
+        frame_width=140,
+        lens_width=52,
+        lens_height=42,
+        bridge_width=18,
+        temple_length=140,
+    )
+    assert valid.frame_width == 140
+
+    with pytest.raises(ValidationError):
+        Measurements(
+            frame_width=250,
+            lens_width=52,
+            lens_height=42,
+            bridge_width=18,
+            temple_length=140,
+        )
+
+
+def test_template_registry_dictionary_is_supported(tmp_path):
+    (tmp_path / "registry.json").write_text(
+        '{"rectangle_plastic": {"name": "rectangle_plastic"}}',
+        encoding="utf-8",
+    )
+    matcher = TemplateMatcher(TemplateLibrary(tmp_path))
+    assert matcher._registry_template_names() == ["rectangle_plastic"]
+
+
+def test_shared_mesh_aliases_are_marked_unsafe():
+    descriptor = SimpleNamespace(
+        raw={
+            "mesh_aliases": {
+                "Frame": "front_mesh",
+                "Bridge": "front_mesh",
+                "LeftRim": "front_mesh",
+                "RightRim": "front_mesh",
+                "LeftTemple": "left_temple",
+                "RightTemple": "right_temple",
+            }
+        }
+    )
+    warnings = DeformationPipeline._template_safety_warnings(descriptor)
+    assert warnings
+    assert "same mesh" in warnings[0]
+
+
+def test_dashboard_requires_manual_measurements_and_supports_overrides():
+    dashboard = Path("toolkit/dashboard.html").read_text(encoding="utf-8")
+
+    for field_id in (
+        "frameWidth",
+        "lensWidth",
+        "lensHeight",
+        "bridgeWidth",
+        "templeLength",
+        "shapeOverride",
+        "materialOverride",
+    ):
+        assert f'id="{field_id}"' in dashboard
+
+    assert "form.append('shape'" in dashboard
+    assert "form.append('material'" in dashboard
+    assert "Manual input" in dashboard
