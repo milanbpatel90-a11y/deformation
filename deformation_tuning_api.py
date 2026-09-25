@@ -25,6 +25,7 @@ import cv2
 import numpy as np
 
 from backend.fusion.view_classifier import ViewClassifier
+from backend.models import Measurements
 from backend.pipeline import DeformationPipeline
 from eyewear_vto_toolkit import DeformationCalibrationWorkflow, TemplateManager
 
@@ -174,6 +175,8 @@ def _run_multiview_reconstruction(
     original_names: list[str],
     template_name: str | None,
     job_id: str,
+    manual_measurements: Measurements,
+    color: str,
 ) -> dict[str, Any]:
     pipeline = _get_reconstruction_pipeline()
     view_classifier = ViewClassifier()
@@ -196,7 +199,7 @@ def _run_multiview_reconstruction(
             shape=style.shape,
             material=style.material,
             nose_pads=style.nose_pads,
-            color="#d9a7a2",
+            color=color,
         )
 
         confidence = float(masks.get("confidence", 0.0))
@@ -226,8 +229,9 @@ def _run_multiview_reconstruction(
     result = pipeline.run_from_multiple_images(
         image_paths,
         glb_path,
-        "#d9a7a2",
+        color,
         template_name,
+        manual_measurements=manual_measurements,
     )
 
     agreement, agreement_warnings = _agreement(per_view)
@@ -252,11 +256,15 @@ def _run_multiview_reconstruction(
         "job_id": job_id,
         "views": per_view,
         "consolidated_measurements": consolidated,
+        "measurement_source": result.get("measurement_source", "manual"),
+        "image_estimate_agreement": agreement,
         "measurement_agreement": agreement,
         "warnings": warnings,
         "model_url": model_url,
         "model_glb_base64": model_uri,
         "template": result.get("template"),
+        "quality": result.get("quality"),
+        "template_selection": result.get("template_selection"),
         "pipeline": result.get("pipeline", []),
     }
 
@@ -422,11 +430,33 @@ async def batch_create_templates():
 @app.post("/api/reconstruct/multi-view")
 async def reconstruct_multi_view(
     images: list[UploadFile] = File(..., description="4-5 images of one pair of glasses"),
+    frame_width: float = Form(...),
+    lens_width: float = Form(...),
+    lens_height: float = Form(...),
+    bridge_width: float = Form(...),
+    temple_length: float = Form(...),
+    rim_thickness: float = Form(1.2),
+    temple_curve_angle: float = Form(28.0),
+    color: str = Form("#d9a7a2"),
     template_name: str | None = Form(None),
 ):
     """Dashboard-compatible multi-view reconstruction endpoint."""
     if not 4 <= len(images) <= 5:
         raise HTTPException(status_code=400, detail="Upload exactly 4 or 5 images")
+
+    try:
+        manual_measurements = Measurements(
+            frame_width=frame_width,
+            lens_width=lens_width,
+            lens_height=lens_height,
+            bridge_width=bridge_width,
+            temple_length=temple_length,
+            rim_thickness=rim_thickness,
+            temple_curve_angle=temple_curve_angle,
+            color=color,
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=422, detail=f"Invalid manual measurements: {exc}") from exc
 
     _prune_reconstruction_models()
     job_id = uuid.uuid4().hex[:12]
@@ -461,6 +491,8 @@ async def reconstruct_multi_view(
                 original_names,
                 template_name,
                 job_id,
+                manual_measurements,
+                color,
             )
     except HTTPException:
         raise
