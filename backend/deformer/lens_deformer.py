@@ -288,6 +288,8 @@ class LensDeformer(BaseDeformer):
                 "vertex_count": int(len(lens_vertices)),
                 "uv_count": uv_count,
                 "fit_error_mm": round(fit_error, 6),
+                "lens_boundary_vertices": int(len(lens_boundary)),
+                "target_boundary_vertices": int(len(target_boundary)),
                 "thickness_mm": round(thickness, 6),
                 "curvature_delta": round(curvature_delta, 9),
                 "inside_rim": inside_rim,
