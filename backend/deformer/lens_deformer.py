@@ -7,6 +7,7 @@ from typing import Any
 
 import numpy as np
 from scipy import interpolate
+from shapely.geometry import Polygon
 
 from backend.deformer.base_deformer import BaseDeformer
 from backend.deformer.deformation_context import DeformationContext
@@ -162,10 +163,14 @@ class LensDeformer(BaseDeformer):
         fitted_target = self._align_boundary(lens_boundary, fitted_target)
         fit_error = m_to_mm(float(np.mean(np.linalg.norm(lens_boundary - fitted_target, axis=1))))
         rim_boundary = rim_vertices[self._surface_indices(rim_vertices, front=True)][:, :2]
-        rim_center = rim_boundary.mean(axis=0)
-        lens_center = lens_boundary.mean(axis=0)
-        rim_radius = np.linalg.norm(rim_boundary - rim_center, axis=1).mean()
-        lens_radius = np.linalg.norm(lens_boundary - lens_center, axis=1).mean()
+        ordered_rim = rim_boundary[self._loop_order(rim_boundary)]
+        rim_polygon = Polygon(ordered_rim).buffer(0)
+        lens_polygon = Polygon(lens_boundary).buffer(0)
+        inside_rim = bool(
+            not rim_polygon.is_empty
+            and not lens_polygon.is_empty
+            and rim_polygon.covers(lens_polygon)
+        )
         thickness = m_to_mm(
             float(np.mean(lens_vertices[front_idx, 2] - lens_vertices[back_idx, 2]))
         )
@@ -180,8 +185,8 @@ class LensDeformer(BaseDeformer):
                 "fit_error_mm": round(fit_error, 6),
                 "thickness_mm": round(thickness, 6),
                 "curvature_delta": round(float(np.std(lens_vertices[:, 2]) - np.std(selection.lens_before[:, 2])), 6),
-                "inside_rim": bool(lens_radius < rim_radius),
-                "valid": bool(fit_error < 2.5 and thickness > 0.0 and lens_radius < rim_radius),
+                "inside_rim": inside_rim,
+                "valid": bool(fit_error < 2.5 and thickness > 0.0 and inside_rim),
             }
         )
 
