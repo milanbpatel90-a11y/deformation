@@ -87,34 +87,39 @@ class LensDeformer(BaseDeformer):
         selection: LensSelection,
         target_boundary: np.ndarray,
     ) -> None:
+        """Fit the complete lens in-plane without collapsing interior vertices.
+
+        Production lens meshes contain dense front/back surfaces, not only edge
+        loops. The previous implementation classified whole surfaces and wrote a
+        boundary sample into every selected vertex, which collapsed interior
+        topology onto the perimeter. Derive an affine fit from the actual
+        projected source boundary, then apply that same in-plane transform to
+        every vertex. Normal coordinates are restored exactly afterwards.
+        """
         lens_mesh = context.mesh(selection.lens_part)
         vertices = np.asarray(lens_mesh.vertices, dtype=np.float64).copy()
         origin, basis = self._lens_basis(selection)
         local = self._to_local(vertices, origin, basis)
+
         front_idx = self._surface_indices(local, front=True)
-        back_idx = self._surface_indices(local, front=False)
+        source_boundary = self._convex_boundary(local[front_idx, :2])
+        target = self._convex_boundary(target_boundary)
 
-        front_boundary = local[front_idx, :2]
-        front_order = self._loop_order(front_boundary)
-        back_boundary = local[back_idx, :2]
-        back_order = self._loop_order(back_boundary)
+        source_min = source_boundary.min(axis=0)
+        source_max = source_boundary.max(axis=0)
+        target_min = target.min(axis=0)
+        target_max = target.max(axis=0)
 
-        ordered_front_idx = front_idx[front_order]
-        ordered_back_idx = back_idx[back_order]
-        template_front = local[ordered_front_idx, :2]
-        template_back = local[ordered_back_idx, :2]
+        source_extent = source_max - source_min
+        target_extent = target_max - target_min
+        if np.any(source_extent <= 1e-9) or np.any(target_extent <= 1e-9):
+            raise ValueError(f"Degenerate lens/rim boundary for {selection.lens_part}")
 
-        resampled_target = self._resample_boundary(target_boundary, len(ordered_front_idx))
-        resampled_target = self._align_boundary(template_front, resampled_target)
-        local[ordered_front_idx, :2] = resampled_target
+        source_center = (source_min + source_max) * 0.5
+        target_center = (target_min + target_max) * 0.5
+        scale = target_extent / source_extent
 
-        # Fit the back surface independently because production lenses may
-        # have a different vertex count on front and back. Reusing the front
-        # scale array would corrupt or fail on asymmetric tessellation.
-        back_target = self._resample_boundary(target_boundary, len(ordered_back_idx))
-        back_target = self._align_boundary(template_back, back_target)
-        local[ordered_back_idx, :2] = back_target
-
+        local[:, :2] = target_center + (local[:, :2] - source_center) * scale
         lens_mesh.vertices = self._from_local(local, origin, basis)
 
     def _preserve_uvs(self, context: DeformationContext, selection: LensSelection) -> None:
@@ -173,8 +178,7 @@ class LensDeformer(BaseDeformer):
 
         front_idx = self._surface_indices(lens_local, front=True)
         back_idx = self._surface_indices(lens_local, front=False)
-        lens_boundary = lens_local[front_idx, :2]
-        lens_boundary = lens_boundary[self._loop_order(lens_boundary)]
+        lens_boundary = self._convex_boundary(lens_local[front_idx, :2])
         fitted_target = self._resample_boundary(target_boundary, len(lens_boundary))
         fitted_target = self._align_boundary(lens_boundary, fitted_target)
         fit_error = m_to_mm(
