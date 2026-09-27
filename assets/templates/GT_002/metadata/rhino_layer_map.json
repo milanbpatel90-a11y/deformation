@@ -1,0 +1,19 @@
+{
+  "template_id": "GT_002",
+  "root_layer": "00_TEMPLATE",
+  "component_layers": {
+    "Frame": "01_Frame/Frame",
+    "LeftRim": "02_LENSES/LeftRim",
+    "RightRim": "02_LENSES/RightRim",
+    "Bridge": "01_Frame/Bridge",
+    "LeftLens": "02_LENSES/LeftLens",
+    "RightLens": "02_LENSES/RightLens",
+    "LeftTemple": "03_TEMPLES/LeftTemple",
+    "RightTemple": "03_TEMPLES/RightTemple",
+    "LeftHinge": "04_HINGES/LeftHinge",
+    "RightHinge": "04_HINGES/RightHinge"
+  },
+  "other_layers": ["05_NOSEPAD","06_DECORATION","07_LANDMARKS","99_REFERENCE"],
+  "landmark_layer": "07_LANDMARKS/Landmarks",
+  "notes": "Layer names transcribed from the supplied Rhino layer-tree screenshot; component and landmark names were also found in the supplied 3DM binary strings."
+}
