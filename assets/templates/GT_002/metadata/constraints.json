@@ -3,10 +3,10 @@
   "template_id":"GT_002",
   "constraints":{
     "symmetry":{"enabled":true,"pairs":[
-      {"left":"LeftRim","right":"RightRim"},
-      {"left":"LeftLens","right":"RightLens"},
-      {"left":"LeftTemple","right":"RightTemple"},
-      {"left":"LeftHinge","right":"RightHinge"}
+      {"left":"Rim_L","right":"Rim_R"},
+      {"left":"Lens_L","right":"Lens_R"},
+      {"left":"Temple_L","right":"Temple_R"},
+      {"left":"Hinge_L","right":"Hinge_R"}
     ]},
     "hinges":{
       "left_axis_landmark":"LM_LeftHingeAxis",
