@@ -1,0 +1,15 @@
+{
+  "schema_version": "1.0",
+  "template_id": "GT_002",
+  "parameters": {
+    "frame_width": {"type":"float","unit":"mm","min":120,"max":160,"default":145,"description":"Total front frame width."},
+    "lens_width": {"type":"float","unit":"mm","min":45,"max":65,"default":54,"description":"Horizontal width of each lens opening."},
+    "lens_height": {"type":"float","unit":"mm","min":32,"max":50,"default":41,"description":"Vertical height of each lens opening."},
+    "bridge_width": {"type":"float","unit":"mm","min":14,"max":24,"default":18,"description":"Bridge / DBL between lens openings."},
+    "temple_length": {"type":"float","unit":"mm","min":135,"max":155,"default":145,"description":"Temple arm length from hinge axis to tip."},
+    "pantoscopic_tilt": {"type":"float","unit":"deg","min":-5,"max":18,"default":6,"description":"Front/temple pantoscopic tilt control."},
+    "temple_open_angle": {"type":"float","unit":"deg","min":80,"max":115,"default":95,"description":"Temple open angle about each hinge axis."}
+  },
+  "provisional": true,
+  "notes": "Ranges are conservative production controls, not measured dimensions of the uploaded 3DM."
+}
