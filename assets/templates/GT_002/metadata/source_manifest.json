@@ -1,0 +1,10 @@
+{
+  "template_id":"GT_002",
+  "display_name":"NewWayfarer Production",
+  "required_source_objects":["Frame","LeftRim","RightRim","Bridge","LeftLens","RightLens","LeftTemple","RightTemple","LeftHinge","RightHinge"],
+  "required_landmarks":["LM_BridgeCenter","LM_BridgeLeftAttach","LM_BridgeRightAttach","LM_LeftLensCenter","LM_RightLensCenter","LM_LeftLensTop","LM_LeftLensBottom","LM_LeftLensNasal","LM_LeftLensTemporal","LM_RightLensTop","LM_RightLensBottom","LM_RightLensNasal","LM_RightLensTemporal","LM_LeftHinge","LM_RightHinge","LM_LeftHingeAxis","LM_RightHingeAxis","LM_LeftTempleRoot","LM_RightTempleRoot","LM_LeftTempleTip","LM_RightTempleTip"],
+  "source_3dm":"source/NewWayfarer_production.3dm",
+  "reference_screenshot":"reference/layer_tree.png",
+  "runtime_outputs":["geometry/template.glb","deformation/basis.npz","deformation/_unified_verts.npy","deformation/_unified_faces.npy","deformation/_part_order.json","deformation/basis_metadata.json"],
+  "status":"source_registered_runtime_pending"
+}
