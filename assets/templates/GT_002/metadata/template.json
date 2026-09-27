@@ -12,17 +12,17 @@
   "reference_image": "reference/layer_tree.png",
   "objects": {
     "Frame": {"source_name":"Frame","vertex_count":null,"face_count":null},
-    "LeftRim": {"source_name":"LeftRim","vertex_count":null,"face_count":null},
-    "RightRim": {"source_name":"RightRim","vertex_count":null,"face_count":null},
+    "Rim_L": {"source_name":"LeftRim","vertex_count":null,"face_count":null},
+    "Rim_R": {"source_name":"RightRim","vertex_count":null,"face_count":null},
     "Bridge": {"source_name":"Bridge","vertex_count":null,"face_count":null},
-    "LeftLens": {"source_name":"LeftLens","vertex_count":null,"face_count":null},
-    "RightLens": {"source_name":"RightLens","vertex_count":null,"face_count":null},
-    "LeftTemple": {"source_name":"LeftTemple","vertex_count":null,"face_count":null},
-    "RightTemple": {"source_name":"RightTemple","vertex_count":null,"face_count":null},
-    "LeftHinge": {"source_name":"LeftHinge","vertex_count":null,"face_count":null},
-    "RightHinge": {"source_name":"RightHinge","vertex_count":null,"face_count":null}
+    "Lens_L": {"source_name":"LeftLens","vertex_count":null,"face_count":null},
+    "Lens_R": {"source_name":"RightLens","vertex_count":null,"face_count":null},
+    "Temple_L": {"source_name":"LeftTemple","vertex_count":null,"face_count":null},
+    "Temple_R": {"source_name":"RightTemple","vertex_count":null,"face_count":null},
+    "Hinge_L": {"source_name":"LeftHinge","vertex_count":null,"face_count":null},
+    "Hinge_R": {"source_name":"RightHinge","vertex_count":null,"face_count":null}
   },
   "created_date": "2026-09-27",
   "author": "Deformation Engine Team",
-  "notes": "Source structure registered. Runtime GLB, basis and unified arrays must be generated and validated before production use."
+  "notes": "Canonical runtime part names follow the GT_001 conventions where applicable; source_name preserves the Rhino object name. Runtime GLB, basis and unified arrays must be generated and validated before production use."
 }
