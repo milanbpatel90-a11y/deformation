@@ -2,18 +2,18 @@
   "template_id": "GT_002",
   "root_layer": "00_TEMPLATE",
   "component_layers": {
-    "Frame": "01_Frame/Frame",
-    "LeftRim": "02_LENSES/LeftRim",
-    "RightRim": "02_LENSES/RightRim",
-    "Bridge": "01_Frame/Bridge",
-    "LeftLens": "02_LENSES/LeftLens",
-    "RightLens": "02_LENSES/RightLens",
-    "LeftTemple": "03_TEMPLES/LeftTemple",
-    "RightTemple": "03_TEMPLES/RightTemple",
-    "LeftHinge": "04_HINGES/LeftHinge",
-    "RightHinge": "04_HINGES/RightHinge"
+    "Frame": {"source_object":"Frame","layer":"01_Frame/Frame"},
+    "Rim_L": {"source_object":"LeftRim","layer":"02_LENSES/LeftRim"},
+    "Rim_R": {"source_object":"RightRim","layer":"02_LENSES/RightRim"},
+    "Bridge": {"source_object":"Bridge","layer":"01_Frame/Bridge"},
+    "Lens_L": {"source_object":"LeftLens","layer":"02_LENSES/LeftLens"},
+    "Lens_R": {"source_object":"RightLens","layer":"02_LENSES/RightLens"},
+    "Temple_L": {"source_object":"LeftTemple","layer":"03_TEMPLES/LeftTemple"},
+    "Temple_R": {"source_object":"RightTemple","layer":"03_TEMPLES/RightTemple"},
+    "Hinge_L": {"source_object":"LeftHinge","layer":"04_HINGES/LeftHinge"},
+    "Hinge_R": {"source_object":"RightHinge","layer":"04_HINGES/RightHinge"}
   },
   "other_layers": ["05_NOSEPAD","06_DECORATION","07_LANDMARKS","99_REFERENCE"],
   "landmark_layer": "07_LANDMARKS/Landmarks",
-  "notes": "Layer names transcribed from the supplied Rhino layer-tree screenshot; component and landmark names were also found in the supplied 3DM binary strings."
+  "notes": "Layer names are transcribed from the supplied Rhino layer-tree screenshot. source_object keeps the exact 3DM object naming while the keys are canonical deformation-template part names."
 }
