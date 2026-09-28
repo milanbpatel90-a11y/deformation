@@ -24,7 +24,9 @@
     "LeftRim",
     "RightRim",
     "LeftTemple",
-    "RightTemple"
+    "RightTemple",
+    "LeftHinge",
+    "RightHinge"
   ],
   "rim_pull_strength": 0.35,
   "toolkit_style": "wayfarer"
