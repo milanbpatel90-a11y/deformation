@@ -344,8 +344,29 @@ class DescriptorLoader:
         geometry: dict[str, trimesh.Trimesh],
     ) -> dict[str, list[str]]:
         result: dict[str, list[str]] = {key: [] for key in self.DEFAULT_VERTEX_GROUPS}
+
+        # Descriptor-declared vertex groups are authoritative when present.
+        declared_groups = payload.get("vertex_groups", {})
+        if isinstance(declared_groups, dict):
+            for key, groups in declared_groups.items():
+                if isinstance(groups, str):
+                    groups = [groups]
+                if not isinstance(groups, list):
+                    raise ValueError(f"Vertex group '{key}' must be a string or list of strings")
+                resolved = []
+                for name in groups:
+                    if not isinstance(name, str):
+                        raise ValueError(f"Vertex group '{key}' contains a non-string part name")
+                    if name not in geometry:
+                        raise ValueError(f"Vertex group '{key}' references missing geometry part '{name}'")
+                    resolved.append(name)
+                if resolved:
+                    result[key] = resolved
+
+        # Fill undeclared groups from the standard production naming contract.
         for key, groups in self.DEFAULT_VERTEX_GROUPS.items():
-            result[key] = [name for name in groups if name in geometry]
+            if not result.get(key):
+                result[key] = [name for name in groups if name in geometry]
 
         hinges = payload.get("hinges", {})
         if isinstance(hinges, dict):
@@ -390,6 +411,14 @@ class DescriptorLoader:
             "frame_bbox": frame_bounds.astype(float).tolist(),
             "symmetry_axis": payload.get("symmetry_plane", {}).get("axis", "X"),
         }
+        declared = payload.get("constraints", {})
+        if isinstance(declared, dict):
+            for key, value in declared.items():
+                if isinstance(value, dict) and isinstance(base.get(key), dict):
+                    base[key] = {**base[key], **value}
+                else:
+                    base[key] = value
+
         if measurements is not None:
             base["requested"] = measurements.model_dump(mode="json")
         return base
