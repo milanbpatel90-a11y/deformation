@@ -1,0 +1,31 @@
+{
+  "name": "new_wayfarer_acetate",
+  "shape": "geometric",
+  "material": "acetate",
+  "glb_file": "new_wayfarer_acetate.glb",
+  "fallback_glb": "geometric_metal.glb",
+  "dimensions": {
+    "frame_width": 141.3,
+    "lens_width": 55.0,
+    "lens_height": 39.0,
+    "bridge_width": 14.5,
+    "temple_length": 136.6,
+    "rim_thickness": 1.5,
+    "temple_curve_angle": 14.0,
+    "nose_pad_distance": 15.0,
+    "nose_pad_angle": 15.0,
+    "nose_pad_height": 3.0
+  },
+  "parts": [
+    "Frame",
+    "LeftLens",
+    "RightLens",
+    "Bridge",
+    "LeftRim",
+    "RightRim",
+    "LeftTemple",
+    "RightTemple"
+  ],
+  "rim_pull_strength": 0.35,
+  "toolkit_style": "wayfarer"
+}
