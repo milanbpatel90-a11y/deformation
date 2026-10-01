@@ -410,9 +410,24 @@ let suggestionTimer;
 let templateRanges = {};
 const editedMeasurements = new Set();
 const measurementForm = document.getElementById('measurements-form');
+const autoAppearance = document.getElementById('auto-appearance');
+let detectedAppearance = null;
 measurementForm.addEventListener('input', event => {
   if (event.target.name) editedMeasurements.add(event.target.name);
 });
+function syncAppearanceControls() {
+  const hasDetection = Boolean(detectedAppearance);
+  const automatic = autoAppearance.checked;
+  for (const name of ['material', 'shape']) {
+    const control = measurementForm.elements.namedItem(name);
+    control.disabled = automatic && hasDetection;
+  }
+  if (automatic && hasDetection) {
+    measurementForm.elements.material.value = detectedAppearance.material;
+    measurementForm.elements.shape.value = detectedAppearance.shape;
+    if (detectedAppearance.color) document.getElementById('color-pick').value = detectedAppearance.color;
+  }
+}
 function displayRanges(template) {
   const ranges = templateRanges[template] || {};
   for (const input of measurementForm.querySelectorAll('input[type=number]')) {
@@ -427,6 +442,11 @@ function displayRanges(template) {
 }
 function scheduleSuggestion() {
   ++suggestionSequence;
+  detectedAppearance = null;
+  syncAppearanceControls();
+  isSuggesting = true;
+  document.getElementById('suggestion-note').textContent = 'Reading the new glasses images…';
+  updateGenerateBtn();
   clearTimeout(suggestionTimer);
   suggestionTimer = setTimeout(() => requestSuggestions(), 450);
 }
@@ -462,11 +482,12 @@ async function requestSuggestions() {
       const input = measurementForm.elements.namedItem(name);
       if (input && value !== null && !editedMeasurements.has(name)) input.value = value;
     }
-    if (document.getElementById('auto-appearance').checked) {
-      document.getElementById('color-pick').value = data.measurements.color;
-      measurementForm.elements.material.value = data.measurements.material;
-      measurementForm.elements.shape.value = data.measurements.shape;
-    }
+    detectedAppearance = {
+      material: data.measurements.material,
+      shape: data.measurements.shape,
+      color: data.measurements.color
+    };
+    syncAppearanceControls();
     templateRanges[data.template] = data.ranges;
     const templateSelect = document.getElementById('template-input');
     templateSelect.value = '';
@@ -488,6 +509,13 @@ document.getElementById('suggest-btn').addEventListener('click', () => {
   clearTimeout(suggestionTimer);
   editedMeasurements.clear();
   requestSuggestions();
+});
+autoAppearance.addEventListener('change', () => {
+  if (autoAppearance.checked && !detectedAppearance) {
+    requestSuggestions();
+    return;
+  }
+  syncAppearanceControls();
 });
 document.getElementById('template-input').addEventListener('change', event => {
   displayRanges(event.target.value || (Object.keys(templateRanges).length === 1 ? Object.keys(templateRanges)[0] : ''));
@@ -546,6 +574,10 @@ document.getElementById('generate-btn').addEventListener('click', async () => {
   const measurementForm = document.getElementById('measurements-form');
   if (!measurementForm.reportValidity()) return;
   const manual = Object.fromEntries(new FormData(measurementForm));
+  // Disabled auto-detected selects are omitted by FormData; include the
+  // current values explicitly for the API's validated measurements payload.
+  manual.material = measurementForm.elements.material.value;
+  manual.shape = measurementForm.elements.shape.value;
   for (const key of ['frame_width', 'lens_width', 'lens_height', 'bridge_width', 'temple_length', 'rim_thickness']) manual[key] = Number(manual[key]);
   if (multiFiles.length > 6) { statusBox.textContent = 'Choose at most 6 images.'; return; }
 
@@ -598,8 +630,12 @@ document.getElementById('generate-btn').addEventListener('click', async () => {
 
     const m = data.measurements || {};
     if (m.color) document.getElementById('color-pick').value = m.color;
-    if (m.material) measurementForm.elements.material.value = m.material;
-    if (m.shape) measurementForm.elements.shape.value = m.shape;
+    if (autoAppearance.checked) {
+      if (m.material && m.shape) {
+        detectedAppearance = {material: m.material, shape: m.shape, color: m.color};
+        syncAppearanceControls();
+      }
+    }
     statusBox.textContent =
       `${data.quality?.passed === false ? 'Generated — dimensional review required' : '✓ Done'}  ·  Template: ${data.template}\n` +
       `Frame ${m.frame_width}mm  ·  Lens ${m.lens_width}×${m.lens_height}mm\n` +

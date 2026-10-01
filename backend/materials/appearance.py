@@ -10,11 +10,14 @@ def detect_appearance(pipeline, image, mask=None):
     contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     if not contours:
         raise ValueError("No frame foreground available for appearance detection")
-    contour = max(contours, key=cv2.contourArea)
-    _, _, width, _ = cv2.boundingRect(contour)
-    # Outer frame band excludes most lens interiors and the product background.
+    boxes = [cv2.boundingRect(contour) for contour in contours]
+    x0 = min(box[0] for box in boxes)
+    x1 = max(box[0] + box[2] for box in boxes)
+    width = x1 - x0
+    # Sample the rim/bridge/temple pixels across all connected components,
+    # rather than measuring the filled convex hull or a single eye only.
     band = np.zeros_like(mask)
-    cv2.drawContours(band, [contour], -1, 255, max(2, round(width * 0.025)))
+    cv2.drawContours(band, contours, -1, 255, max(2, round(width * 0.02)))
     border = np.concatenate([image[0], image[-1], image[:, 0], image[:, -1]])
     background = np.median(border.astype(float), axis=0)
     contrast = np.linalg.norm(image.astype(float) - background, axis=2)
@@ -24,6 +27,13 @@ def detect_appearance(pipeline, image, mask=None):
         pixels = image[(mask > 0) & (contrast > 25)]
     if len(pixels) < 10:
         raise ValueError("Frame colour is unclear; use a contrasting plain background")
+    style.material = pipeline.classifier.classify_material_pixels(pixels)
+    style.nose_pads = style.material.value in {"metal", "titanium"} and style.shape.value != "rimless"
+    style.rim_type = pipeline.classifier._infer_rim_type(style.shape, style.material)
+    style.bridge_type = pipeline.classifier._infer_bridge_type(
+        style.shape, style.material, style.nose_pads, style.lens_aspect_ratio
+    )
+    style.metrics["material_source"] = "frame_rim_pixels"
     # Dominant colour bucket avoids bright reflections biasing the average.
     quantized = pixels.astype(int) // 32
     codes = quantized[:, 0] * 64 + quantized[:, 1] * 8 + quantized[:, 2]

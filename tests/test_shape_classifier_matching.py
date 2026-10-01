@@ -42,3 +42,14 @@ def test_wayfarer_style_prefers_matching_full_rim_template():
     match = TemplateMatcher(TemplateLibrary()).match(features)
 
     assert match.best.template.name == "RB_001"
+
+
+def test_material_detection_uses_rim_pixels_not_lens_or_background():
+    patterned_acetate = np.array([[0, 10, 20], [220, 180, 90]] * 20, dtype=np.uint8)
+    matte_dark_frame = np.full((40, 3), 24, dtype=np.uint8)
+    reflective_metal = np.full((40, 3), 175, dtype=np.uint8)
+
+    classify = ShapeClassifier.classify_material_pixels
+    assert classify(patterned_acetate).value == "acetate"
+    assert classify(matte_dark_frame).value == "plastic"
+    assert classify(reflective_metal).value == "metal"

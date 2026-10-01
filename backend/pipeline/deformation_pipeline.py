@@ -367,6 +367,7 @@ class DeformationPipeline:
 
         extracted_views = []
         front_image = None
+        front_mask = None
         front_lens_contour = None
         first_valid = None
 
@@ -394,11 +395,12 @@ class DeformationPipeline:
                 )
 
             if first_valid is None:
-                first_valid = (img, lens_contour)
+                first_valid = (img, lens_contour, masks["front"])
             extracted_views.append((view_type, measurements))
 
             if view_type == "front" and front_image is None:
                 front_image = img
+                front_mask = masks["front"]
                 front_lens_contour = lens_contour
 
         if not extracted_views:
@@ -407,14 +409,16 @@ class DeformationPipeline:
         # If no front view was classified, pick the first view as front fallback
         if front_image is None:
             first_view_type, first_ms = extracted_views[0]
-            front_image, front_lens_contour = first_valid
+            front_image, front_lens_contour, front_mask = first_valid
             extracted_views[0] = ("front", first_ms)
 
         # Fuse measurements
         fused_measurements = manual_measurements.model_copy(deep=True) if manual_measurements is not None else fuser.fuse(extracted_views)
 
         if automatic_appearance:
-            fused_measurements, _, appearance_mask = apply_image_appearance(self, fused_measurements, front_image)
+            fused_measurements, _, appearance_mask = apply_image_appearance(
+                self, fused_measurements, front_image, front_mask
+            )
             front_lens_contour = self.measurer.extract_lens_contour(front_image, appearance_mask)
 
         # Detect lens opacity and dominant color

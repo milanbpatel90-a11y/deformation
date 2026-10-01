@@ -39,7 +39,7 @@ class ShapeClassifier:
             return FrameShape.GEOMETRIC, FrameMaterial.METAL, True
 
         shape = self._classify_shape(contour)
-        material = self._classify_material(image, contour)
+        material = self._classify_material(image, contour, mask)
         shape = self._refine_wide_plastic_shape(shape, material)
         nose_pads = material == FrameMaterial.METAL and shape != FrameShape.RIMLESS
         return shape, material, nose_pads
@@ -56,7 +56,7 @@ class ShapeClassifier:
             return FrameShape.GEOMETRIC, FrameMaterial.METAL, True, {"confidence": 0.0, "method": "default"}
 
         raw_shape = self._classify_shape(contour)
-        material = self._classify_material(image, contour)
+        material = self._classify_material(image, contour, mask)
         shape = self._refine_wide_plastic_shape(raw_shape, material)
         nose_pads = material == FrameMaterial.METAL and shape != FrameShape.RIMLESS
 
@@ -185,10 +185,22 @@ class ShapeClassifier:
             return FrameShape.RECTANGLE
         return FrameShape.GEOMETRIC
 
-    def _classify_material(self, image: np.ndarray, contour: np.ndarray) -> FrameMaterial:
-        mask = np.zeros(image.shape[:2], dtype=np.uint8)
-        cv2.drawContours(mask, [contour], -1, 255, -1)
-        pixels = image[mask > 0]
+    def _classify_material(
+        self,
+        image: np.ndarray,
+        contour: np.ndarray,
+        foreground_mask: np.ndarray | None = None,
+    ) -> FrameMaterial:
+        if foreground_mask is not None and np.count_nonzero(foreground_mask):
+            pixels = image[foreground_mask > 0]
+        else:
+            mask = np.zeros(image.shape[:2], dtype=np.uint8)
+            cv2.drawContours(mask, [contour], -1, 255, -1)
+            pixels = image[mask > 0]
+        return self.classify_material_pixels(pixels)
+
+    @staticmethod
+    def classify_material_pixels(pixels: np.ndarray) -> FrameMaterial:
         if len(pixels) == 0:
             return FrameMaterial.METAL
 
