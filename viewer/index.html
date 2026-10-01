@@ -799,7 +799,7 @@ async function checkTemplates() {
     for (const name of catalog.templates) {
       const option = document.createElement('option');
       option.value = name;
-      option.textContent = name === 'GT_001' ? 'Gold Template (GT_001)' : name;
+      option.textContent = catalog.labels?.[name] || (name === 'GT_001' ? 'Gold Template (GT_001)' : name);
       select.appendChild(option);
     }
     templateRanges = catalog.ranges || {};

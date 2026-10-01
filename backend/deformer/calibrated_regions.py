@@ -41,7 +41,7 @@ class CalibratedRegions:
         self.jacobian = np.column_stack([
             (self.measure(rest+basis[:,:,i]*step)-self.reference)/step for i in self.columns])
         if not np.isfinite(self.jacobian).all() or np.linalg.cond(self.jacobian) > 1e6:
-            raise ValueError('Gold Template dimension Jacobian is singular or ill-conditioned')
+            raise ValueError('Template dimension Jacobian is singular or ill-conditioned')
         self.calibration = np.linalg.inv(self.jacobian)
         frame, left, right = (rest[slices[n]] for n in ('Frame','LeftLens','RightLens'))
         self.x_source = np.array([frame[:,0].min(), right[:,0].min(), right[:,0].max(),
@@ -59,7 +59,7 @@ class CalibratedRegions:
         # long rim triangles and can fold their piecewise-linear approximation.
         self.height_falloff_x = max(abs(self.x_source[0]),abs(self.x_source[-1]))
         if np.any(np.diff(self.x_source)<=0) or self.height_falloff_x <= self.x_source[-2]:
-            raise ValueError('Gold Template regions are not ordered or isolated')
+            raise ValueError('Template optical regions are not ordered or isolated')
 
     def measure(self, vertices):
         frame,left,right = (vertices[self.slices[n]] for n in ('Frame','LeftLens','RightLens'))

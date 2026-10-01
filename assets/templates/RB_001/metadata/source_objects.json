@@ -1,0 +1,25 @@
+{
+  "source_file": "source/ray_ban_glasses.3dm",
+  "objects": [
+    {
+      "source_object": "Object_0",
+      "source_name": "defaultMaterial",
+      "renamed_regions": [
+        "Frame",
+        "LeftTemple",
+        "RightTemple"
+      ]
+    },
+    {
+      "source_object": "Object_1",
+      "source_name": "defaultMaterial",
+      "renamed_regions": [
+        "LeftLens",
+        "RightLens",
+        "NosePadLeft",
+        "NosePadRight"
+      ]
+    }
+  ],
+  "note": "The source has no named point/empty objects or useful object properties; landmarks and region names are generated from mesh components."
+}

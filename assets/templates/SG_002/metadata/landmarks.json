@@ -1,0 +1,126 @@
+{
+  "landmarks": {
+    "LM_BridgeCenter": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "LM_BridgeLeftAttach": [
+      11.6,
+      0.0,
+      0.0
+    ],
+    "LM_BridgeRightAttach": [
+      -11.6,
+      0.0,
+      0.0
+    ],
+    "LM_LeftLensCenter": [
+      28.898856,
+      0.0,
+      0.0
+    ],
+    "LM_RightLensCenter": [
+      -28.898856,
+      0.0,
+      0.0
+    ],
+    "LM_LeftLensTop": [
+      28.898856,
+      0.0,
+      13.509583
+    ],
+    "LM_LeftLensBottom": [
+      28.898856,
+      0.0,
+      -13.509583
+    ],
+    "LM_LeftLensNasal": [
+      11.6,
+      0.0,
+      0.0
+    ],
+    "LM_LeftLensTemporal": [
+      46.197712,
+      0.0,
+      0.0
+    ],
+    "LM_RightLensTop": [
+      -28.898856,
+      0.0,
+      13.509583
+    ],
+    "LM_RightLensBottom": [
+      -28.898856,
+      0.0,
+      -13.509583
+    ],
+    "LM_RightLensNasal": [
+      -11.6,
+      0.0,
+      0.0
+    ],
+    "LM_RightLensTemporal": [
+      -46.197712,
+      0.0,
+      0.0
+    ],
+    "LM_LeftTempleRoot": [
+      69.706721,
+      5.317491,
+      8.463738
+    ],
+    "LM_LeftTempleTip": [
+      65.030855,
+      135.597246,
+      5.133779
+    ],
+    "LM_LeftHinge": [
+      69.706721,
+      5.317491,
+      8.463738
+    ],
+    "LM_LeftHingeAxis": [
+      69.706721,
+      5.317491,
+      9.463738
+    ],
+    "LM_LeftTemplePivot": [
+      69.706721,
+      5.317491,
+      8.463738
+    ],
+    "LM_RightTempleRoot": [
+      -63.690535,
+      4.048517,
+      9.244567
+    ],
+    "LM_RightTempleTip": [
+      -71.271096,
+      129.04294,
+      5.130939
+    ],
+    "LM_RightHinge": [
+      -63.690535,
+      4.048517,
+      9.244567
+    ],
+    "LM_RightHingeAxis": [
+      -63.690535,
+      4.048517,
+      10.244567
+    ],
+    "LM_RightTemplePivot": [
+      -63.690535,
+      4.048517,
+      9.244567
+    ]
+  },
+  "coordinate_system": {
+    "x": "left_right; positive is Left",
+    "y": "front_back",
+    "z": "up_down",
+    "units": "mm"
+  },
+  "derivation": "Optical landmarks use named lens bounds. Hinge pivots use temple roots because source hinge landmarks are absent."
+}

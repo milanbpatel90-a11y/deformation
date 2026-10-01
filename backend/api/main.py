@@ -6,6 +6,7 @@ import uuid
 import logging
 import os
 import re
+import json
 from pydantic import ValidationError
 from backend.api.safety import read_image, run_job
 
@@ -124,8 +125,20 @@ def list_templates():
     catalog = template_readiness(library)
     available = catalog["templates"]
     active = "rectangle_plastic" if "rectangle_plastic" in available else (available[0] if available else None)
+    labels = {}
+    for name in available:
+        descriptor = library.bundle_dir / name / "metadata/template.json"
+        if descriptor.is_file():
+            try:
+                labels[name] = json.loads(descriptor.read_text(encoding="utf-8")).get(
+                    "display_name", "Gold Template (GT_001)" if name == "GT_001" else name)
+            except (OSError, json.JSONDecodeError):
+                labels[name] = name
+        else:
+            labels[name] = "Gold Template (GT_001)" if name == "GT_001" else name
     return {
         "templates": available,
+        "labels": labels,
         "planned": library.list_templates(),
         "unavailable": list(catalog["unavailable"]),
         "active": active,
@@ -326,8 +339,11 @@ async def deform_from_measurements(
 
     try:
         validate_template(template)
-        check_combination(measurements, template)
-        result = await run_job(pipeline.run_from_measurements, measurements, out_path, template)
+        # Manual-size submissions without a selected template use Gold, which
+        # remains the stable default even as new catalog templates are added.
+        selected_template = template or ("GT_001" if "GT_001" in library.list_templates() else None)
+        check_combination(measurements, selected_template)
+        result = await run_job(pipeline.run_from_measurements, measurements, out_path, selected_template)
         result["ranges"] = input_ranges(Measurements(**result["measurements"]), result.get("template"))
         result["job_id"] = job_id
         result["download_url"] = f"/api/output/{job_id}.glb"

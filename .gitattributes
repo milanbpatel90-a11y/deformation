@@ -1,0 +1,6 @@
+assets/templates/RB_001/deformation/basis.npz filter=lfs diff=lfs merge=lfs -text
+assets/templates/RB_001/source/ray_ban_glasses.3dm filter=lfs diff=lfs merge=lfs -text
+assets/templates/RB_001/geometry/template.glb filter=lfs diff=lfs merge=lfs -text
+assets/templates/*/deformation/basis.npz filter=lfs diff=lfs merge=lfs -text
+assets/templates/*/geometry/template.glb filter=lfs diff=lfs merge=lfs -text
+assets/templates/*/source/*.3dm filter=lfs diff=lfs merge=lfs -text

@@ -1,0 +1,130 @@
+{
+  "landmarks": {
+    "LM_BridgeCenter": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "LM_BridgeLeftAttach": [
+      12.316639,
+      0.0,
+      0.0
+    ],
+    "LM_BridgeRightAttach": [
+      -12.316639,
+      0.0,
+      0.0
+    ],
+    "LM_LeftLensCenter": [
+      41.26716,
+      0.0,
+      0.0
+    ],
+    "LM_RightLensCenter": [
+      -41.26716,
+      0.0,
+      0.0
+    ],
+    "LM_LeftLensTop": [
+      41.26716,
+      0.0,
+      25.02052
+    ],
+    "LM_LeftLensBottom": [
+      41.26716,
+      0.0,
+      -25.02052
+    ],
+    "LM_LeftLensNasal": [
+      12.316639,
+      0.0,
+      0.0
+    ],
+    "LM_LeftLensTemporal": [
+      70.217681,
+      0.0,
+      0.0
+    ],
+    "LM_RightLensTop": [
+      -41.26716,
+      0.0,
+      25.02052
+    ],
+    "LM_RightLensBottom": [
+      -41.26716,
+      0.0,
+      -25.02052
+    ],
+    "LM_RightLensNasal": [
+      -12.316639,
+      0.0,
+      0.0
+    ],
+    "LM_RightLensTemporal": [
+      -70.217681,
+      0.0,
+      0.0
+    ],
+    "LM_LeftHinge": [
+      75.139797,
+      7.573618,
+      5.444126
+    ],
+    "LM_LeftHingeAxis": [
+      75.139797,
+      7.573618,
+      6.444126
+    ],
+    "LM_LeftTempleRoot": [
+      75.139797,
+      7.573618,
+      5.444126
+    ],
+    "LM_LeftTempleTip": [
+      52.256602,
+      152.517625,
+      -25.58571
+    ],
+    "LM_LeftTemplePivot": [
+      75.139797,
+      7.573618,
+      5.444126
+    ],
+    "LM_RightHinge": [
+      -75.139797,
+      7.573618,
+      5.444126
+    ],
+    "LM_RightHingeAxis": [
+      -75.139797,
+      7.573618,
+      6.444126
+    ],
+    "LM_RightTempleRoot": [
+      -75.139797,
+      7.573618,
+      5.444126
+    ],
+    "LM_RightTempleTip": [
+      -52.25659,
+      152.517634,
+      -25.5857
+    ],
+    "LM_RightTemplePivot": [
+      -75.139797,
+      7.573618,
+      5.444126
+    ],
+    "LM_NosePadLeftCenter": [
+      12.232764,
+      4.093082,
+      -5.769555
+    ],
+    "LM_NosePadRightCenter": [
+      -12.232764,
+      4.093081,
+      -5.769555
+    ]
+  },
+  "derivation": "Landmarks were generated from mesh-region bounds/vertex clusters because the source 3DM contains only unnamed mesh objects and no named point objects."
+}

@@ -56,16 +56,27 @@ class TemplateLibrary:
 
         bundle = self.bundle_dir / name
         if (bundle / "deformation/basis_metadata.json").is_file():
-            params = json.loads((bundle / "deformation/basis_metadata.json").read_text(encoding="utf-8"))["parameters"]
-            dimensions = TemplateDimensions(**{p["name"]: p["default"] for p in params})
+            basis_meta = json.loads((bundle / "deformation/basis_metadata.json").read_text(encoding="utf-8"))
+            params = basis_meta["parameters"]
+            descriptor_path = bundle / "metadata/template.json"
+            descriptor = json.loads(descriptor_path.read_text(encoding="utf-8")) if descriptor_path.is_file() else {}
+            dimension_values = {p["name"]: p["default"] for p in params}
+            dimension_values.update(descriptor.get("dimensions", {}))
+            dimensions = TemplateDimensions(**dimension_values)
+            shape = FrameShape(descriptor.get("shape", "rectangle"))
+            material = self._coerce_material(descriptor.get("material", "plastic"))
+            family = FrameFamily(descriptor.get("frame_family", "rectangle"))
+            rim_type = RimType(descriptor.get("rim_type", "full_rim"))
+            bridge_type = BridgeType(descriptor.get("bridge_type", "saddle"))
             info = TemplateInfo(
-                name=name, deformation_mode="basis", shape=FrameShape.RECTANGLE,
-                material=FrameMaterial.PLASTIC, glb_path=str(bundle / "geometry/template.glb"),
+                name=descriptor.get("name", name), deformation_mode="basis", shape=shape,
+                material=material, glb_path=str(bundle / "geometry/template.glb"),
                 dimensions=dimensions,
-                parts=["Frame", "LeftLens", "RightLens", "LeftTemple", "RightTemple"],
-                profile=TemplateProfile(frame_family=FrameFamily.RECTANGLE, material=FrameMaterial.PLASTIC,
-                    rim_type=RimType.FULL_RIM, bridge_type=BridgeType.SADDLE,
-                    lens_aspect_ratio=dimensions.lens_aspect_ratio, tags=["gold", "rectangle"]),
+                parts=descriptor.get("parts", ["Frame", "LeftLens", "RightLens", "LeftTemple", "RightTemple"]),
+                profile=TemplateProfile(frame_family=family, material=material,
+                    rim_type=rim_type, bridge_type=bridge_type,
+                    lens_aspect_ratio=dimensions.lens_aspect_ratio,
+                    tags=descriptor.get("tags", [family.value, shape.value, material.value])),
             )
             self._cache[name] = info
             return info

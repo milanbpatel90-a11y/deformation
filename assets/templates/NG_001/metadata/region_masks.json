@@ -1,0 +1,66 @@
+{
+  "regions": {
+    "Frame": {
+      "parts": [
+        "Frame"
+      ],
+      "vertex_range": {
+        "start": 0,
+        "stop": 381
+      }
+    },
+    "LeftLens": {
+      "parts": [
+        "LeftLens"
+      ],
+      "vertex_range": {
+        "start": 381,
+        "stop": 479
+      }
+    },
+    "RightLens": {
+      "parts": [
+        "RightLens"
+      ],
+      "vertex_range": {
+        "start": 479,
+        "stop": 577
+      }
+    },
+    "LeftTemple": {
+      "parts": [
+        "LeftTemple"
+      ],
+      "vertex_range": {
+        "start": 577,
+        "stop": 719
+      }
+    },
+    "RightTemple": {
+      "parts": [
+        "RightTemple"
+      ],
+      "vertex_range": {
+        "start": 719,
+        "stop": 861
+      }
+    }
+  },
+  "front_frame": {
+    "parts": [
+      "Frame"
+    ]
+  },
+  "optical": {
+    "parts": [
+      "LeftLens",
+      "RightLens"
+    ]
+  },
+  "temples": {
+    "parts": [
+      "LeftTemple",
+      "RightTemple"
+    ]
+  }
+}

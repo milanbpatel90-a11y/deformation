@@ -1,0 +1,8 @@
+{
+  "source_units": "millimeters",
+  "runtime_units": "millimeters",
+  "source_geometry_scale_factor": 0.033188872601732505,
+  "raw_frame_width_model_units": 4368.934183,
+  "normalized_frame_width_mm": 145.0,
+  "scale_rationale": "Inferred uniform scale 0.0331888726 normalizes the horizontal model extent to 145 mm; verify against product dimensions."
+}

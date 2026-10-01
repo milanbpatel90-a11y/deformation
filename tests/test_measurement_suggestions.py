@@ -15,16 +15,20 @@ def test_suggestions_fill_supported_values_and_generate(monkeypatch, tmp_path):
         response = client.post("/api/measurements/suggest", files={"images": (path.name, file, "image/jpeg")})
     assert response.status_code == 200, response.text
     data = response.json()
-    assert data["template"] == "GT_001"
+    assert data["template"] in main.library.list_templates()
     assert data["fallback_used"]
     assert "Estimated sizes" in data["note"]
     for field, bounds in data["ranges"].items():
         assert bounds["min"] <= data["measurements"][field] <= bounds["max"]
     values = {key: data["measurements"][key] for key in
               ("frame_width", "lens_width", "lens_height", "bridge_width", "temple_length", "rim_thickness")}
+    # Carry the template recommended from the image analysis into generation;
+    # otherwise the measurement-only endpoint deliberately uses Gold as its
+    # default and would discard the user's auto-selected deformation base.
+    values["template"] = data["template"]
     result = client.post("/api/deform/measurements", data=values)
     assert result.status_code == 200, result.text
-    assert result.json()["template"] == "GT_001"
+    assert result.json()["template"] == data["template"]
     values["temple_length"] = 50
     result = client.post("/api/deform/measurements", data=values)
     assert result.status_code == 422

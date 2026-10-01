@@ -40,6 +40,7 @@ class ShapeClassifier:
 
         shape = self._classify_shape(contour)
         material = self._classify_material(image, contour)
+        shape = self._refine_wide_plastic_shape(shape, material)
         nose_pads = material == FrameMaterial.METAL and shape != FrameShape.RIMLESS
         return shape, material, nose_pads
 
@@ -54,8 +55,9 @@ class ShapeClassifier:
         if contour is None:
             return FrameShape.GEOMETRIC, FrameMaterial.METAL, True, {"confidence": 0.0, "method": "default"}
 
-        shape = self._classify_shape(contour)
+        raw_shape = self._classify_shape(contour)
         material = self._classify_material(image, contour)
+        shape = self._refine_wide_plastic_shape(raw_shape, material)
         nose_pads = material == FrameMaterial.METAL and shape != FrameShape.RIMLESS
 
         x, y, w, h = cv2.boundingRect(contour)
@@ -68,6 +70,11 @@ class ShapeClassifier:
         pixels = image[cv2.drawContours(
             np.zeros(image.shape[:2], np.uint8), [contour], -1, 255, -1
         ) > 0]
+        if mask is not None and np.count_nonzero(mask):
+            # Use observed foreground pixels for material classification. The
+            # convex hull below is only a shape envelope and includes the
+            # white space between the two eyes.
+            pixels = image[mask > 0]
         px_std = float(np.std(pixels.astype(np.float32), axis=0).mean()) if len(pixels) else 0.0
         px_mean = float(pixels.mean()) if len(pixels) else 0.0
 
@@ -84,6 +91,8 @@ class ShapeClassifier:
                 "pixel_mean": round(px_mean, 1),
             },
         }
+        if raw_shape != shape:
+            confidence["metrics"]["wide_acetate_shape_correction"] = True
         return shape, material, nose_pads, confidence
 
     def classify_style(
@@ -107,6 +116,7 @@ class ShapeClassifier:
         shape, material, nose_pads, confidence = self.classify_with_confidence(image, mask)
         x, y, w, h = cv2.boundingRect(contour)
         aspect = w / max(h, 1)
+
         family = self._infer_family(shape, aspect)
         rim_type = self._infer_rim_type(shape, material)
         bridge_type = self._infer_bridge_type(shape, material, nose_pads, aspect)
@@ -138,7 +148,11 @@ class ShapeClassifier:
         if mask is not None:
             contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
             if contours:
-                return max(contours, key=cv2.contourArea)
+                # Combine disconnected rims/bridge/temples into one eyewear
+                # envelope. Looking at only the largest component often sees a
+                # single eye and labels full-frame glasses as geometric.
+                points = np.vstack(contours)
+                return cv2.convexHull(points)
 
         gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
         edges = cv2.Canny(gray, 50, 150)
@@ -192,6 +206,15 @@ class ShapeClassifier:
         return FrameMaterial.METAL
 
     @staticmethod
+    def _refine_wide_plastic_shape(shape: FrameShape, material: FrameMaterial) -> FrameShape:
+        # Whole-eyewear aspect ratio alone often calls wide acetate wayfarers
+        # "aviator". Without a lens-level classifier, use the less specific
+        # rectangular shape for non-metal wide silhouettes.
+        if shape == FrameShape.AVIATOR and material in {FrameMaterial.ACETATE, FrameMaterial.PLASTIC}:
+            return FrameShape.RECTANGLE
+        return shape
+
+    @staticmethod
     def _infer_family(shape: FrameShape, aspect_ratio: float) -> FrameFamily:
         if shape == FrameShape.AVIATOR:
             return FrameFamily.AVIATOR
@@ -203,7 +226,11 @@ class ShapeClassifier:
             return FrameFamily.BROWLINE
         if shape == FrameShape.RIMLESS:
             return FrameFamily.RIMLESS
-        if shape == FrameShape.RECTANGLE and aspect_ratio > 1.45:
+        # For a rectangle, this ratio is the measured lens aspect ratio when
+        # dimensions drive matching and the product silhouette ratio during
+        # image classification. A moderately wide acetate rectangle is much
+        # closer to the Wayfarer family than to round/geometric wire frames.
+        if shape == FrameShape.RECTANGLE and aspect_ratio > 1.15:
             return FrameFamily.WAYFARER
         if shape == FrameShape.RECTANGLE:
             return FrameFamily.RECTANGLE

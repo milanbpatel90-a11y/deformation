@@ -1,4 +1,4 @@
-"""Deform registered Gold Template bundles using their supplied linear basis.
+"""Deform registered basis-template bundles using their supplied linear basis.
 
 The frame contains coupled rim/bridge regions, so this route intentionally does
 not apply the separate-part deformer or require fictitious rim/bridge meshes.
@@ -17,10 +17,16 @@ from backend.deformer.quality_checker import QualityReport
 class BasisDeformer:
     def __init__(self, root: Path):
         self.root = Path(root)
+        descriptor_path = self.root / "metadata/template.json"
+        self.template_id = self.root.name
+        if descriptor_path.is_file():
+            self.template_id = json.loads(descriptor_path.read_text(encoding="utf-8")).get("template_id", self.template_id)
         for relative, magic in (("geometry/template.glb", b"glTF"), ("deformation/basis.npz", b"PK")):
             path = self.root / relative
             if not path.is_file():
-                raise FileNotFoundError(f"Install real GT_001 delivery asset: {path}; binary assets are not supplied by a metadata-only checkout")
+                expected = ("real GT_001 delivery asset" if self.template_id == "GT_001"
+                            else f"real GT_001 delivery asset (or matching {self.template_id} bundle asset)")
+                raise FileNotFoundError(f"Install the {expected}: {path}; binary assets are not supplied by a metadata-only checkout")
             with path.open("rb") as source:
                 if not source.read(4).startswith(magic):
                     raise ValueError(f"{path} is not a real binary asset (check Git LFS/delivery files)")
@@ -32,7 +38,7 @@ class BasisDeformer:
             self.part_order = data["part_order"].tolist()
         self.scene = trimesh.load(self.root / "geometry/template.glb", force="scene", process=False)
         if len(set(self.part_order)) != len(self.part_order) or set(self.part_order) != set(self.scene.geometry):
-            raise ValueError("Gold Template basis part order does not match GLB geometry")
+            raise ValueError(f"{self.template_id} basis part order does not match GLB geometry")
         vertices, faces, offset = [], [], 0
         for name in self.part_order:
             mesh = self.scene.geometry[name]
@@ -41,21 +47,21 @@ class BasisDeformer:
             offset += len(mesh.vertices)
         vertices = np.vstack(vertices)
         if vertices.shape != self.rest.shape or not np.allclose(vertices, self.rest, atol=1e-5, rtol=0):
-            raise ValueError("Gold Template basis rest vertices do not match GLB geometry")
+            raise ValueError(f"{self.template_id} basis rest vertices do not match GLB geometry")
         if not np.array_equal(np.vstack(faces), self.faces):
-            raise ValueError("Gold Template basis faces do not match GLB topology")
+            raise ValueError(f"{self.template_id} basis faces do not match GLB topology")
         if self.basis.shape != (*self.rest.shape, len(self.parameters)) or not np.isfinite(self.basis).all():
-            raise ValueError("Invalid Gold Template deformation basis")
+            raise ValueError(f"Invalid {self.template_id} deformation basis")
         if not np.isfinite(self.rest).all():
-            raise ValueError("Invalid Gold Template rest vertices")
+            raise ValueError(f"Invalid {self.template_id} rest vertices")
         self.slices = {}
         start = 0
         for name in self.part_order:
             end = start + len(self.scene.geometry[name].vertices)
             self.slices[name] = slice(start, end)
             start = end
-        landmarks = json.loads((self.root / "metadata/landmarks.json").read_text(encoding="utf-8"))["landmarks"]
-        self.regions = CalibratedRegions(self.rest, self.basis, self.slices, self.parameters, landmarks)
+        self.landmarks = json.loads((self.root / "metadata/landmarks.json").read_text(encoding="utf-8"))["landmarks"]
+        self.regions = CalibratedRegions(self.rest, self.basis, self.slices, self.parameters, self.landmarks)
         self.calibration_matrix = self.regions.calibration
         self.reference_measurements = dict(zip(self.regions.names, self.regions.reference))
         self.reference_measurements["temple_length"] = self.regions.temple_reference
@@ -66,11 +72,11 @@ class BasisDeformer:
         for parameter in self.parameters:
             value = getattr(measurements, parameter["name"])
             if not parameter["min"] <= value <= parameter["max"]:
-                raise MeasurementCompatibilityError(f'{parameter["name"]} must be between {parameter["min"]} and {parameter["max"]} mm for Gold Template', ranges)
+                raise MeasurementCompatibilityError(f'{parameter["name"]} must be between {parameter["min"]} and {parameter["max"]} mm for {self.template_id}', ranges)
         field = self.regions.configure(measurements)
         vertices = field.warp(self.rest)
         if not np.isfinite(vertices).all() or field.min_jacobian <= 0:
-            raise ValueError("Gold Template deformation produced invalid or folded coordinates")
+            raise ValueError(f"{self.template_id} deformation produced invalid or folded coordinates")
         scene = self.scene.copy()
         for name, sl in self.slices.items():
             scene.geometry[name].vertices = vertices[sl].copy()
@@ -81,14 +87,24 @@ class BasisDeformer:
         temple_length = float(np.linalg.norm(endpoints[1]-endpoints[0]))
         maximum_error = max(float(errors.max()),abs(temple_length-measurements.temple_length))
         if maximum_error > 0.5:
-            raise ValueError(f"Gold Template failed physical dimension validation: {maximum_error:g} mm")
+            raise ValueError(f"{self.template_id} failed physical dimension validation: {maximum_error:g} mm")
         # Native Z-up -> Y-up. All internal deformation and anchor inputs stay mm.
         scene.apply_transform(trimesh.transformations.rotation_matrix(-np.pi / 2, [1, 0, 0]))
         from backend.exporter.geometry import world_vertices
-        anchors = {"NoseBridge": [0.0, 0.0, 0.0]}
+        def to_viewer(point):
+            x, y, z = point
+            return [float(x), float(z), float(-y)]
+
+        bridge = field.warp(np.asarray([self.landmarks.get("LM_BridgeCenter", [0, 0, 0])], dtype=float))[0]
+        anchors = {"NoseBridge": to_viewer(bridge)}
         for name in ("LeftHinge", "RightHinge"):
-            points = world_vertices(scene, name)
-            anchors[name] = ((points.min(0) + points.max(0)) / 2).tolist()
+            if name in scene.geometry:
+                points = world_vertices(scene, name)
+                anchors[name] = ((points.min(0) + points.max(0)) / 2).tolist()
+            else:
+                landmark = self.landmarks.get(f"LM_{name}")
+                if landmark is not None:
+                    anchors[name] = to_viewer(field.warp(np.asarray([landmark], dtype=float))[0])
         scene.metadata["vto_anchors"] = anchors
         scene.metadata["coordinate_units"] = "mm"
         scene.metadata["deformation_validation"] = {
@@ -99,6 +115,6 @@ class BasisDeformer:
             "bridge_definition": "horizontal gap between lens bounding boxes",
         }
         return scene, QualityReport(passed=True, warnings=[
-            "Gold Template retains its authored rim cross-section and temple curve; rim thickness reserves outer clearance in coupled validation."],
+            f"{self.template_id} retains its authored rim cross-section and temple curve; rim thickness reserves outer clearance in coupled validation."],
             breakdown={"finite_geometry": 100.0, "dimension_tolerance_0_5mm": 100.0,
                        "positive_deformation_jacobian": 100.0})
