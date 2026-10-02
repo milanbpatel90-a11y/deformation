@@ -1,0 +1,43 @@
+{
+  "template_id": "HG_001",
+  "display_name": "Hipster Eyewear Spectacles",
+  "template_version": "1.0.0",
+  "shape": "rectangle",
+  "material": "acetate",
+  "frame_family": "rectangle",
+  "rim_type": "full_rim",
+  "bridge_type": "saddle",
+  "parts": [
+    "Frame",
+    "LeftLens",
+    "RightLens",
+    "LeftTemple",
+    "RightTemple"
+  ],
+  "tags": [
+    "hg_001",
+    "rectangle",
+    "acetate"
+  ],
+  "description": "Imported and annotated from hipster_glasses_eyewear_spectacles.3dm; see source_objects.json and scale_config.json for classification assumptions.",
+  "dimensions": {
+    "frame_width": 143.709774,
+    "lens_width": 57.285372,
+    "lens_height": 52.751261,
+    "bridge_width": 21.01595,
+    "temple_length": 124.483221,
+    "rim_thickness": 1.2
+  },
+  "source_file": "source/hipster_glasses_eyewear_spectacles.3dm",
+  "source_model_units": "mm",
+  "source_geometry_scale": 0.002964968679144292,
+  "landmark_method": "Lens bounds and temple end vertex clusters in PCA-aligned canonical eyewear coordinates.",
+  "lens_geometry_method": "source connected eye-sized regions; classified by projected bounds and side",
+  "geometry_object_names": [
+    "Frame",
+    "LeftLens",
+    "RightLens",
+    "LeftTemple",
+    "RightTemple"
+  ]
+}

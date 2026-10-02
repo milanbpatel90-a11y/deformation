@@ -1,3 +1,4 @@
+from tests.template_fixture import procedural_library
 import unittest
 from pathlib import Path
 
@@ -13,7 +14,7 @@ from backend.template_library.loader import TemplateLibrary
 
 class BridgeDeformerTests(unittest.TestCase):
     def _context(self) -> DeformationContext:
-        library = TemplateLibrary(Path("templates"))
+        library = procedural_library(self)
         info = library.load("geometric_metal")
         measurements = Measurements(
             frame_width=135.0,
@@ -26,7 +27,7 @@ class BridgeDeformerTests(unittest.TestCase):
             shape=FrameShape.GEOMETRIC,
             nose_pads=True,
         )
-        descriptor = DescriptorLoader(Path("templates")).load("geometric_metal", measurements=measurements, template_info=info)
+        descriptor = DescriptorLoader(library.templates_dir).load("geometric_metal", measurements=measurements, template_info=info)
         scene = trimesh.load(info.glb_path, force="scene")
         return DeformationContext(template_info=info, template_scene=scene, descriptor=descriptor, measurements=measurements)
 

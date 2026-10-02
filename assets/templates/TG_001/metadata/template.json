@@ -1,0 +1,43 @@
+{
+  "template_id": "TG_001",
+  "display_name": "Transparent Baked-Texture Glasses",
+  "template_version": "1.0.0",
+  "shape": "rectangle",
+  "material": "acetate",
+  "frame_family": "rectangle",
+  "rim_type": "full_rim",
+  "bridge_type": "saddle",
+  "parts": [
+    "Frame",
+    "LeftLens",
+    "RightLens",
+    "LeftTemple",
+    "RightTemple"
+  ],
+  "tags": [
+    "tg_001",
+    "rectangle",
+    "acetate"
+  ],
+  "description": "Imported and annotated from transparent_glasses_with_baked_textures.3dm; see source_objects.json and scale_config.json for classification assumptions.",
+  "dimensions": {
+    "frame_width": 144.567093,
+    "lens_width": 60.710498,
+    "lens_height": 48.13839,
+    "bridge_width": 16.350431,
+    "temple_length": 91.33038,
+    "rim_thickness": 1.2
+  },
+  "source_file": "source/transparent_glasses_with_baked_textures.3dm",
+  "source_model_units": "mm",
+  "source_geometry_scale": 0.05093320618900101,
+  "landmark_method": "Lens bounds and temple end vertex clusters in PCA-aligned canonical eyewear coordinates.",
+  "lens_geometry_method": "source connected eye-sized regions; classified by projected bounds and side",
+  "geometry_object_names": [
+    "Frame",
+    "LeftLens",
+    "RightLens",
+    "LeftTemple",
+    "RightTemple"
+  ]
+}

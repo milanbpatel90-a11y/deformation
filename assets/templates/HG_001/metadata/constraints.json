@@ -1,0 +1,8 @@
+{
+  "coupled": [
+    {
+      "formula": "frame_width >= 2*lens_width + bridge_width + 2*rim_thickness",
+      "description": "Reserves frame and bridge clearance on both sides."
+    }
+  ]
+}

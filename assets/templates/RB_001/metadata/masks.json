@@ -1,0 +1,42 @@
+{
+  "unified_vertex_order": [
+    "Frame",
+    "LeftLens",
+    "RightLens",
+    "LeftTemple",
+    "RightTemple",
+    "NosePadLeft",
+    "NosePadRight"
+  ],
+  "vertex_count": 20178,
+  "part_masks": {
+    "Frame": {
+      "start": 0,
+      "stop": 9292
+    },
+    "LeftLens": {
+      "start": 9292,
+      "stop": 11238
+    },
+    "RightLens": {
+      "start": 11238,
+      "stop": 13184
+    },
+    "LeftTemple": {
+      "start": 13184,
+      "stop": 16227
+    },
+    "RightTemple": {
+      "start": 16227,
+      "stop": 19270
+    },
+    "NosePadLeft": {
+      "start": 19270,
+      "stop": 19724
+    },
+    "NosePadRight": {
+      "start": 19724,
+      "stop": 20178
+    }
+  }
+}

@@ -1,0 +1,83 @@
+{
+  "topology": {
+    "Frame": {
+      "vertex_count": 20718,
+      "face_count": 40448,
+      "topology_hash": "2379298413ab3636",
+      "geometry_hash": "5f4002284adb30b5"
+    },
+    "LeftLens": {
+      "vertex_count": 5122,
+      "face_count": 10240,
+      "topology_hash": "6c141e30c1097418",
+      "geometry_hash": "cb0f65d6bae0cb71"
+    },
+    "RightLens": {
+      "vertex_count": 5122,
+      "face_count": 10240,
+      "topology_hash": "6c141e30c1097418",
+      "geometry_hash": "8a383c14af34bf58"
+    },
+    "LeftTemple": {
+      "vertex_count": 8258,
+      "face_count": 16128,
+      "topology_hash": "80eaaeb746e159e8",
+      "geometry_hash": "130cd4407d8101af"
+    },
+    "RightTemple": {
+      "vertex_count": 8258,
+      "face_count": 16128,
+      "topology_hash": "80eaaeb746e159e8",
+      "geometry_hash": "3bc48a7e99d35634"
+    },
+    "LeftHinge": {
+      "vertex_count": 7294,
+      "face_count": 3648,
+      "topology_hash": "a65a904fc0421163",
+      "geometry_hash": "7d998daa22ea9bd8"
+    },
+    "RightHinge": {
+      "vertex_count": 7290,
+      "face_count": 3648,
+      "topology_hash": "a8c6eb0c454d76e4",
+      "geometry_hash": "5c5730a6d3296b57"
+    },
+    "LeftTempleJoint": {
+      "vertex_count": 37876,
+      "face_count": 18944,
+      "topology_hash": "e361622732209c1a",
+      "geometry_hash": "ebadab60d4c55e81"
+    },
+    "RightTempleJoint": {
+      "vertex_count": 37876,
+      "face_count": 18944,
+      "topology_hash": "e361622732209c1a",
+      "geometry_hash": "41a44de4ca99d7c0"
+    },
+    "LeftFrameInsert": {
+      "vertex_count": 20992,
+      "face_count": 10496,
+      "topology_hash": "5a32ad882cf9190a",
+      "geometry_hash": "82bf87a8a51a494f"
+    },
+    "RightFrameInsert": {
+      "vertex_count": 20992,
+      "face_count": 10496,
+      "topology_hash": "5a32ad882cf9190a",
+      "geometry_hash": "ba9817e82eeda4d1"
+    },
+    "LeftDecoration": {
+      "vertex_count": 2944,
+      "face_count": 1472,
+      "topology_hash": "e5bac751436729fc",
+      "geometry_hash": "e90de65e8b0759a8"
+    },
+    "RightDecoration": {
+      "vertex_count": 2944,
+      "face_count": 1472,
+      "topology_hash": "e5bac751436729fc",
+      "geometry_hash": "d7632acb1096982c"
+    }
+  },
+  "source_glb": "geometry/Gold_Template_Runtime.glb"
+}

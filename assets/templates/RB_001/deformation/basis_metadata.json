@@ -1,0 +1,97 @@
+{
+  "parameters": [
+    {
+      "name": "frame_width",
+      "units": "mm",
+      "default": 153.120645,
+      "min": 110.0,
+      "max": 170.0,
+      "affected_parts": [
+        "Frame",
+        "LeftLens",
+        "RightLens",
+        "LeftTemple",
+        "RightTemple",
+        "NosePadLeft",
+        "NosePadRight"
+      ]
+    },
+    {
+      "name": "lens_width",
+      "units": "mm",
+      "default": 57.901041,
+      "min": 40.0,
+      "max": 70.0,
+      "affected_parts": [
+        "Frame",
+        "LeftLens",
+        "RightLens",
+        "LeftTemple",
+        "RightTemple",
+        "NosePadLeft",
+        "NosePadRight"
+      ]
+    },
+    {
+      "name": "lens_height",
+      "units": "mm",
+      "default": 50.04104,
+      "min": 25.0,
+      "max": 55.0,
+      "affected_parts": [
+        "Frame",
+        "LeftLens",
+        "RightLens",
+        "LeftTemple",
+        "RightTemple",
+        "NosePadLeft",
+        "NosePadRight"
+      ]
+    },
+    {
+      "name": "bridge_width",
+      "units": "mm",
+      "default": 24.633279,
+      "min": 12.0,
+      "max": 28.0,
+      "affected_parts": [
+        "Frame",
+        "LeftLens",
+        "RightLens",
+        "LeftTemple",
+        "RightTemple",
+        "NosePadLeft",
+        "NosePadRight"
+      ]
+    },
+    {
+      "name": "temple_length",
+      "units": "mm",
+      "default": 149.984188,
+      "min": 120.0,
+      "max": 180.0,
+      "affected_parts": [
+        "Frame",
+        "LeftLens",
+        "RightLens",
+        "LeftTemple",
+        "RightTemple",
+        "NosePadLeft",
+        "NosePadRight"
+      ]
+    }
+  ],
+  "formula": "V(p) = V0 + sum_i B[:,:,i] * (p_i - default_i); dimensions are calibrated from the measured basis Jacobian.",
+  "units": "millimeters",
+  "part_order": [
+    "Frame",
+    "LeftLens",
+    "RightLens",
+    "LeftTemple",
+    "RightTemple",
+    "NosePadLeft",
+    "NosePadRight"
+  ],
+  "landmark_source": "Calculated from the named source mesh regions; see metadata/landmarks.json derivation fields.",
+  "version": "1.0"
+}

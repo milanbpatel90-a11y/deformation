@@ -1,0 +1,104 @@
+{
+  "source_file": "source/hipster_glasses_eyewear_spectacles.3dm",
+  "objects": [
+    {
+      "source_object": "Object_0",
+      "source_name": "Object_0",
+      "geometry_type": "Mesh",
+      "renamed_regions": [
+        "Frame",
+        "LeftTemple",
+        "RightTemple"
+      ]
+    },
+    {
+      "source_object": "Object_1",
+      "source_name": "Object_1",
+      "geometry_type": "Mesh",
+      "renamed_regions": [
+        "Frame"
+      ]
+    },
+    {
+      "source_object": "Object_2",
+      "source_name": "Object_2",
+      "geometry_type": "Mesh",
+      "renamed_regions": [
+        "Frame"
+      ]
+    },
+    {
+      "source_object": "Object_3",
+      "source_name": "Object_3",
+      "geometry_type": "Mesh",
+      "renamed_regions": [
+        "Frame",
+        "LeftTemple",
+        "RightTemple"
+      ]
+    },
+    {
+      "source_object": "Object_4",
+      "source_name": "Object_4",
+      "geometry_type": "Mesh",
+      "renamed_regions": [
+        "LeftTemple",
+        "RightTemple"
+      ]
+    },
+    {
+      "source_object": "Object_5",
+      "source_name": "Object_5",
+      "geometry_type": "Mesh",
+      "renamed_regions": [
+        "Frame",
+        "LeftLens",
+        "RightLens"
+      ]
+    },
+    {
+      "source_object": "Object_6",
+      "source_name": "Object_6",
+      "geometry_type": "Mesh",
+      "renamed_regions": [
+        "Frame"
+      ]
+    },
+    {
+      "source_object": "Object_7",
+      "source_name": "Object_7",
+      "geometry_type": "Mesh",
+      "renamed_regions": [
+        "Frame"
+      ]
+    },
+    {
+      "source_object": "Object_8",
+      "source_name": "Object_8",
+      "geometry_type": "Mesh",
+      "renamed_regions": [
+        "Frame",
+        "LeftLens"
+      ]
+    },
+    {
+      "source_object": "Object_9",
+      "source_name": "Object_9",
+      "geometry_type": "Mesh",
+      "renamed_regions": [
+        "Frame",
+        "RightLens"
+      ]
+    },
+    {
+      "source_object": "Object_10",
+      "source_name": "Object_10",
+      "geometry_type": "Mesh",
+      "renamed_regions": [
+        "Frame"
+      ]
+    }
+  ],
+  "classification": "Connected components classified from projected bounds; see lens_geometry_method and scale_config.",
+  "notes": "Source has no standard LM_* point/empty objects. Landmark JSON records inferred points; generated optical surfaces are explicitly identified when used."
+}

@@ -1,0 +1,9 @@
+{
+  "source_units": "millimeters",
+  "source_model_unit_system": "Millimeters",
+  "source_geometry_scale_factor": 0.08,
+  "runtime_units": "millimeters",
+  "raw_frame_width_model_units": 1914.008057,
+  "normalized_frame_width_mm": 153.120645,
+  "scale_rationale": "The supplied file declares mm but has a 1914.0-unit front frame; factor 0.08 yields 153.12 mm, a plausible eyewear width. This is inferred and must be checked against a product specification."
+}

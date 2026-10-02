@@ -291,40 +291,35 @@ class RimDeformer(BaseDeformer):
 
     @staticmethod
     def _propagate_to_frame(frame_mesh, original_rim_vertices: np.ndarray, deformed_rim_vertices: np.ndarray) -> None:
-        """Propagate rim deformation into frame mesh — vectorised with spatial index."""
+        """Transfer rim motion through a deterministic nearest-surface field.
+
+        A single radius query from every rim vertex creates a dense ragged
+        neighbourhood list and accumulates the same frame vertex many times.
+        Querying each frame vertex against one rim KD-tree is O(F log R), has
+        bounded memory, and makes the soft falloff independent of mesh density.
+        Exact shared boundary vertices receive the full corresponding delta.
+        """
         from scipy.spatial import cKDTree
 
-        frame_vertices = frame_mesh.vertices.copy()
-        deltas = deformed_rim_vertices - original_rim_vertices  # (R, 3)
-
-        tree = cKDTree(frame_vertices)
-
-        # --- Exact matches (within 1e-5) ---
-        exact_indices = tree.query_ball_point(original_rim_vertices, r=1e-5)
-        for r_idx, f_indices in enumerate(exact_indices):
-            if f_indices:
-                frame_vertices[f_indices] += deltas[r_idx]
-
-        # --- Soft falloff within radius 12 mm ---
-        # Only query rim verts that had no exact match
-        no_exact_mask = np.array([len(fi) == 0 for fi in exact_indices])
-        if not no_exact_mask.any():
-            frame_mesh.vertices = frame_vertices
+        original_rim_vertices = np.asarray(original_rim_vertices, dtype=np.float64)
+        deformed_rim_vertices = np.asarray(deformed_rim_vertices, dtype=np.float64)
+        frame_vertices = np.asarray(frame_mesh.vertices, dtype=np.float64).copy()
+        if (original_rim_vertices.ndim != 2 or original_rim_vertices.shape[1] != 3
+                or deformed_rim_vertices.shape != original_rim_vertices.shape
+                or frame_vertices.ndim != 2 or frame_vertices.shape[1] != 3):
+            raise ValueError("Rim/frame propagation requires matching Nx3 vertex arrays")
+        if not (np.isfinite(original_rim_vertices).all() and np.isfinite(deformed_rim_vertices).all()
+                and np.isfinite(frame_vertices).all()):
+            raise ValueError("Rim/frame propagation received non-finite vertices")
+        if not len(original_rim_vertices) or not len(frame_vertices):
             return
 
-        soft_rim = original_rim_vertices[no_exact_mask]
-        soft_deltas = deltas[no_exact_mask]
-
-        # Query neighbours within 12 mm
-        neighbours = tree.query_ball_point(soft_rim, r=12.0)
-        weighted = np.zeros_like(frame_vertices)
-        for r_idx, f_indices in enumerate(neighbours):
-            if not f_indices:
-                continue
-            f_idx = np.array(f_indices, dtype=np.int32)
-            dist = np.linalg.norm(frame_vertices[f_idx] - soft_rim[r_idx], axis=1)
-            influence = BaseDeformer.apply_falloff(np.clip(1.0 - dist / 12.0, 0.0, 1.0))
-            weighted[f_idx] += soft_deltas[r_idx] * influence[:, None] * 0.2
-
-        frame_vertices += weighted
+        base_vertices = frame_vertices.copy()
+        deltas = deformed_rim_vertices - original_rim_vertices
+        tree = cKDTree(original_rim_vertices)
+        distances, nearest = tree.query(frame_vertices, k=1, workers=1)
+        influence = BaseDeformer.apply_falloff(np.clip(1.0 - distances / 12.0, 0.0, 1.0))
+        frame_vertices += deltas[nearest] * (0.2 * influence[:, None])
+        exact = distances <= 1e-5
+        frame_vertices[exact] = base_vertices[exact] + deltas[nearest[exact]]
         frame_mesh.vertices = frame_vertices
