@@ -21,4 +21,11 @@ def template_readiness(library: TemplateLibrary) -> dict:
             available.append(name)
         except (ValueError, KeyError, OSError) as exc:
             unavailable[name] = str(exc)
-    return {"ready": bool(available), "templates": available, "unavailable": unavailable}
+    # GT_001 is the service's documented default for manual generation. A
+    # deployment with only an unrelated catalog item must not pass /readyz.
+    required = "GT_001"
+    ready = required in available
+    if not ready and required not in unavailable:
+        unavailable[required] = "Required production default template GT_001 is not installed"
+    return {"ready": ready, "required_template": required,
+            "templates": available, "unavailable": unavailable}

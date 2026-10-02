@@ -40,8 +40,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-OUTPUT_DIR = Path(__file__).resolve().parents[2] / "output"
-OUTPUT_DIR.mkdir(exist_ok=True)
+OUTPUT_ROOT = Path(__file__).resolve().parents[2] / "output"
+PRODUCTION_MODE = os.getenv("DEFIRM_PRODUCTION_MODE", "").lower() in {"1", "true", "yes"}
+OUTPUT_DIR = OUTPUT_ROOT / ("production" if PRODUCTION_MODE else "development")
+OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 pipeline = DeformationPipeline()
 library = TemplateLibrary()
@@ -98,7 +100,8 @@ def health():
 def ready():
     catalog = template_readiness(library)
     return JSONResponse({"ready": catalog["ready"], "templates": catalog["templates"],
-                         "unavailable": list(catalog["unavailable"])},
+                         "unavailable": list(catalog["unavailable"]),
+                         "production_mode": PRODUCTION_MODE},
                         status_code=200 if catalog["ready"] else 503)
 
 
@@ -223,6 +226,7 @@ async def deform_from_images(
         result["ranges"] = input_ranges(Measurements(**result["measurements"]), result.get("template"))
         result["job_id"] = job_id
         result["download_url"] = f"/api/output/{job_id}.glb"
+        result["manifest_url"] = f"/api/output/{job_id}.manifest.json"
         return result
     except HTTPException:
         raise
@@ -285,6 +289,7 @@ async def deform_from_multiple_images(
         result["ranges"] = input_ranges(Measurements(**result["measurements"]), result.get("template"))
         result["job_id"] = job_id
         result["download_url"] = f"/api/output/{job_id}.glb"
+        result["manifest_url"] = f"/api/output/{job_id}.manifest.json"
         return result
     except HTTPException:
         raise
@@ -347,6 +352,7 @@ async def deform_from_measurements(
         result["ranges"] = input_ranges(Measurements(**result["measurements"]), result.get("template"))
         result["job_id"] = job_id
         result["download_url"] = f"/api/output/{job_id}.glb"
+        result["manifest_url"] = f"/api/output/{job_id}.manifest.json"
         return result
     except HTTPException:
         raise
@@ -362,7 +368,7 @@ async def deform_from_measurements(
 
 @app.get("/api/output/{filename}")
 def download_output(filename: str):
-    if not re.fullmatch(r"[A-Za-z0-9_-]+\.(?:glb|metadata\.json)", filename):
+    if not re.fullmatch(r"[A-Za-z0-9_-]+\.(?:glb|metadata\.json|manifest\.json)", filename):
         raise HTTPException(404, "File not found")
     path = (OUTPUT_DIR / filename).resolve()
     if path.parent != OUTPUT_DIR.resolve() or not path.is_file():

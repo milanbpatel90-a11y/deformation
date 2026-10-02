@@ -1,71 +1,79 @@
-# Deployment status
+# Production readiness
 
-**Gold Template GT_001 is installed and available for generation.**
+The project uses product GLB templates and a parametric deformation engine. The
+runtime path is image/measurement extraction, template matching, deformation,
+material assignment, independent serialized-GLB checks, and browser VTO. GT_001
+is the required default bundle; the exporter remains unchanged.
 
-The complete bundle metadata and coupled basis were recovered from the local
-`gt001_delivery` package. The original Gold Template runtime GLB was installed at
-`assets/templates/GT_001/geometry/template.glb`; its vertices and face topology
-match the basis exactly. The API discovers asset bundles as well as legacy templates.
-Gold Template uses its supplied basis to deform combined frame/rim/bridge regions,
-so it does not require those regions to be separate GLB meshes.
+## Implemented gates
 
-`python -m scripts.check_readiness` and `/readyz` now report GT_001 as ready.
-Readiness validates structural compatibility, not full-range visual fidelity.
-The five primary manual dimensions drive the basis; rim thickness and temple
-curve retain the supplied template geometry, with this limitation returned in
-quality warnings. Manual dimensions outside the basis's supported ranges are
-rejected rather than silently clamped. Large deformations still require visual QA.
+- GT_001 calibrates the supplied basis with the measured dimension Jacobian and
+  rejects unsupported or coupled-infeasible dimensions.
+- Its monotone regional field preserves a positive Jacobian. Runtime checks
+  reject non-finite coordinates, degenerate triangle area, and edge stretch
+  above the template's declared 3x limit. The bridge height transition is
+  widened to avoid excessive local shear at the high supported settings.
+- Every exported GLB is independently checked after serialization for glTF
+  2.0, embedded buffer/accessor integrity, metres, normals, texture UVs when a
+  material uses textures, valid indices, non-degenerate triangles, reasonable
+  bounds, and requested frame/lens/bridge dimensions. A failed GLB and its
+  sidecars are deleted.
+- Each result has a deterministic `.manifest.json` with measurement units,
+  source bundle hashes, output hash, deformation quality, and acceptance state.
+- `DEFIRM_PRODUCTION_MODE=1` writes under `output/production` and requires exact
+  Open3D per-component triangle self-intersection checks; failures do not leave
+  a downloadable GLB. Default development outputs go under
+  `output/development` and are marked `REVIEW` while exact intersections are
+  not checked.
+- GT_001 and six additional runtime bundles have a committed asset checksum
+  manifest. The required Gold GLB and basis are now included through Git LFS.
+- The real-product benchmark runner reports template accuracy, measurement MAE,
+  RMSE, maximum error, failures, and per-model output acceptance.
 
-The older `templates/geometric_metal.glb` and `rectangle_plastic.glb` entries remain
-unavailable through the separate-part engine. They are distinct from GT_001.
-`assets/.gitignore` intentionally excludes large binaries: deployment must copy
-`geometry/template.glb` and `deformation/basis.npz` along with the JSON metadata,
-or store those binaries through the project's asset/LFS delivery process.
+## Release gate
 
-## Manual measurement contract
+Run `python -m scripts.check_readiness`. The `ready` field means the service has
+the required local assets and passes its GT_001 dimensional smoke checks.
+`production_ready` is a stricter release decision. It remains false until all
+of the following evidence is present:
 
-The viewer suggests editable frame width, lens width, lens height, bridge width,
-temple length and rim thickness after image upload. These are estimates using an assumed scale, not exact physical measurements. Manual editing is supported and automatic template selection checks supported ranges. POST /api/measurements/suggest accepts images and returns suggested values, range limits and any adjustments. Photos are optional. Generation image endpoints require a
-`measurements` form field containing a Measurements JSON object; the five primary
-dimensions are mandatory. These values bypass image-based dimensional estimation
-and multi-view fusion. Images can still provide contours and lens appearance.
-The measurements-only endpoint accepts form fields. All dimensions must be finite
-and positive; invalid inputs return 422. Legacy Python callers can still explicitly
-use the experimental estimation path by omitting `manual_measurements`.
+1. Start the service with `DEFIRM_PRODUCTION_MODE=1` and use that profile for
+   release generation. This requires Open3D; unsupported/missing exact checks
+   fail closed.
+2. Run `python -m scripts.benchmark_real_products` with at least 100 real,
+   independently measured products and product-owner-approved thresholds.
+   Keep customer images outside Git unless their owner approved repository
+   storage. The benchmark must show no template mismatches or review-only GLBs.
+3. Record browser and mobile VTO acceptance in
+   `dataset/real_products/release_acceptance.json` after testing real devices.
+4. Review lens/rim clearance, temple-joint fit, material segmentation, and all
+   collision findings on the intended template families.
 
-## Run and verify
+These release requirements are intentional: automatic measurements from photos
+without a scale reference are estimates, and passing synthetic geometry tests
+does not establish real-product accuracy. A rectangular template also preserves
+its authored silhouette; it cannot become an unrelated aviator, round, or
+cat-eye product from dimension changes alone.
 
-Use a dedicated Python 3.11 environment and install `requirements-dev.txt`.
-This workspace's populated environment is `venv`; `.venv` was missing runtime packages.
+## Run the local checks
 
 ```powershell
-.\venv\Scripts\python.exe -m pytest
-.\venv\Scripts\python.exe -m scripts.check_readiness
-.\venv\Scripts\python.exe -m uvicorn backend.api.main:app --host 127.0.0.1 --port 8000
+python -m pytest -q --tb=short
+python -m scripts.template_asset_manifest
+python -m scripts.check_readiness
+python -m scripts.validate_production_glb
+python -m scripts.benchmark_rim_deformer --vertices 61872
 ```
 
-Serve the viewer at `/viewer/` from the same origin. For a separate trusted frontend,
-set `DEFIRM_CORS_ORIGINS` to a comma-separated origin list. Set `DEFIRM_YOLO_MODEL`
-to a validated eyewear segmentation model. The generic COCO model is no longer
-preferred over the trained eyewear model.
+Install/fetch Git LFS assets after cloning (`git lfs install`, `git lfs pull`).
+The asset manifest detects missing, incorrect, or incomplete LFS downloads.
 
-Uploads are limited to 10 MiB and 16 megapixels per image, with at most six images.
-Heavy inference/deformation jobs run outside the event loop, one at a time per
-process; concurrent jobs receive 503 with Retry-After. Configure a reverse proxy
-with an overall request-body limit (65 MiB), timeouts, authentication and rate
-limits before public deployment. Downloads are bearer URLs, not per-user access
-control. Define output retention and disk monitoring for the deployment.
+## Deployment controls
 
-The viewer still depends on external Three.js and MediaPipe CDNs. Webcam operation
-requires HTTPS or localhost and browser permission. Camera/browser visual QA,
-load testing, artist-asset fidelity, and Blender-only factory/add-on execution
-remain deployment checks. Python compilation does not exercise Blender APIs.
-
-Component tests use a temporary procedural scene with separate parts; regression
-tests independently verify rejection of ambiguous geometry, manual input handling,
-API errors and limits, GLB materials and export. One existing Gold Template
-integration test remains skipped pending asset preparation. Passing those tests
-does not replace production visual and load testing.
-
-## Current measured GLB audit
-See [GLB_PRODUCTION_AUDIT.md](docs/GLB_PRODUCTION_AUDIT.md). Export units, normals, hierarchy and metadata are repaired and tested on the real Gold asset. Dimensional production readiness remains false: the nominal lens/bridge basis requires calibration and coupled range validation. Successful GLB generation is not a production-readiness guarantee.
+Uploads are limited to 10 MiB and 16 megapixels per image, with at most six
+images. CPU deformation jobs are serialized per process and concurrent requests
+receive 503 with `Retry-After`. Before public deployment, configure a reverse
+proxy request-size limit, timeouts, authentication, rate limits, and output
+retention/disk monitoring. Output URLs are bearer links, not per-user access
+control. The viewer uses external Three.js and MediaPipe CDNs; production
+browser/mobile, webcam, load, and GPU memory behavior still require device QA.

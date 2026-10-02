@@ -9,7 +9,8 @@ from pathlib import Path
 import numpy as np
 import trimesh
 from backend.deformer.calibrated_regions import CalibratedRegions
-from backend.template_library.compatibility import validate_combination, MeasurementCompatibilityError
+from backend.template_library.compatibility import (
+    validate_combination, MeasurementCompatibilityError, dependent_ranges)
 
 from backend.deformer.quality_checker import QualityReport
 
@@ -30,7 +31,9 @@ class BasisDeformer:
             with path.open("rb") as source:
                 if not source.read(4).startswith(magic):
                     raise ValueError(f"{path} is not a real binary asset (check Git LFS/delivery files)")
-        self.parameters = json.loads((self.root / "deformation/basis_metadata.json").read_text(encoding="utf-8"))["parameters"]
+        self.basis_metadata = json.loads(
+            (self.root / "deformation/basis_metadata.json").read_text(encoding="utf-8"))
+        self.parameters = self.basis_metadata["parameters"]
         with np.load(self.root / "deformation/basis.npz", allow_pickle=False) as data:
             self.basis = data["B"]
             self.rest = data["V0"]
@@ -77,6 +80,43 @@ class BasisDeformer:
         vertices = field.warp(self.rest)
         if not np.isfinite(vertices).all() or field.min_jacobian <= 0:
             raise ValueError(f"{self.template_id} deformation produced invalid or folded coordinates")
+        quality_limits = self.basis_metadata.get("geometry_quality", {})
+        minimum_area = float(quality_limits.get("minimum_triangle_area_mm2", 1e-10))
+        maximum_stretch = float(quality_limits.get("maximum_edge_stretch_ratio", 3.0))
+        faces = np.asarray(self.faces, dtype=np.int64)
+        target_triangles = vertices[faces]
+        target_normals = np.cross(target_triangles[:, 1] - target_triangles[:, 0],
+                                  target_triangles[:, 2] - target_triangles[:, 0])
+        areas = np.linalg.norm(target_normals, axis=1) * 0.5
+        if np.any(areas <= minimum_area):
+            raise ValueError(f"{self.template_id} deformation created degenerate triangles")
+        edges = np.vstack((faces[:, [0, 1]], faces[:, [1, 2]], faces[:, [2, 0]]))
+        source_lengths = np.linalg.norm(self.rest[edges[:, 0]] - self.rest[edges[:, 1]], axis=1)
+        target_lengths = np.linalg.norm(vertices[edges[:, 0]] - vertices[edges[:, 1]], axis=1)
+        nonzero = source_lengths > 1e-12
+        stretch = target_lengths[nonzero] / source_lengths[nonzero]
+        max_stretch = float(stretch.max(initial=1.0))
+        min_stretch = float(stretch.min(initial=1.0))
+        if not np.isfinite(stretch).all() or max_stretch > maximum_stretch:
+            worst = int(np.argmax(stretch))
+            source_edge = edges[nonzero][worst]
+            source_part = next((name for name, sl in self.slices.items()
+                                if sl.start <= source_edge[0] < sl.stop), "unknown")
+            base_ranges = {p["name"]: {"min": p["min"], "max": p["max"]} for p in self.parameters}
+            ranges = dependent_ranges(measurements, base_ranges)
+            ranges["geometry_quality"] = {
+                "maximum_edge_stretch_ratio": max_stretch,
+                "maximum_allowed_edge_stretch_ratio": maximum_stretch,
+                "limiting_part": source_part,
+            }
+            raise MeasurementCompatibilityError(
+                f"{self.template_id} maximum edge stretch {max_stretch:.4g} exceeds {maximum_stretch:g} "
+                f"in {source_part} (edge vertices {int(source_edge[0])}, {int(source_edge[1])}; "
+                f"FW/LW/LH/BW/TL={measurements.frame_width:g}/{measurements.lens_width:g}/"
+                f"{measurements.lens_height:g}/{measurements.bridge_width:g}/{measurements.temple_length:g} mm). "
+                "Reduce the dimensions until the selected template remains within its geometry limits.",
+                ranges,
+            )
         scene = self.scene.copy()
         for name, sl in self.slices.items():
             scene.geometry[name].vertices = vertices[sl].copy()
@@ -113,6 +153,10 @@ class BasisDeformer:
             "basis_calibration_matrix": self.calibration_matrix.tolist(),
             "basis_coefficients": field.coefficients.tolist(),
             "bridge_definition": "horizontal gap between lens bounding boxes",
+            "maximum_edge_stretch_ratio": max_stretch,
+            "minimum_edge_stretch_ratio": min_stretch,
+            "minimum_triangle_area_mm2": float(areas.min()),
+            "continuous_map_orientation_preserved": True,
         }
         return scene, QualityReport(passed=True, warnings=[
             f"{self.template_id} retains its authored rim cross-section and temple curve; rim thickness reserves outer clearance in coupled validation."],

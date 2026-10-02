@@ -44,7 +44,7 @@
         "LeftTempleJoint",
         "RightTempleJoint"
       ],
-      "deformation_type": "linear_vertex_basis (V = V0 + B*delta)",
+      "deformation_type": "jacobian_calibrated_monotone_regional_field",
       "constraints": [
         "EQ_BRIDGE_CENTERING",
         "EQ_LR_SYMMETRY",
@@ -80,13 +80,13 @@
         "LeftLens",
         "RightLens"
       ],
-      "deformation_type": "linear_vertex_basis (V = V0 + B*delta)",
+      "deformation_type": "jacobian_calibrated_monotone_regional_field",
       "constraints": [
         "EQ_BRIDGE_CENTERING",
         "EQ_LR_SYMMETRY",
         "INEQ_LENS_INSIDE_RIM"
       ],
-      "known_limitation": "Frame rim does not follow; will visually separate from lens boundary at large deltas.",
+      "known_limitation": "The calibrated field follows measured lens/frame region boundaries. Exact CAD surface clearance and non-rectangular silhouette fitting still require product-specific validation.",
       "test_cases_mm": [
         55.79,
         40,
@@ -116,7 +116,7 @@
         "LeftLens",
         "RightLens"
       ],
-      "deformation_type": "linear_vertex_basis (V = V0 + B*delta)",
+      "deformation_type": "jacobian_calibrated_monotone_regional_field",
       "constraints": [
         "EQ_BRIDGE_CENTERING",
         "EQ_LR_SYMMETRY",
@@ -172,14 +172,14 @@
         "LeftDecoration",
         "RightDecoration"
       ],
-      "deformation_type": "linear_vertex_basis (V = V0 + B*delta)",
+      "deformation_type": "jacobian_calibrated_monotone_regional_field",
       "constraints": [
         "EQ_BRIDGE_CENTERING",
         "EQ_LR_SYMMETRY",
         "EQ_HINGE_ATTACHMENT",
         "INEQ_LENS_INSIDE_RIM"
       ],
-      "known_limitation": "Frame mesh itself is NOT reshaped to follow - will separate from the moved assemblies at large deltas. This is the single biggest gap before this basis is production-real; see README.",
+      "known_limitation": "Bridge width is the horizontal gap between lens bounding boxes. The calibrated field couples adjacent frame regions, but does not measure CAD nose-bridge surface clearance.",
       "test_cases_mm": [
         17.9,
         12,
@@ -209,7 +209,7 @@
         "LeftTemple",
         "RightTemple"
       ],
-      "deformation_type": "linear_vertex_basis (V = V0 + B*delta)",
+      "deformation_type": "jacobian_calibrated_monotone_regional_field",
       "constraints": [
         "EQ_BRIDGE_CENTERING",
         "EQ_LR_SYMMETRY",

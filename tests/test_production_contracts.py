@@ -46,6 +46,17 @@ def test_measurement_validation(key, value):
         Measurements(**{**MANUAL, key: value})
 
 
+def test_template_geometry_limit_is_reported_as_coupled_422(client):
+    values = dict(frame_width=170, lens_width=40, lens_height=25,
+                  bridge_width=12, temple_length=120, rim_thickness=1.2)
+    response = client.post("/api/deform/measurements", data=values)
+    assert response.status_code == 422, response.text
+    payload = response.json()
+    assert "geometry_quality" in payload["ranges"]
+    assert payload["ranges"]["geometry_quality"]["maximum_edge_stretch_ratio"] > 3.0
+    assert payload["ranges"]["geometry_quality"]["maximum_allowed_edge_stretch_ratio"] == 3.0
+
+
 def test_manual_dimensions_required(client):
     assert client.post("/api/deform/measurements", data={}).status_code == 422
     assert client.post("/api/deform/measurements", data={**MANUAL, "frame_width": "nan"}).status_code == 422
@@ -156,7 +167,10 @@ def test_manual_pipeline_exports_prepared_geometry(tmp_path, prepared_pipeline):
     scene = trimesh.load(output, force="scene")
     assert len(scene.geometry) >= 8
     assert all(np.isfinite(mesh.vertices).all() for mesh in scene.geometry.values())
-    assert template_readiness(TemplateLibrary(tmp_path))["ready"]
+    readiness = template_readiness(TemplateLibrary(tmp_path))
+    assert not readiness["ready"]
+    assert readiness["required_template"] == "GT_001"
+    assert "geometric_metal" in readiness["templates"]
 
 
 @pytest.mark.parametrize("multi", [False, True])

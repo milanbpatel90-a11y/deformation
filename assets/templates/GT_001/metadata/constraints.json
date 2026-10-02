@@ -1,6 +1,6 @@
 {
   "schema_version": "1.1",
-  "note": "Pivot/axis geometry below is measured directly from LM_* landmarks (exact). Angle ranges are ENGINEERING DEFAULTS, not measured/verified against real hinge hardware - see rotation_range_source. Equality/inequality constraints below are the current mesh-quality/attachment rules the deform() and validator enforce.",
+  "note": "Pivot/axis positions come from LM_* landmarks. Hinge angle limits remain engineering defaults, not verified hardware specs. The calibrated dimensional and mesh-quality rules are enforced by BasisDeformer; exact per-component self-intersection checks are enabled in DEFIRM_PRODUCTION_MODE. This file records constraints and explicitly labels any policy not enforced by runtime.",
   "hinges": {
     "left": {
       "pivot": "LM_LeftHinge",
@@ -50,12 +50,12 @@
       "scale": "limited"
     },
     "LeftLens": {
-      "deform": "follows_frame_v2_not_yet",
+      "deform": "calibrated_region_field",
       "rotate": true,
       "scale": "limited"
     },
     "RightLens": {
-      "deform": "follows_frame_v2_not_yet",
+      "deform": "calibrated_region_field",
       "rotate": true,
       "scale": "limited"
     },
@@ -200,7 +200,7 @@
       },
       "units": "mm",
       "tolerance": "not enforced",
-      "implementation_notes": "NOT implemented - lens_width/lens_height/bridge_width move the lens independently of the frame rim (documented limitation in basis_metadata.json). This constraint exists here as a placeholder for the v2 rim-following basis."
+      "implementation_notes": "Lens width, lens height, and horizontal lens-box bridge gap are dimension-calibrated and region-isolated; the continuous field has a positive Jacobian. This does not certify CAD surface clearance or all cross-component collisions. Exact per-component triangle self-intersections are checked in DEFIRM_PRODUCTION_MODE."
     },
     {
       "id": "INEQ_HINGE_ANGLE_LIMITS",
@@ -229,7 +229,7 @@
       },
       "units": "ratio",
       "tolerance": "n/a",
-      "implementation_notes": "Checked in validate_template.py mesh-quality pass: flags any edge whose deformed length exceeds 3x its rest length as severe stretching."
+      "implementation_notes": "Enforced during basis deformation: every triangle edge is compared with its rest length and deformation is rejected if any edge stretches by more than 3x. Degenerate triangle areas and the continuous deformation Jacobian are checked."
     },
     {
       "id": "INEQ_SELF_INTERSECTION",
@@ -240,7 +240,7 @@
       "parameters": {},
       "units": "n/a",
       "tolerance": "n/a",
-      "implementation_notes": "NOT implemented - true self-intersection testing (e.g. BVH-based triangle-triangle intersection) is expensive and was out of scope for this pass. Flagged as an open gap."
+      "implementation_notes": "Exact per-component triangle intersection checking is performed after serialization in DEFIRM_PRODUCTION_MODE. Cross-component collision and source-surface certification still require a product-specific audit."
     }
   ],
   "design_change_v1_1": "bridge_width no longer rigidly shifts LeftHinge/RightHinge/LeftTempleJoint/RightTempleJoint - see deformation/build_basis.py docstring. bridge_width is now a local nasal/rim parameter; frame_width remains the whole-assembly-width parameter that does move the hinge/temple."

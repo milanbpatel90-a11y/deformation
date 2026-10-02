@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
+import os
 from io import BytesIO
 from pathlib import Path
 
@@ -13,6 +16,7 @@ from PIL import Image
 from backend.classifier.shape_classifier import ShapeClassifier
 from backend.deformer.engine import MeshDeformer
 from backend.exporter.glb_exporter import GLBExporter
+from backend.exporter.production_validation import ProductionValidationError, validate_production_glb
 from backend.materials.pbr import apply_materials
 from backend.materials.appearance import apply_image_appearance
 from backend.measurement.extractor import MeasurementExtractor
@@ -85,6 +89,56 @@ class DeformationPipeline:
             geom._cache.clear()
         return scene
 
+    def _export_validated(self, scene, output_path, measurements, template_name, template_info, quality):
+        """Export, independently validate, and write a deterministic manifest.
+
+        Production mode runs exact per-component triangle-intersection checks
+        and refuses to retain a failed/unverified GLB. Development outputs are
+        still checked for their serialized glTF, units, normals and dimensions,
+        but are explicitly marked REVIEW until the expensive intersection pass
+        has run.
+        """
+        out = Path(output_path)
+        metadata_path = out.with_suffix(".metadata.json")
+        manifest_path = out.with_suffix(".manifest.json")
+        production_mode = os.getenv("DEFIRM_PRODUCTION_MODE", "").lower() in {"1", "true", "yes"}
+        try:
+            self.exporter.export(scene, out, measurements, template_name)
+            acceptance = validate_production_glb(out, measurements)
+            if not quality.passed:
+                raise ProductionValidationError("Deformation quality report failed: " + "; ".join(quality.warnings))
+            if production_mode and acceptance["status"] != "PASS":
+                raise ProductionValidationError("Production mode requires a complete PASS acceptance report")
+
+            source_hashes = {}
+            bundle_root = Path(template_info.glb_path).parents[1]
+            for relative in ("geometry/template.glb", "deformation/basis.npz"):
+                source = bundle_root / relative
+                if source.is_file():
+                    source_hashes[relative] = hashlib.sha256(source.read_bytes()).hexdigest()
+            payload = {
+                "schema_version": 1,
+                "template": template_name,
+                "coordinate_units": "m",
+                "measurement_units": "mm",
+                "measurements": measurements.model_dump(mode="json"),
+                "quality": quality.to_dict(),
+                "acceptance": acceptance,
+                "source_assets_sha256": source_hashes,
+                "output_sha256": hashlib.sha256(out.read_bytes()).hexdigest(),
+                "output_bytes": out.stat().st_size,
+            }
+            manifest_path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+            return acceptance, manifest_path
+        except Exception:
+            # Never leave a file that failed the release contract accessible.
+            for artifact in (out, metadata_path, manifest_path):
+                try:
+                    artifact.unlink(missing_ok=True)
+                except OSError:
+                    pass
+            raise
+
     @staticmethod
     def _imread(path: Path | str) -> np.ndarray | None:
         """Read common product-image formats from Windows-safe paths."""
@@ -141,7 +195,8 @@ class DeformationPipeline:
         deformed = apply_materials(deformed, measurements)
 
         out = Path(output_path)
-        self.exporter.export(deformed, out, measurements, template_name)
+        acceptance, manifest_path = self._export_validated(
+            deformed, out, measurements, template_name, template_info, quality)
 
         meta_path = out.with_suffix(".metadata.json")
         anchors = self.exporter._compute_anchors(deformed, measurements)
@@ -162,6 +217,8 @@ class DeformationPipeline:
             "quality": quality.to_dict(),
             "output_glb": str(out),
             "metadata_json": str(meta_path),
+            "manifest_json": str(manifest_path),
+            "acceptance": acceptance,
             "measurements": measurements.model_dump(),
             "template": template_name,
             "features": features.model_dump(mode="json"),
@@ -298,10 +355,11 @@ class DeformationPipeline:
         s9 = report.add("GLB Export")
         t = s9.start()
         if output_path is None:
-            output_path = Path("output") / f"{template_name}_deformed.glb"
+            output_path = Path("output/development") / f"{template_name}_deformed.glb"
         out = Path(output_path)
 
-        self.exporter.export(deformed, out, measurements, template_name)
+        acceptance, manifest_path = self._export_validated(
+            deformed, out, measurements, template_name, template_info, quality)
         meta_path = out.with_suffix(".metadata.json")
         anchors = self.exporter._compute_anchors(deformed, measurements)
 
@@ -322,6 +380,8 @@ class DeformationPipeline:
             "quality": quality.to_dict(),
             "output_glb": str(out),
             "metadata_json": str(meta_path),
+            "manifest_json": str(manifest_path),
+            "acceptance": acceptance,
             "measurements": measurements.model_dump(),
             "template": template_name,
             "features": features.model_dump(mode="json"),
@@ -486,10 +546,11 @@ class DeformationPipeline:
         s6 = report.add("GLB Export")
         t = s6.start()
         if output_path is None:
-            output_path = Path("output") / f"{template_name}_deformed.glb"
+            output_path = Path("output/development") / f"{template_name}_deformed.glb"
         out = Path(output_path)
 
-        self.exporter.export(deformed, out, fused_measurements, template_name)
+        acceptance, manifest_path = self._export_validated(
+            deformed, out, fused_measurements, template_name, template_info, quality)
         meta_path = out.with_suffix(".metadata.json")
         anchors = self.exporter._compute_anchors(deformed, fused_measurements)
 
@@ -510,6 +571,8 @@ class DeformationPipeline:
             "quality": quality.to_dict(),
             "output_glb": str(out),
             "metadata_json": str(meta_path),
+            "manifest_json": str(manifest_path),
+            "acceptance": acceptance,
             "measurements": fused_measurements.model_dump(),
             "template": template_name,
             "features": features.model_dump(mode="json"),

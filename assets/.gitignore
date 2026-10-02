@@ -4,6 +4,13 @@
 *.npy
 *.3dm
 
+# Required default production bundle. Runtime binaries are delivered through LFS.
+!templates/GT_001/
+!templates/GT_001/geometry/
+!templates/GT_001/geometry/template.glb
+!templates/GT_001/deformation/
+!templates/GT_001/deformation/basis.npz
+
 # Installed template bundles; their binaries are tracked through LFS.
 !templates/
 !templates/RB_001/

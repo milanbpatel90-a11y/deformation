@@ -34,9 +34,9 @@
         "RightLens",
         "Frame (rim region, smooth falloff)"
       ],
-      "generation_rule": "Lens: exact affine X-scale about own LM_*LensCenter.x. Frame: SAME formula applied to every Frame vertex, weighted by smoothstep(1 - d/12mm) where d = distance to nearest vertex of that lens. 12mm falloff radius measured from actual geometry (90th/99th percentile of Frame-to-lens distance at rest, see build_basis.py docstring).",
-      "known_limitation": null,
-      "quality_metric": "lens_rim_boundary_error_mm (engine.lens_rim_boundary_error_mm) - measured 0.0005mm at +5% (target: stay near the 0.02mm rest-state gap)"
+      "generation_rule": "Runtime calibrates the supplied NPZ basis from the measured four-dimension Jacobian, then maps ordered lens/frame X regions monotonically. Lens intervals remain affine and exact; the bridge core is isolated.",
+      "known_limitation": "The authored silhouette is preserved; this parameter changes lens width and adjacent frame-region coordinates, not arbitrary product shape.",
+      "quality_metric": "Serialized left/right lens widths and frame width must each be within 0.5 mm of the request."
     },
     {
       "name": "lens_height",
@@ -49,9 +49,9 @@
         "RightLens",
         "Frame (rim region, smooth falloff)"
       ],
-      "generation_rule": "Same method as lens_width, applied to Z about LM_*LensCenter.z.",
-      "known_limitation": null,
-      "quality_metric": "lens_rim_boundary_error_mm - measured 0.0011mm at +5%"
+      "generation_rule": "Runtime derives calibrated target lens-height bounds from the supplied NPZ basis and applies a positive-Jacobian Z field with smooth transitions across the authored frame rim band.",
+      "known_limitation": "The authored vertical silhouette is preserved; this parameter does not infer a new contour from photographs.",
+      "quality_metric": "Serialized left/right lens heights must each be within 0.5 mm of the request."
     },
     {
       "name": "bridge_width",
@@ -64,9 +64,9 @@
         "RightLens",
         "Frame (bridge region, smooth falloff, 22mm radius)"
       ],
-      "generation_rule": "Lens: rigid +-0.5*delta X-shift (unchanged from v1). Frame: rigid-direction X-shift weighted by smoothstep(1 - d_to_bridge_center/22mm), so Frame moves with the lens near the nasal/bridge area and tapers to exactly 0 well before the hinge (measured: nearest Frame vertex to LM_LeftHinge is 45mm+ from bridge center, radius is 22mm, so zero overlap risk).",
-      "known_limitation": "At large deltas (tested at max range, 28mm) local edge stretch in the bridge falloff band reaches ~18mm distortion - the smoothstep falloff is C1-continuous but not shape-preserving under large pushes. Acceptable for the +-5% test range (1.6mm measured) but a proper ARAP/biharmonic solve would be needed for full-range production quality.",
-      "quality_metric": "bridge_continuity_error_mm (engine.bridge_continuity_error_mm) - measured 1.6mm at +5% (delta=0.9mm), 18.0mm at max range (delta=10.1mm)"
+      "generation_rule": "The control is the horizontal gap between left and right lens bounding boxes. Runtime calibration couples the NPZ basis coefficients, then constructs a monotone X map through measured bridge and lens boundaries.",
+      "known_limitation": "The bridge width is a lens-box gap, not a CAD nose-bridge surface width. Full surface clearance and cross-section fit still require product-specific review.",
+      "quality_metric": "Serialized lens-box bridge gap must be within 0.5 mm of the request; the continuous deformation Jacobian must remain positive."
     },
     {
       "name": "temple_length",
@@ -79,15 +79,21 @@
         "RightTemple"
       ],
       "generation_rule": "Affine scale along each temple's root->tip axis (LM_*TempleRoot -> LM_*TempleTip), pivoting at the root so the hinge attachment point never moves.",
-      "known_limitation": "LeftTempleJoint/RightTempleJoint are rigid and do not stretch with the temple - large deltas could visually separate temple from joint housing."
+      "known_limitation": "The authored temple curve is retained and its root-to-tip chord is calibrated. Temple-joint housing clearance is not certified by the chord-length check."
     }
   ],
-  "formula": "V(p) = V0 + sum_i( B[:,:,i] * (p_i - default_i) ),  p_i in mm, default in mm",
+  "geometry_quality": {
+    "minimum_triangle_area_mm2": 1e-10,
+    "maximum_edge_stretch_ratio": 3.0,
+    "require_positive_continuous_jacobian": true
+  },
+  "formula": "Runtime computes J[i,j]=(measure(V0+B[j]*h)[i]-measure(V0)[i])/h and coefficients=inverse(J)*(requested_mm-rest_mm); a monotone regional coordinate field applies the calibrated target boundaries.",
   "unified_vertex_order": "matches masks.json part_masks (index ranges), which matches part_order in _part_order.json and the GLB node order",
   "symmetry_note": "All 5 basis vectors are constructed from geometry that was pre-verified as mirror-symmetric to <1e-6mm, and each rule treats Left/Right identically (same formula, mirrored sign or mirrored landmark) - symmetry is structurally preserved by construction, not just checked after the fact.",
-  "version": "1.1",
+  "version": "1.2",
   "changelog": [
-    "v1.1: lens_width, lens_height, bridge_width now couple the Frame rim (previously Frame was completely unaffected by these 3 params - the lens visibly separated from the rim at any nontrivial delta).",
-    "v1.1: bridge_width no longer moves Hinge/Temple/TempleJoint (was incorrectly duplicating frame_width's job) - it is now a local nasal/rim parameter only. frame_width remains the whole-assembly parameter."
+    "v1.2: Runtime calibration is computed from the installed basis Jacobian; frame width, lens width, lens height and lens-box bridge gap are validated within 0.5 mm.",
+    "v1.2: Coupled measurement feasibility is enforced before deformation; monotone regional interpolation preserves a positive continuous Jacobian across supported inputs.",
+    "v1.2: Per-job exact triangle self-intersection checks run in DEFIRM_PRODUCTION_MODE and are required before a result can be considered a full production PASS."
   ]
 }

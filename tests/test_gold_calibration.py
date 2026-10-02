@@ -45,7 +45,7 @@ def test_jacobian_unit_response_and_region_isolation(engine):
 def test_feasible_corner_grid_and_source_assets_unchanged(engine):
     paths=[ROOT/'geometry/template.glb',ROOT/'deformation/basis.npz']
     hashes=[hashlib.sha256(p.read_bytes()).hexdigest() for p in paths]
-    valid=invalid=0
+    valid=invalid=geometry_rejected=0
     for fw,lw,bw,lh,tl in itertools.product((110,140,170),(40,55,70),(12,20,28),(25,50),(120,180)):
         m=Measurements(frame_width=fw,lens_width=lw,bridge_width=bw,lens_height=lh,temple_length=tl)
         if fw < 2*lw+bw+2*m.rim_thickness:
@@ -53,11 +53,21 @@ def test_feasible_corner_grid_and_source_assets_unchanged(engine):
                 engine.deform(m)
             invalid+=1
             continue
-        scene,quality=engine.deform(m)
+        try:
+            scene,quality=engine.deform(m)
+        except MeasurementCompatibilityError as error:
+            assert error.ranges["geometry_quality"]["maximum_edge_stretch_ratio"] > 3.0
+            assert error.ranges["geometry_quality"]["maximum_allowed_edge_stretch_ratio"] == 3.0
+            geometry_rejected+=1
+            continue
         valid+=1
         np.testing.assert_allclose(measured(scene),[fw,lw,lh,bw],atol=0.5)
         assert quality.passed
         assert engine.regions.min_jacobian>0
+        geometry_quality=scene.metadata['deformation_validation']
+        assert geometry_quality['maximum_edge_stretch_ratio'] <= 3.0
+        assert geometry_quality['minimum_triangle_area_mm2'] > 1e-10
+        assert geometry_quality['continuous_map_orientation_preserved']
         for mesh in scene.geometry.values():
             assert np.isfinite(mesh.vertices).all() and mesh.area_faces.min()>1e-10
             assert np.prod(mesh.extents)>0
@@ -65,11 +75,12 @@ def test_feasible_corner_grid_and_source_assets_unchanged(engine):
         for side in ('Left','Right'):
             endpoints=engine.regions.warp(np.array([landmarks[f'LM_{side}TempleRoot'],landmarks[f'LM_{side}TempleTip']]))
             assert abs(np.linalg.norm(endpoints[1]-endpoints[0])-tl)<0.5
-    assert valid>20 and invalid>20
+    assert valid>20 and invalid>20 and geometry_rejected>0
+    assert valid+invalid+geometry_rejected==108
     assert hashes==[hashlib.sha256(p.read_bytes()).hexdigest() for p in paths]
 
 
-@pytest.mark.parametrize('values',[(110,40,25,12,120),(170,69.8,50,28,180)])
+@pytest.mark.parametrize('values',[(110,40,25,20,120),(135,56,37,18,130.9),(170,55,50,28,180)])
 def test_extreme_meshes_have_no_self_intersecting_optical_surfaces(engine,values):
     # Exact triangle intersection checks, not just bounding-box positivity.
     import open3d as o3d

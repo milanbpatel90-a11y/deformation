@@ -2,6 +2,7 @@ from tests.template_fixture import procedural_library
 import unittest
 from pathlib import Path
 
+import numpy as np
 import trimesh
 
 from backend.deformer.deformation_context import DeformationContext
@@ -42,6 +43,26 @@ class RimDeformerTests(unittest.TestCase):
         self.assertAlmostEqual(abs(left[0, 0]), abs(right[1, 0]), places=3)
         self.assertAlmostEqual(abs(left[1, 0]), abs(right[0, 0]), places=3)
         self.assertTrue(ctx.metadata["rim_deformation"]["applied"])
+
+    def test_propagation_is_exact_at_shared_vertices_and_bounded_in_falloff(self) -> None:
+        frame = trimesh.Trimesh(
+            vertices=np.array([[0.0, 0.0, 0.0], [0.0, 6.0, 0.0], [20.0, 0.0, 0.0]]),
+            faces=np.empty((0, 3), dtype=np.int64), process=False,
+        )
+        rim = np.array([[0.0, 0.0, 0.0], [0.0, 10.0, 0.0]])
+        deformed = rim + np.array([0.0, 0.0, 1.0])
+
+        RimDeformer._propagate_to_frame(frame, rim, deformed)
+
+        self.assertAlmostEqual(frame.vertices[0, 2], 1.0, places=8)
+        self.assertGreater(frame.vertices[1, 2], 0.0)
+        self.assertLess(frame.vertices[1, 2], 0.2)
+        self.assertAlmostEqual(frame.vertices[2, 2], 0.0, places=8)
+
+    def test_propagation_rejects_mismatched_basis_vertex_arrays(self) -> None:
+        frame = trimesh.Trimesh(vertices=np.zeros((1, 3)), faces=np.empty((0, 3), dtype=np.int64), process=False)
+        with self.assertRaises(ValueError, msg="input correspondence must be validated"):
+            RimDeformer._propagate_to_frame(frame, np.zeros((2, 3)), np.zeros((3, 3)))
 
 
 if __name__ == "__main__":

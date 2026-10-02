@@ -7,6 +7,7 @@ import trimesh
 from scipy.spatial import cKDTree
 from backend.deformer.basis_deformer import BasisDeformer
 from backend.exporter.glb_exporter import GLBExporter
+from backend.exporter.production_validation import validate_production_glb
 from backend.exporter.geometry import world_vertices
 from backend.exporter.validation import inspect_glb, read_glb, world_primitives
 from backend.materials.pbr import apply_materials
@@ -56,6 +57,15 @@ def test_physical_scale_normals_metadata_and_independent_components(real_export)
     assert abs(report['components']['LeftLens']['extent'][0]*1000-measurements.lens_width)<0.5
     assert abs(report['components']['LeftLens']['extent'][1]*1000-measurements.lens_height)<0.5
     assert abs((report['components']['LeftLens']['bounds'][0][0]-report['components']['RightLens']['bounds'][1][0])*1000-measurements.bridge_width)<0.5
+
+
+def test_runtime_acceptance_checks_serialized_dimensions_and_marks_unverified_intersections(real_export):
+    _, path, measurements, _ = real_export
+    report = validate_production_glb(path, measurements, check_self_intersections=False)
+    assert report['status'] == 'REVIEW'
+    assert report['checks']['maximum_dimension_error_mm'] <= 0.5
+    assert report['checks']['normals_required']
+    assert report['checks']['self_intersections']['status'] == 'not_checked'
 
 
 def test_cleanup_preserves_surface_and_source_topology(real_export):

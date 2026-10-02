@@ -93,6 +93,7 @@ class CalibratedRegions:
         # on temple length would subtly move the frame when only an arm changes.
         self.x_damping = 0.4*smoothstep(np.abs(slopes-1))
         self.x_damping[[1,3]] = 0  # Optical widths stay affine and exact.
+        self.x_damping[2] = 0  # Avoid center-slope overshoot in the coupled bridge expansion.
         endpoints = self._xz(np.vstack([self.temple_root,self.temple_tip]))
         transverse = np.sum((endpoints[1,[0,2]]-endpoints[0,[0,2]])**2)
         remaining = measurements.temple_length**2-transverse
@@ -117,7 +118,10 @@ class CalibratedRegions:
         x = np.abs(points[:,0])
         inner = min(abs(self.x_source[2]),abs(self.x_source[3]))
         outer = max(abs(self.x_source[1]),abs(self.x_source[4]))
-        weight = smoothstep((x-inner/2)/(inner/2))*(1-smoothstep((x-outer)/(self.height_falloff_x-outer)))
+        # Ramp height changes from the centerline to the lens nasal boundary.
+        # Starting this ramp halfway out made a narrow, high-shear band across
+        # the bridge (over 3x edge stretch at the large supported setting).
+        weight = smoothstep(x/(3.0*inner))*(1-smoothstep((x-outer)/(self.height_falloff_x-outer)))
         desired_z = self.z_target[0]+(points[:,2]-self.z_source[0])*self.z_scale
         out[:,2] += weight*(desired_z-points[:,2])
         return out

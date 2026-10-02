@@ -37,6 +37,11 @@ def test_gold_api_generates_and_downloads(monkeypatch, tmp_path):
     result = response.json()
     assert result["template"] == "GT_001"
     assert result["measurements"]["frame_width"] == 142
+    assert result["acceptance"]["checks"]["maximum_dimension_error_mm"] <= 0.5
+    assert result["acceptance"]["status"] == "REVIEW"
+    manifest = client.get(result["manifest_url"])
+    assert manifest.status_code == 200
+    assert manifest.json()["acceptance"]["status"] == "REVIEW"
     downloaded = client.get(result["download_url"])
     assert downloaded.status_code == 200
     assert downloaded.content[:4] == b"glTF"
