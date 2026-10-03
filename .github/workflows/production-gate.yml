@@ -1,0 +1,37 @@
+name: Production Gate
+
+on:
+  push:
+    branches:
+      - main
+      - "prod/**"
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  production-gate:
+    runs-on: ubuntu-latest
+    env:
+      DEFIRM_PRODUCTION_MODE: "1"
+    steps:
+      - name: Checkout with LFS assets
+        uses: actions/checkout@v4
+        with:
+          lfs: true
+          fetch-depth: 1
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Pull LFS runtime assets
+        run: git lfs pull
+
+      - name: Install dependencies
+        run: python -m pip install -r requirements-dev.txt
+
+      - name: Verify production assets and tests
+        run: python scripts/production_release_gate.py
