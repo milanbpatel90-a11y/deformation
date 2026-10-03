@@ -26,6 +26,7 @@ def validate_production_glb(
     *,
     tolerance_mm: float = 0.5,
     check_self_intersections: bool | None = None,
+    require_calibrated_scale: bool | None = None,
 ) -> dict:
     """Validate serialized attributes, scale, measured fit and optional BVH checks.
 
@@ -36,6 +37,16 @@ def validate_production_glb(
     """
     path = Path(path)
     report = {"status": "FAIL", "checks": {}, "errors": [], "warnings": []}
+    production_mode = os.getenv("DEFIRM_PRODUCTION_MODE", "").lower() in {"1", "true", "yes"}
+    if require_calibrated_scale is None:
+        require_calibrated_scale = production_mode
+    report["checks"]["measurement_scale_source"] = measurements.measurement_scale_source
+    report["checks"]["measurement_scale_calibrated"] = measurements.measurement_scale_calibrated
+    report["checks"]["measurement_reference_width_mm"] = measurements.measurement_reference_width_mm
+    if require_calibrated_scale and not measurements.measurement_scale_calibrated:
+        report["errors"].append(
+            "Production generation requires a known physical image scale reference; image-only size estimates are review-only"
+        )
     tree, binary = read_glb(path)
     if tree.get("asset", {}).get("version") != "2.0":
         report["errors"].append("GLB asset version must be 2.0")
@@ -161,8 +172,7 @@ def validate_production_glb(
             "Template has no calibrated deformation certificate; physical dimensions were not verified"
         )
 
-    run_intersections = (os.getenv("DEFIRM_PRODUCTION_MODE", "").lower() in {"1", "true", "yes"}
-                         if check_self_intersections is None else check_self_intersections)
+    run_intersections = (production_mode if check_self_intersections is None else check_self_intersections)
     if run_intersections:
         try:
             import open3d as o3d
