@@ -178,10 +178,11 @@ async def deform_from_images(
     top: UploadFile | None = File(None, description="Top product image"),
     color: str = Form("#d9a7a2"),
     template: str | None = Form(None),
-    measurements: str = Form(..., description="Manual Measurements JSON in millimetres"),
+    measurements: str | None = Form(None, description="Optional manual Measurements JSON in millimetres; omit to estimate from images"),
+    reference_frame_width_mm: float | None = Form(None, description="Known physical frame width in mm used to calibrate image scale"),
     automatic_appearance: bool = Form(True),
 ):
-    """Upload up to 3 images (front, side, top), use manual measurements, deform template, export GLB."""
+    """Generate a GLB from images; manual measurements are optional when a physical scale reference is supplied."""
     job_id = uuid.uuid4().hex
     # Use OUTPUT_DIR (project-local, ASCII-safe path) instead of system temp
     # to avoid Windows 8.3 tilde paths (PETPOO~1) that break cv2.imread.
@@ -190,9 +191,12 @@ async def deform_from_images(
 
     try:
         front_path = work_dir / "front.jpg"
-        manual = parse_measurements(measurements, color)
+        manual = parse_measurements(measurements, color) if measurements else None
         validate_template(template)
-        check_combination(manual, template)
+        if manual is not None:
+            check_combination(manual, template)
+        elif PRODUCTION_MODE and reference_frame_width_mm is None:
+            raise HTTPException(422, "reference_frame_width_mm is required for production image-only generation; photographs without a physical scale reference are review-only")
         front_bytes, _ = await read_image(front)
         if not front_bytes:
             raise ValueError("Front image upload is empty — please re-select the file and try again.")
@@ -222,6 +226,7 @@ async def deform_from_images(
             top_path=top_path,
             manual_measurements=manual,
             automatic_appearance=automatic_appearance,
+            reference_frame_width_mm=reference_frame_width_mm,
         )
         result["ranges"] = input_ranges(Measurements(**result["measurements"]), result.get("template"))
         result["job_id"] = job_id
@@ -248,18 +253,22 @@ async def deform_from_multiple_images(
     images: list[UploadFile] = File(..., description="List of 4-6 product images from multiple view angles"),
     color: str = Form("#d9a7a2"),
     template: str | None = Form(None),
-    measurements: str = Form(..., description="Manual Measurements JSON in millimetres"),
+    measurements: str | None = Form(None, description="Optional manual Measurements JSON in millimetres; omit to estimate from images"),
+    reference_frame_width_mm: float | None = Form(None, description="Known physical frame width in mm used to calibrate image scale"),
     automatic_appearance: bool = Form(True),
 ):
-    """Upload multiple product images, classify views, use manual measurements, deform template, and export GLB."""
+    """Generate a GLB from 4–6 product images; calibrated automatic sizing is supported via reference_frame_width_mm."""
     job_id = uuid.uuid4().hex
     work_dir = OUTPUT_DIR / f"_upload_multi_{job_id}"
     work_dir.mkdir(parents=True, exist_ok=True)
 
     try:
-        manual = parse_measurements(measurements, color)
+        manual = parse_measurements(measurements, color) if measurements else None
         validate_template(template)
-        check_combination(manual, template)
+        if manual is not None:
+            check_combination(manual, template)
+        elif PRODUCTION_MODE and reference_frame_width_mm is None:
+            raise HTTPException(422, "reference_frame_width_mm is required for production image-only generation; photographs without a physical scale reference are review-only")
         if not 1 <= len(images) <= 6:
             raise HTTPException(400, "Upload between 1 and 6 images")
         image_paths = []
@@ -285,6 +294,7 @@ async def deform_from_multiple_images(
             template_override=template,
             manual_measurements=manual,
             automatic_appearance=automatic_appearance,
+            reference_frame_width_mm=reference_frame_width_mm,
         )
         result["ranges"] = input_ranges(Measurements(**result["measurements"]), result.get("template"))
         result["job_id"] = job_id
