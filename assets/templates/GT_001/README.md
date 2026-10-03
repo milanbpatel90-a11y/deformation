@@ -1,134 +1,58 @@
-# GT_001 - Gold Template
+# GT_001 Gold Template
 
-**Status:** Placeholder structure created. Awaiting actual Gold_Template.zip extraction.
+GT_001 is the required default production deformation bundle for the
+rectangle-family frame. Runtime deformation uses `geometry/template.glb`,
+`deformation/basis.npz`, `deformation/basis_metadata.json`, and the landmarks
+in `metadata/landmarks.json`. The NPZ and GLB vertex/face ordering is checked
+at load time. Internal geometry and input dimensions use millimetres; the
+exported glTF scene uses metres.
 
-## Template Information
+## Deformation and supported range
 
-- **Template ID:** GT_001
-- **Version:** 1.1.0
-- **Shape Category:** Rectangular
-- **Description:** Gold Template - Rectangle frame design with parametric deformation
+`backend.deformer.basis_deformer.BasisDeformer` measures the actual rest-state
+dimensions, differentiates the supplied basis to form a dimension Jacobian,
+and applies its inverse to requested frame width, lens width, lens height, and
+bridge gap. Lens width/height and bridge regions are isolated by a monotone
+regional coordinate field. Temple length is solved from its root/tip chord.
+The shared coupled constraint is:
 
-## Directory Structure
-
-```
-GT_001/
-├── geometry/
-│   └── template.glb              ← Runtime GLB (rename from Gold_Template_Runtime.glb)
-│
-├── metadata/
-│   ├── template.json             ← Template metadata and versioning
-│   ├── parameter_schema.json     ← Parameter definitions and ranges
-│   ├── measurements.json         ← Default measurements
-│   ├── constraints.json          ← Deformation constraints
-│   ├── topology.json             ← Topology information
-│   ├── masks.json                ← Segmentation masks
-│   ├── landmarks.json            ← Anatomical landmarks
-│   ├── region_masks.json         ← Regional segmentation
-│   └── scale_config.json         ← Scale configuration
-│
-├── deformation/
-│   ├── basis.npz                 ← Deformation basis functions
-│   ├── basis_metadata.json       ← Basis information
-│   ├── _part_order.json          ← Part ordering
-│   ├── _unified_faces.npy        ← Unified face array
-│   ├── _unified_verts.npy        ← Unified vertex array
-│   └── build_basis.py            ← Basis generation script
-│
-└── source/
-    └── Gold_Template_Rhino_v1_scaled.3dm  ← Rhino source (authoring only)
+```text
+frame_width >= 2 * lens_width + bridge_width + 2 * rim_thickness
 ```
 
-## Installation Instructions
+Per-field range defaults are declared in `deformation/basis_metadata.json`.
+The API and direct deformation path additionally enforce the coupled formula;
+the engine rejects unsupported values rather than clamping them. Measured
+geometry must remain within 0.5 mm of the requested dimensional controls.
 
-### Step 1: Extract Gold_Template.zip
+## Validation
 
-When you receive the `Gold_Template.zip`, extract it to this directory:
+Run these from the repository root:
 
 ```powershell
-# From the project root
-Expand-Archive -Path path\to\Gold_Template.zip -DestinationPath assets\templates\GT_001
+python -m pytest -q --tb=short
+python -m scripts.check_readiness
+python -m scripts.validate_production_glb
+python -m scripts.audit_glb output/glb-audit/standard.glb --expected-width-mm 135 --tolerance-mm 0.01 --output output/glb-audit/inspection.json
 ```
 
-### Step 2: Normalize File Names
+Tests check the real bundle, its calibration response, source immutability,
+coupled input rejection, symmetry, positive deformation Jacobian, and selected
+extreme cases for triangle self-intersection. The exported GLB is checked
+independently for metre scale, dimensions, primitive attributes, normals,
+indices, and degeneracy. Exact per-job intersection checks are enabled with
+`DEFIRM_PRODUCTION_MODE=1`; this mode fails closed if Open3D is unavailable or
+the geometry check fails. Use development outputs for review and do not mark a
+`REVIEW` result as release-ready.
 
-Rename the runtime GLB for consistency:
+Numerical agreement is not evidence that an unreferenced product image has a
+known physical scale, nor does a rectangular template reproduce unrelated
+silhouettes. Real-product image validation is tracked separately in
+`dataset/real_products/README.md`.
 
-```powershell
-cd assets\templates\GT_001\geometry
-Rename-Item "Gold_Template_Runtime.glb" "template.glb"
-```
+## Asset delivery
 
-### Step 3: Organize Source Files
-
-Move Rhino source files to the source directory:
-
-```powershell
-cd assets\templates\GT_001
-Move-Item "Gold_Template_Rhino_v1_scaled.3dm" source\
-```
-
-### Step 4: Validate Template
-
-Run the validation script:
-
-```python
-from template_registry import TemplateBundle
-
-bundle = TemplateBundle.load("GT_001")
-report = bundle.validate()
-
-if report['valid']:
-    print("✓ Template is valid")
-else:
-    print("✗ Validation errors:")
-    for error in report['errors']:
-        print(f"  - {error}")
-```
-
-## Usage Example
-
-```python
-from template_registry import get_template_assets, TemplateBundle
-
-# Get all template paths
-assets = get_template_assets("GT_001")
-print(f"GLB: {assets['glb']}")
-print(f"Basis: {assets['basis']}")
-
-# Load complete bundle
-bundle = TemplateBundle.load("GT_001")
-
-# Access metadata
-print(f"Template: {bundle.metadata.template_id} v{bundle.metadata.template_version}")
-print(f"Description: {bundle.metadata.description}")
-
-# Access deformation data
-landmarks = bundle.landmarks
-basis = bundle.get_basis()
-vertices = bundle.get_vertices()
-
-# Use with deformation engine
-from backend.deformer.engine import DeformationEngine
-
-engine = DeformationEngine(template=bundle)
-result = engine.deform(params={
-    "frame_width": 145,
-    "lens_width": 58,
-    "lens_height": 37,
-    "bridge_width": 18,
-    "temple_length": 155,
-})
-```
-
-## Version History
-
-- **1.1.0** (2026-08-26): Initial structure created, awaiting Gold Template extraction
-- **1.0.0** (planned): Initial Gold Template release
-
-## Notes
-
-- The `source/` directory contains authoring files (Rhino .3dm) for reference only
-- Production runtime should only use `geometry/template.glb` + JSON metadata + `deformation/basis.npz`
-- Do NOT copy the Gold Template's `deformation_engine.py` into the main engine
-- Use this template through the `TemplateBundle` loader, not by direct file access
+The runtime GLB and basis are stored with Git LFS. Install Git LFS and fetch
+the assets when cloning (`git lfs install`, then `git lfs pull`). A metadata-
+only checkout cannot run this template. The Rhino authoring file is not needed
+at runtime.

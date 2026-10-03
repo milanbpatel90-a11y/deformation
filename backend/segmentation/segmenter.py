@@ -19,7 +19,7 @@ _MODEL_EXTENSIONS = {".pt", ".pth", ".onnx", ".engine", ".xml", ".mlpackage", ".
 _CANDIDATE_PATHS = [
     os.environ.get("DEFIRM_YOLO_MODEL"),
     _PROJECT_ROOT / "models" / "glasses_seg.pt",
-    _PROJECT_ROOT / "yolov8n-seg.pt",
+    _PROJECT_ROOT / "models" / "best.pt",
     _PROJECT_ROOT / "runs" / "segment" / "train" / "weights" / "best.pt",
 ]
 
@@ -114,14 +114,35 @@ class GlassesSegmenter:
             aspect_penalty = abs(aspect - 3.0)
             return normalized_distance, aspect_penalty, -area
 
-        selected = min(contours, key=score)
+        # Keep the separate pieces of the frame together. Product photos often
+        # break the dark threshold mask into two rims, a bridge and temples;
+        # selecting just one "best" contour fed a single lens/hinge to view
+        # classification and made the multi-view pipeline choose the wrong
+        # image as its front view.
+        candidates = []
+        for contour in contours:
+            x, y, contour_w, contour_h = cv2.boundingRect(contour)
+            area = float(cv2.contourArea(contour))
+            center_x = x + contour_w / 2.0
+            center_y = y + contour_h / 2.0
+            if (area >= max(2.0, h * w * 0.000002)
+                    and w * 0.08 <= center_x <= w * 0.92
+                    and h * 0.08 <= center_y <= h * 0.92):
+                candidates.append(contour)
+
+        if not candidates:
+            candidates = [min(contours, key=score)]
         mask = np.zeros_like(gray)
-        cv2.drawContours(mask, [selected], -1, 255, -1)
+        cv2.drawContours(mask, candidates, -1, 255, -1)
+        # Bridge small threshold gaps while keeping the image background out.
+        close_size = max(3, min(11, int(round(min(h, w) * 0.012)) | 1))
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (close_size, close_size))
+        mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
 
         return {
             "front": mask,
             "side": mask,
             "full": mask,
             "model_type": self.model_type,
-            "detections": 1,
+            "detections": len(candidates),
         }

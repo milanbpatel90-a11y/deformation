@@ -1,0 +1,74 @@
+{
+  "parameters": [
+    {
+      "name": "frame_width",
+      "units": "mm",
+      "default": 144.567093,
+      "min": 124.567093,
+      "max": 164.567093,
+      "affected_parts": [
+        "Frame",
+        "LeftLens",
+        "RightLens",
+        "LeftTemple",
+        "RightTemple"
+      ]
+    },
+    {
+      "name": "lens_width",
+      "units": "mm",
+      "default": 60.710498,
+      "min": 48.710498,
+      "max": 72.710498,
+      "affected_parts": [
+        "Frame",
+        "LeftLens",
+        "RightLens",
+        "LeftTemple",
+        "RightTemple"
+      ]
+    },
+    {
+      "name": "lens_height",
+      "units": "mm",
+      "default": 48.13839,
+      "min": 36.13839,
+      "max": 60.13839,
+      "affected_parts": [
+        "Frame",
+        "LeftLens",
+        "RightLens",
+        "LeftTemple",
+        "RightTemple"
+      ]
+    },
+    {
+      "name": "bridge_width",
+      "units": "mm",
+      "default": 16.350431,
+      "min": 8.350431,
+      "max": 24.350431,
+      "affected_parts": [
+        "Frame",
+        "LeftLens",
+        "RightLens",
+        "LeftTemple",
+        "RightTemple"
+      ]
+    },
+    {
+      "name": "temple_length",
+      "units": "mm",
+      "default": 91.33038,
+      "min": 66.33038,
+      "max": 116.33038,
+      "affected_parts": [
+        "Frame",
+        "LeftLens",
+        "RightLens",
+        "LeftTemple",
+        "RightTemple"
+      ]
+    }
+  ]
+}

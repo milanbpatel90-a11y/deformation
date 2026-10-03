@@ -4,6 +4,40 @@
 *.npy
 *.3dm
 
+# Required default production bundle. Runtime binaries are delivered through LFS.
+!templates/GT_001/
+!templates/GT_001/geometry/
+!templates/GT_001/geometry/template.glb
+!templates/GT_001/deformation/
+!templates/GT_001/deformation/basis.npz
+
+# Installed template bundles; their binaries are tracked through LFS.
+!templates/
+!templates/RB_001/
+!templates/RB_001/geometry/template.glb
+!templates/RB_001/deformation/basis.npz
+!templates/RB_001/source/ray_ban_glasses.3dm
+!templates/TG_001/
+!templates/TG_001/geometry/template.glb
+!templates/TG_001/deformation/basis.npz
+!templates/TG_001/source/*.3dm
+!templates/SG_001/
+!templates/SG_001/geometry/template.glb
+!templates/SG_001/deformation/basis.npz
+!templates/SG_001/source/*.3dm
+!templates/SG_002/
+!templates/SG_002/geometry/template.glb
+!templates/SG_002/deformation/basis.npz
+!templates/SG_002/source/*.3dm
+!templates/NG_001/
+!templates/NG_001/geometry/template.glb
+!templates/NG_001/deformation/basis.npz
+!templates/NG_001/source/*.3dm
+!templates/HG_001/
+!templates/HG_001/geometry/template.glb
+!templates/HG_001/deformation/basis.npz
+!templates/HG_001/source/*.3dm
+
 # Temporary extraction
 temp_gold_template/
 

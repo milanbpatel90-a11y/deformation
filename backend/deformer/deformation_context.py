@@ -8,7 +8,7 @@ from typing import Any
 
 import trimesh
 
-from backend.deformer.descriptor_loader import TemplateDescriptor
+from backend.deformer.descriptor_loader import TemplateDescriptor, DescriptorLoader
 from backend.models import Measurements, TemplateInfo
 from backend.template_matching.feature_extractor import EyewearFeatureSet
 
@@ -32,6 +32,18 @@ class DeformationContext:
             for name, mesh in self.template_scene.geometry.items()
             if isinstance(mesh, trimesh.Trimesh)
         }
+        if self.descriptor.raw:
+            resolved = DescriptorLoader._resolve_geometry_aliases(self.meshes, self.descriptor.raw)
+            for logical, actual in self.descriptor.raw.get("mesh_aliases", {}).items():
+                if logical in self.meshes or logical not in resolved:
+                    continue
+                self.template_scene.geometry[logical] = self.meshes[actual]
+                for node in list(self.template_scene.graph.nodes_geometry):
+                    matrix, geometry = self.template_scene.graph[node]
+                    if geometry == actual:
+                        self.template_scene.graph.update(frame_to=node, matrix=matrix, geometry=logical)
+                self.template_scene.geometry.pop(actual, None)
+            self.meshes = dict(self.template_scene.geometry)
         if not self.materials:
             self.materials = {
                 name: getattr(mesh.visual, "material", None)

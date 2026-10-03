@@ -1,0 +1,84 @@
+{
+  "parameters": [
+    {
+      "name": "frame_width",
+      "units": "mm",
+      "default": 139.264534,
+      "min": 119.264534,
+      "max": 159.264534,
+      "affected_parts": [
+        "Frame",
+        "LeftLens",
+        "RightLens",
+        "LeftTemple",
+        "RightTemple"
+      ]
+    },
+    {
+      "name": "lens_width",
+      "units": "mm",
+      "default": 34.597712,
+      "min": 30,
+      "max": 46.597712,
+      "affected_parts": [
+        "Frame",
+        "LeftLens",
+        "RightLens",
+        "LeftTemple",
+        "RightTemple"
+      ]
+    },
+    {
+      "name": "lens_height",
+      "units": "mm",
+      "default": 27.019166,
+      "min": 20,
+      "max": 39.019166,
+      "affected_parts": [
+        "Frame",
+        "LeftLens",
+        "RightLens",
+        "LeftTemple",
+        "RightTemple"
+      ]
+    },
+    {
+      "name": "bridge_width",
+      "units": "mm",
+      "default": 23.2,
+      "min": 15.2,
+      "max": 31.2,
+      "affected_parts": [
+        "Frame",
+        "LeftLens",
+        "RightLens",
+        "LeftTemple",
+        "RightTemple"
+      ]
+    },
+    {
+      "name": "temple_length",
+      "units": "mm",
+      "default": 130.406161,
+      "min": 105.406161,
+      "max": 155.406161,
+      "affected_parts": [
+        "Frame",
+        "LeftLens",
+        "RightLens",
+        "LeftTemple",
+        "RightTemple"
+      ]
+    }
+  ],
+  "formula": "V(p) = V0 + sum_i B[:,:,i] * (p_i - default_i); optical dimensions use measured Jacobian calibration.",
+  "units": "millimeters",
+  "part_order": [
+    "Frame",
+    "LeftLens",
+    "RightLens",
+    "LeftTemple",
+    "RightTemple"
+  ],
+  "version": "1.0"
+}

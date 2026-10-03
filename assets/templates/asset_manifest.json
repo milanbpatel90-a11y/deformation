@@ -1,0 +1,75 @@
+{
+  "schema_version": 1,
+  "templates": {
+    "GT_001": {
+      "deformation/basis.npz": {
+        "sha256": "c963815ce3e52684c5a2c954d59b98ad2bcbcadad5feb7ef4361ab19aeaa5ea0",
+        "size_bytes": 5620246
+      },
+      "geometry/template.glb": {
+        "sha256": "d630cf4d6112b017bec952c3ec7bfd7bb128352cb682f2faa144e3eb359e3a5a",
+        "size_bytes": 3495108
+      }
+    },
+    "HG_001": {
+      "deformation/basis.npz": {
+        "sha256": "2813ab477a16f8a50f97157f0b0373e5e9f2e8437cd0819e954c274f521d2cdd",
+        "size_bytes": 7949164
+      },
+      "geometry/template.glb": {
+        "sha256": "69f66c4a5a92f9087316ae4c9df888bdf087eda72e96a1f5fc6680ee2bf2ea17",
+        "size_bytes": 9442060
+      }
+    },
+    "NG_001": {
+      "deformation/basis.npz": {
+        "sha256": "bf49970651f776f8d81403ef5c660c4836dfe4a189fc87c21d307c167b82d638",
+        "size_bytes": 12025
+      },
+      "geometry/template.glb": {
+        "sha256": "4b890fd792c78c570802ea94be0640ddebc1f4b291bcc2ec75dbae4b8a25f32f",
+        "size_bytes": 32244
+      }
+    },
+    "RB_001": {
+      "deformation/basis.npz": {
+        "sha256": "f31de25f80643a82a6e3b6ec619be93fc6ae2f7dbb2e44526368fda92dbbf160",
+        "size_bytes": 445970
+      },
+      "geometry/template.glb": {
+        "sha256": "a67470c224d5d43a6b1fd59b871bca5b2527e67f8234afba6daf1803b8430894",
+        "size_bytes": 612332
+      }
+    },
+    "SG_001": {
+      "deformation/basis.npz": {
+        "sha256": "157530ef71feffc20919f3c504f026df84ef7fc302b06a289d5725f9c9452c32",
+        "size_bytes": 30322
+      },
+      "geometry/template.glb": {
+        "sha256": "776f96f1780496800217cf4b85c230d9bdd3550e66267c57a1a415050e248d8a",
+        "size_bytes": 51992
+      }
+    },
+    "SG_002": {
+      "deformation/basis.npz": {
+        "sha256": "ef71316119ea1d88fb90762085b3780fff9157e9565eeab3d8d4b4df28d875c9",
+        "size_bytes": 97997
+      },
+      "geometry/template.glb": {
+        "sha256": "0d90bbf9db8b06f807c0bcd7b5712392a67bf39fced4b3444704c8ec38c8fc42",
+        "size_bytes": 220216
+      }
+    },
+    "TG_001": {
+      "deformation/basis.npz": {
+        "sha256": "b47997a58509369c761626a76488fdcdbf7840bc03bfca1b11991a43118700b1",
+        "size_bytes": 114410
+      },
+      "geometry/template.glb": {
+        "sha256": "928266c3d9044eeb5ad5f8e6cecf649c0574f5032d65b6202205489a70360af0",
+        "size_bytes": 157520
+      }
+    }
+  }
+}

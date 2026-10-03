@@ -1,0 +1,51 @@
+{
+  "template_id": "RB_001",
+  "display_name": "Ray-Ban Wayfarer (RB_001)",
+  "template_version": "1.0.0",
+  "shape": "rectangle",
+  "material": "acetate",
+  "frame_family": "wayfarer",
+  "rim_type": "full_rim",
+  "bridge_type": "pad",
+  "parts": [
+    "Frame",
+    "LeftLens",
+    "RightLens",
+    "LeftTemple",
+    "RightTemple",
+    "NosePadLeft",
+    "NosePadRight"
+  ],
+  "tags": [
+    "ray-ban",
+    "wayfarer",
+    "rectangle",
+    "acetate",
+    "full-rim"
+  ],
+  "description": "Ray-Ban frame normalized from the supplied Rhino mesh, with named runtime regions and an mm deformation basis.",
+  "dimensions": {
+    "frame_width": 153.120645,
+    "lens_width": 57.901041,
+    "lens_height": 50.04104,
+    "bridge_width": 24.633279,
+    "temple_length": 149.984188,
+    "nose_pad_distance": 24.465528,
+    "nose_pad_height": 14.632199,
+    "temple_curve_angle": 12.083572
+  },
+  "source_file": "source/ray_ban_glasses.3dm",
+  "source_model_units": "mm",
+  "source_geometry_scale": 0.08,
+  "source_frame_width_mm": 153.120645,
+  "landmark_method": "Lens bounding boxes define optical landmarks; root/tip coordinates are averaged from the frontmost and rearmost temple mesh vertices; hinge centers are mesh centroids.",
+  "geometry_object_names": [
+    "Frame",
+    "LeftLens",
+    "RightLens",
+    "LeftTemple",
+    "RightTemple",
+    "NosePadLeft",
+    "NosePadRight"
+  ]
+}

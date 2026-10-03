@@ -1,0 +1,43 @@
+{
+  "template_id": "SG_001",
+  "display_name": "Sunglasses (Model 1)",
+  "template_version": "1.0.0",
+  "shape": "geometric",
+  "material": "acetate",
+  "frame_family": "geometric",
+  "rim_type": "full_rim",
+  "bridge_type": "saddle",
+  "parts": [
+    "Frame",
+    "LeftLens",
+    "RightLens",
+    "LeftTemple",
+    "RightTemple"
+  ],
+  "tags": [
+    "sg_001",
+    "geometric",
+    "acetate"
+  ],
+  "description": "Imported and annotated from sun_glasses.3dm; see source_objects.json and scale_config.json for classification assumptions.",
+  "dimensions": {
+    "frame_width": 143.61056,
+    "lens_width": 60.751236,
+    "lens_height": 50.851257,
+    "bridge_width": 14.621599,
+    "temple_length": 124.651955,
+    "rim_thickness": 1.2
+  },
+  "source_file": "source/sun_glasses.3dm",
+  "source_model_units": "mm",
+  "source_geometry_scale": 0.0012061379151563968,
+  "landmark_method": "Lens bounds and temple end vertex clusters in PCA-aligned canonical eyewear coordinates.",
+  "lens_geometry_method": "source connected eye-sized regions; classified by projected bounds and side",
+  "geometry_object_names": [
+    "Frame",
+    "LeftLens",
+    "RightLens",
+    "LeftTemple",
+    "RightTemple"
+  ]
+}

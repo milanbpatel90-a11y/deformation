@@ -3,17 +3,29 @@
 from __future__ import annotations
 
 import uuid
+import logging
+import os
+import re
+import json
+from pydantic import ValidationError
+from backend.api.safety import read_image, run_job
+
+logger = logging.getLogger(__name__)
 from pathlib import Path
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from backend.models import FrameMaterial, FrameShape, Measurements
 from backend.pipeline import DeformationPipeline
 from backend.template_library.loader import TemplateLibrary
+from backend.template_library.readiness import template_readiness
 from backend.api import rim_detection_routes
+from backend.measurement.suggestions import suggest_measurements
+from backend.template_library.compatibility import (
+    MeasurementCompatibilityError, measurement_ranges, dependent_ranges, validate_combination)
 
 app = FastAPI(
     title="Defirmation API",
@@ -23,13 +35,15 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[origin.strip() for origin in os.getenv("DEFIRM_CORS_ORIGINS", "").split(",") if origin.strip()],
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-OUTPUT_DIR = Path(__file__).resolve().parents[2] / "output"
-OUTPUT_DIR.mkdir(exist_ok=True)
+OUTPUT_ROOT = Path(__file__).resolve().parents[2] / "output"
+PRODUCTION_MODE = os.getenv("DEFIRM_PRODUCTION_MODE", "").lower() in {"1", "true", "yes"}
+OUTPUT_DIR = OUTPUT_ROOT / ("production" if PRODUCTION_MODE else "development")
+OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 pipeline = DeformationPipeline()
 library = TemplateLibrary()
@@ -39,6 +53,56 @@ if viewer_dir.exists():
     app.mount("/viewer", StaticFiles(directory=str(viewer_dir), html=True), name="viewer")
 
 app.include_router(rim_detection_routes.router)
+
+
+@app.exception_handler(MeasurementCompatibilityError)
+async def incompatible_measurements(request, exc):
+    return JSONResponse(status_code=422, content={"detail": str(exc), "ranges": exc.ranges})
+
+
+def input_ranges(measurements, template=None):
+    name = template or "GT_001"
+    base = measurement_ranges(library.load(name)) if name in library.list_templates() else {}
+    return dependent_ranges(measurements, base)
+
+
+def check_combination(measurements, template=None):
+    validate_combination(measurements, input_ranges(measurements, template))
+
+
+@app.post("/api/measurements/ranges")
+def calculate_ranges(measurements: Measurements, template: str | None = None):
+    validate_template(template)
+    return {"ranges": input_ranges(measurements, template),
+            "constraint": "frame_width >= 2*lens_width + bridge_width + 2*rim_thickness"}
+
+
+def parse_measurements(payload: str, color: str) -> Measurements:
+    try:
+        result = Measurements.model_validate_json(payload)
+        result.color = color
+        return result
+    except ValidationError as exc:
+        raise HTTPException(422, "Provide valid manual measurements, positive finite dimensions and hex colours") from exc
+
+
+def validate_template(name: str | None) -> None:
+    if name is not None and name not in library.list_templates():
+        raise HTTPException(400, "Unknown or unavailable template")
+
+
+@app.get("/healthz")
+def health():
+    return {"status": "ok"}
+
+
+@app.get("/readyz")
+def ready():
+    catalog = template_readiness(library)
+    return JSONResponse({"ready": catalog["ready"], "templates": catalog["templates"],
+                         "unavailable": list(catalog["unavailable"]),
+                         "production_mode": PRODUCTION_MODE},
+                        status_code=200 if catalog["ready"] else 503)
 
 
 @app.get("/")
@@ -61,13 +125,50 @@ def root():
 
 @app.get("/api/templates")
 def list_templates():
-    available = library.list_templates()
+    catalog = template_readiness(library)
+    available = catalog["templates"]
     active = "rectangle_plastic" if "rectangle_plastic" in available else (available[0] if available else None)
+    labels = {}
+    for name in available:
+        descriptor = library.bundle_dir / name / "metadata/template.json"
+        if descriptor.is_file():
+            try:
+                labels[name] = json.loads(descriptor.read_text(encoding="utf-8")).get(
+                    "display_name", "Gold Template (GT_001)" if name == "GT_001" else name)
+            except (OSError, json.JSONDecodeError):
+                labels[name] = name
+        else:
+            labels[name] = "Gold Template (GT_001)" if name == "GT_001" else name
     return {
         "templates": available,
-        "planned": available,
+        "labels": labels,
+        "planned": library.list_templates(),
+        "unavailable": list(catalog["unavailable"]),
         "active": active,
+        "ranges": {name: measurement_ranges(library.load(name)) for name in available},
     }
+
+
+@app.post("/api/measurements/suggest")
+async def suggest_from_images(
+    images: list[UploadFile] = File(...),
+    side: UploadFile | None = File(None),
+    top: UploadFile | None = File(None),
+):
+    if not 1 <= len(images) <= 6:
+        raise HTTPException(400, "Upload between 1 and 6 images")
+    decoded = [(await read_image(file))[1] for file in images]
+    side_image = (await read_image(side))[1] if side else None
+    top_image = (await read_image(top))[1] if top else None
+    try:
+        return await run_job(suggest_measurements, pipeline, decoded, side_image, top_image)
+    except HTTPException:
+        raise
+    except ValueError as exc:
+        raise HTTPException(422, "Could not estimate supported sizes. Use a clear front photo and check that a template is available.") from exc
+    except Exception as exc:
+        logger.exception("Measurement suggestion failed")
+        raise HTTPException(500, "Size suggestion failed. Retry or enter measurements manually.") from exc
 
 
 @app.post("/api/deform")
@@ -77,9 +178,12 @@ async def deform_from_images(
     top: UploadFile | None = File(None, description="Top product image"),
     color: str = Form("#d9a7a2"),
     template: str | None = Form(None),
+    measurements: str | None = Form(None, description="Optional manual Measurements JSON in millimetres; omit to estimate from images"),
+    reference_frame_width_mm: float | None = Form(None, description="Known physical frame width in mm used to calibrate image scale"),
+    automatic_appearance: bool = Form(True),
 ):
-    """Upload up to 3 images (front, side, top), detect measurements, deform template, export GLB."""
-    job_id = uuid.uuid4().hex[:12]
+    """Generate a GLB from images; manual measurements are optional when a physical scale reference is supplied."""
+    job_id = uuid.uuid4().hex
     # Use OUTPUT_DIR (project-local, ASCII-safe path) instead of system temp
     # to avoid Windows 8.3 tilde paths (PETPOO~1) that break cv2.imread.
     work_dir = OUTPUT_DIR / f"_upload_{job_id}"
@@ -87,41 +191,58 @@ async def deform_from_images(
 
     try:
         front_path = work_dir / "front.jpg"
-        front_bytes = await front.read()
+        manual = parse_measurements(measurements, color) if measurements else None
+        validate_template(template)
+        if manual is not None:
+            check_combination(manual, template)
+        elif PRODUCTION_MODE and reference_frame_width_mm is None:
+            raise HTTPException(422, "reference_frame_width_mm is required for production image-only generation; photographs without a physical scale reference are review-only")
+        front_bytes, _ = await read_image(front)
         if not front_bytes:
             raise ValueError("Front image upload is empty — please re-select the file and try again.")
         front_path.write_bytes(front_bytes)
 
         side_path = None
         if side and side.filename:
-            side_bytes = await side.read()
+            side_bytes, _ = await read_image(side)
             if side_bytes:
                 side_path = work_dir / "side.jpg"
                 side_path.write_bytes(side_bytes)
 
         top_path = None
         if top and top.filename:
-            top_bytes = await top.read()
+            top_bytes, _ = await read_image(top)
             if top_bytes:
                 top_path = work_dir / "top.jpg"
                 top_path.write_bytes(top_bytes)
 
         out_path = OUTPUT_DIR / f"{job_id}.glb"
-        result = pipeline.run_from_images(
+        result = await run_job(pipeline.run_from_images,
             front_path,
             side_path,
             out_path,
             color=color,
             template_override=template,
             top_path=top_path,
+            manual_measurements=manual,
+            automatic_appearance=automatic_appearance,
+            reference_frame_width_mm=reference_frame_width_mm,
         )
+        result["ranges"] = input_ranges(Measurements(**result["measurements"]), result.get("template"))
         result["job_id"] = job_id
         result["download_url"] = f"/api/output/{job_id}.glb"
+        result["manifest_url"] = f"/api/output/{job_id}.manifest.json"
         return result
+    except HTTPException:
+        raise
+    except MeasurementCompatibilityError:
+        raise
+    except ValueError as exc:
+        logger.info("Rejected deformation job %s: %s", job_id, exc)
+        raise HTTPException(400, "Input or template is unsuitable for deformation") from exc
     except Exception as exc:
-        import traceback
-        tb = traceback.format_exc()
-        raise HTTPException(status_code=500, detail=f"{exc}\n\nTraceback:\n{tb}") from exc
+        logger.exception("Deformation job %s failed", job_id)
+        raise HTTPException(500, "Deformation failed. Check server logs with job ID " + job_id) from exc
     finally:
         import shutil as _shutil
         _shutil.rmtree(work_dir, ignore_errors=True)
@@ -132,21 +253,32 @@ async def deform_from_multiple_images(
     images: list[UploadFile] = File(..., description="List of 4-6 product images from multiple view angles"),
     color: str = Form("#d9a7a2"),
     template: str | None = Form(None),
+    measurements: str | None = Form(None, description="Optional manual Measurements JSON in millimetres; omit to estimate from images"),
+    reference_frame_width_mm: float | None = Form(None, description="Known physical frame width in mm used to calibrate image scale"),
+    automatic_appearance: bool = Form(True),
 ):
-    """Upload multiple product images, classify views, fuse measurements, deform template, and export GLB."""
-    job_id = uuid.uuid4().hex[:12]
+    """Generate a GLB from 4–6 product images; calibrated automatic sizing is supported via reference_frame_width_mm."""
+    job_id = uuid.uuid4().hex
     work_dir = OUTPUT_DIR / f"_upload_multi_{job_id}"
     work_dir.mkdir(parents=True, exist_ok=True)
 
     try:
+        manual = parse_measurements(measurements, color) if measurements else None
+        validate_template(template)
+        if manual is not None:
+            check_combination(manual, template)
+        elif PRODUCTION_MODE and reference_frame_width_mm is None:
+            raise HTTPException(422, "reference_frame_width_mm is required for production image-only generation; photographs without a physical scale reference are review-only")
+        if not 1 <= len(images) <= 6:
+            raise HTTPException(400, "Upload between 1 and 6 images")
         image_paths = []
         for i, file in enumerate(images):
             if not file.filename:
                 continue
-            file_bytes = await file.read()
+            file_bytes, _ = await read_image(file)
             if not file_bytes:
                 continue
-            suffix = Path(file.filename).suffix or ".jpg"
+            suffix = ".img"
             file_path = work_dir / f"image_{i}{suffix}"
             file_path.write_bytes(file_bytes)
             image_paths.append(file_path)
@@ -155,19 +287,30 @@ async def deform_from_multiple_images(
             raise ValueError("No non-empty images uploaded")
 
         out_path = OUTPUT_DIR / f"{job_id}.glb"
-        result = pipeline.run_from_multiple_images(
+        result = await run_job(pipeline.run_from_multiple_images,
             image_paths,
             out_path,
             color=color,
             template_override=template,
+            manual_measurements=manual,
+            automatic_appearance=automatic_appearance,
+            reference_frame_width_mm=reference_frame_width_mm,
         )
+        result["ranges"] = input_ranges(Measurements(**result["measurements"]), result.get("template"))
         result["job_id"] = job_id
         result["download_url"] = f"/api/output/{job_id}.glb"
+        result["manifest_url"] = f"/api/output/{job_id}.manifest.json"
         return result
+    except HTTPException:
+        raise
+    except MeasurementCompatibilityError:
+        raise
+    except ValueError as exc:
+        logger.info("Rejected deformation job %s: %s", job_id, exc)
+        raise HTTPException(400, "Input or template is unsuitable for deformation") from exc
     except Exception as exc:
-        import traceback
-        tb = traceback.format_exc()
-        raise HTTPException(status_code=500, detail=f"{exc}\n\nTraceback:\n{tb}") from exc
+        logger.exception("Deformation job %s failed", job_id)
+        raise HTTPException(500, "Deformation failed. Check server logs with job ID " + job_id) from exc
     finally:
         import shutil as _shutil
         _shutil.rmtree(work_dir, ignore_errors=True)
@@ -175,18 +318,18 @@ async def deform_from_multiple_images(
 
 @app.post("/api/deform/measurements")
 async def deform_from_measurements(
-    frame_width: float = Form(145),
-    lens_width: float = Form(54),
-    lens_height: float = Form(50),
-    bridge_width: float = Form(18),
-    temple_length: float = Form(140),
+    frame_width: float = Form(...),
+    lens_width: float = Form(...),
+    lens_height: float = Form(...),
+    bridge_width: float = Form(...),
+    temple_length: float = Form(...),
     rim_thickness: float = Form(1.2),
     material: str = Form("metal"),
     shape: str = Form("geometric"),
     nose_pads: bool = Form(True),
     temple_curve_angle: float = Form(28),
     color: str = Form("#d9a7a2"),
-    template: str = Form("rectangle_plastic"),
+    template: str | None = Form(None),
 ):
     """Deform template directly from known measurements (no images required)."""
     try:
@@ -204,23 +347,41 @@ async def deform_from_measurements(
             color=color,
         )
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise HTTPException(422, "Invalid manual measurements, material, shape or colour") from exc
 
-    job_id = uuid.uuid4().hex[:12]
+    job_id = uuid.uuid4().hex
     out_path = OUTPUT_DIR / f"{job_id}.glb"
 
     try:
-        result = pipeline.run_from_measurements(measurements, out_path, template)
+        validate_template(template)
+        # Manual-size submissions without a selected template use Gold, which
+        # remains the stable default even as new catalog templates are added.
+        selected_template = template or ("GT_001" if "GT_001" in library.list_templates() else None)
+        check_combination(measurements, selected_template)
+        result = await run_job(pipeline.run_from_measurements, measurements, out_path, selected_template)
+        result["ranges"] = input_ranges(Measurements(**result["measurements"]), result.get("template"))
         result["job_id"] = job_id
         result["download_url"] = f"/api/output/{job_id}.glb"
+        result["manifest_url"] = f"/api/output/{job_id}.manifest.json"
         return result
+    except HTTPException:
+        raise
+    except MeasurementCompatibilityError:
+        raise
+    except ValueError as exc:
+        logger.info("Rejected deformation job %s: %s", job_id, exc)
+        raise HTTPException(400, "Input or template is unsuitable for deformation") from exc
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+        logger.exception("Deformation job %s failed", job_id)
+        raise HTTPException(500, "Deformation failed. Check server logs with job ID " + job_id) from exc
 
 
 @app.get("/api/output/{filename}")
 def download_output(filename: str):
-    path = OUTPUT_DIR / filename
-    if not path.exists():
+    if not re.fullmatch(r"[A-Za-z0-9_-]+\.(?:glb|metadata\.json|manifest\.json)", filename):
+        raise HTTPException(404, "File not found")
+    path = (OUTPUT_DIR / filename).resolve()
+    if path.parent != OUTPUT_DIR.resolve() or not path.is_file():
         raise HTTPException(status_code=404, detail="File not found")
-    return FileResponse(path, media_type="model/gltf-binary", filename=filename)
+    media_type = "application/json" if filename.endswith(".json") else "model/gltf-binary"
+    return FileResponse(path, media_type=media_type, filename=filename)

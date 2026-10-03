@@ -68,6 +68,11 @@ class MeasurementFuser:
         # Merge lens parameters if any view has them
         lens_color = next((m.lens_color for m in any_ms if m.lens_color is not None), None)
         lens_opacity = next((m.lens_opacity for m in any_ms if m.lens_opacity is not None), None)
+        calibrated = all(m.measurement_scale_calibrated for _, m in views)
+        reference_values = [m.measurement_reference_width_mm for _, m in views if m.measurement_reference_width_mm is not None]
+        reference_width = float(np.mean(reference_values)) if reference_values else None
+        scale_source = "image_reference" if calibrated and reference_values else (
+            "image_estimate" if any(m.measurement_scale_source == "image_estimate" for _, m in views) else "manual")
 
         return Measurements(
             frame_width=round(frame_width, 1),
@@ -86,4 +91,7 @@ class MeasurementFuser:
             color=color,
             lens_color=lens_color,
             lens_opacity=lens_opacity,
+            measurement_scale_source=scale_source,
+            measurement_reference_width_mm=reference_width,
+            measurement_scale_calibrated=calibrated and bool(reference_values),
         )
