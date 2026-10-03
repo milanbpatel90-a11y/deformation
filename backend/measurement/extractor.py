@@ -30,6 +30,7 @@ class MeasurementExtractor:
         nose_pads: bool = True,
         color: str = "#d9a7a2",
         top: np.ndarray | None = None,
+        reference_frame_width_mm: float | None = None,
     ) -> tuple[Measurements, LensContour]:
         front_mask = mask if mask is not None else self._auto_mask(front)
         contour = self._largest_contour(front_mask)
@@ -37,7 +38,10 @@ class MeasurementExtractor:
             return self._default_measurements(shape, material, nose_pads, color), LensContour()
 
         x, y, w, h = cv2.boundingRect(contour)
-        mm_per_px = self.DEFAULT_FRAME_WIDTH_MM / max(w, 1)
+        scale_width_mm = self.DEFAULT_FRAME_WIDTH_MM if reference_frame_width_mm is None else float(reference_frame_width_mm)
+        if scale_width_mm <= 0 or scale_width_mm > 300:
+            raise ValueError("reference_frame_width_mm must be between 0 and 300 mm")
+        mm_per_px = scale_width_mm / max(w, 1)
 
         # Detect lens regions via horizontal valley in upper half
         lens_w_px, lens_h_px, bridge_w_px = self._detect_lens_regions(front_mask, x, y, w, h)
