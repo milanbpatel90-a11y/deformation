@@ -165,6 +165,7 @@ class DeformationPipeline:
         template_override: str | None = None,
         top_path: Path | str | None = None,
         manual_measurements: Measurements | None = None,
+        reference_frame_width_mm: float | None = None,
         automatic_appearance: bool = True,
     ) -> dict:
         front = self._imread(front_path)
@@ -174,7 +175,7 @@ class DeformationPipeline:
         side = self._imread(side_path) if side_path else None
         top = self._imread(top_path) if top_path else None
 
-        return self.run_from_arrays(front, side, output_path, color, template_override, top=top, manual_measurements=manual_measurements, automatic_appearance=automatic_appearance)
+        return self.run_from_arrays(front, side, output_path, color, template_override, top=top, manual_measurements=manual_measurements, automatic_appearance=automatic_appearance, reference_frame_width_mm=reference_frame_width_mm)
 
     def run_from_measurements(
         self,
@@ -244,6 +245,7 @@ class DeformationPipeline:
         top: np.ndarray | None = None,
         manual_measurements: Measurements | None = None,
         automatic_appearance: bool = True,
+        reference_frame_width_mm: float | None = None,
     ) -> dict:
         report = PipelineReport()
 
@@ -283,6 +285,7 @@ class DeformationPipeline:
                 style.nose_pads,
                 color,
                 top=top,
+                reference_frame_width_mm=reference_frame_width_mm,
             )
         if automatic_appearance:
             measurements, style, appearance_mask = apply_image_appearance(self, measurements, front, masks["front"])
@@ -407,6 +410,7 @@ class DeformationPipeline:
         template_override: str | None = None,
         manual_measurements: Measurements | None = None,
         automatic_appearance: bool = True,
+        reference_frame_width_mm: float | None = None,
     ) -> dict:
         """
         Run the full pipeline on 4-6 images:
@@ -452,6 +456,7 @@ class DeformationPipeline:
                     material=style.material,
                     nose_pads=style.nose_pads,
                     color=color,
+                    reference_frame_width_mm=reference_frame_width_mm,
                 )
 
             if first_valid is None:
