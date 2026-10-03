@@ -114,6 +114,9 @@ class MeasurementExtractor:
             shape=shape,
             nose_pads=nose_pads,
             color=color,
+            measurement_scale_source="image_estimate",
+            measurement_reference_width_mm=None,
+            measurement_scale_calibrated=False,
         )
 
     def _auto_mask(self, image: np.ndarray) -> np.ndarray:
