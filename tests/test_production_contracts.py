@@ -62,10 +62,28 @@ def test_manual_dimensions_required(client):
     assert client.post("/api/deform/measurements", data={**MANUAL, "frame_width": "nan"}).status_code == 422
 
 
-@pytest.mark.parametrize("route", ["/api/deform", "/api/deform/multi-view"])
-def test_images_require_manual_measurements(client, image_bytes, route):
-    field = "images" if route.endswith("multi-view") else "front"
-    assert client.post(route, files={field: ("front.png", image_bytes)}).status_code == 422
+def test_images_require_scale_reference_in_production(client, image_bytes, monkeypatch):
+    monkeypatch.setattr(main, "PRODUCTION_MODE", True)
+    for route, field in [("/api/deform", "front"), ("/api/deform/multi-view", "images")]:
+        response = client.post(route, files={field: ("front.png", image_bytes)})
+        assert response.status_code == 422, response.text
+        assert "reference_frame_width_mm" in response.text
+
+
+def test_multi_view_can_run_image_only_with_explicit_scale_reference(client, image_bytes, monkeypatch):
+    captured = {}
+    def generate(*args, **kwargs):
+        captured.update(kwargs)
+        return {"measurements": {**MANUAL, "measurement_scale_source": "image_reference",
+                                 "measurement_reference_width_mm": 135.0,
+                                 "measurement_scale_calibrated": True}, "template": "GT_001"}
+    monkeypatch.setattr(main.pipeline, "run_from_multiple_images", generate)
+    response = client.post("/api/deform/multi-view",
+                           data={"reference_frame_width_mm": "135"},
+                           files={"images": ("front.png", image_bytes)})
+    assert response.status_code == 200, response.text
+    assert captured["manual_measurements"] is None
+    assert captured["reference_frame_width_mm"] == 135.0
 
 
 def test_manual_values_reach_image_pipeline_and_temp_files_removed(client, monkeypatch, image_bytes):
