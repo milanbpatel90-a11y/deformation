@@ -73,6 +73,10 @@ class Measurements(BaseModel):
     color: str = Field(default="#d9a7a2", pattern=r"^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$")
     lens_color: str | None = Field(default=None, pattern=r"^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$", description="Hex color code for the lenses")
     lens_opacity: float | None = Field(default=None, ge=0, le=1, description="Opacity of the lenses (0.0 to 1.0)")
+    # Provenance for production release gating. Image-only scale estimates remain review-only.
+    measurement_scale_source: str = Field(default="manual", description="manual | image_reference | image_estimate")
+    measurement_reference_width_mm: float | None = Field(default=None, gt=0, le=300, description="Known physical frame width used to calibrate image scale")
+    measurement_scale_calibrated: bool = Field(default=True, description="True only when image scale comes from a known physical reference")
 
 
 class TemplateDimensions(BaseModel):
