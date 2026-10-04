@@ -46,13 +46,27 @@ class GlassesSegmenter:
     def __init__(self, model_path: str | Path | None = None):
         self._model = None
         self.model_type = "opencv_fallback"
+        self.class_names: dict[int, str] = {}
 
         if YOLO is None:
             return  # ultralytics not installed
 
         resolved = Path(model_path).expanduser() if model_path else _find_model()
         if resolved and resolved.is_file():
-            self._model = YOLO(str(resolved))
+            model = YOLO(str(resolved))
+            names = getattr(model, "names", {}) or {}
+            if not isinstance(names, dict):
+                names = dict(enumerate(names))
+            expected = os.environ.get("DEFIRM_EXPECTED_CLASSES")
+            if expected:
+                expected_n = int(expected)
+                if len(names) != expected_n:
+                    raise ValueError(
+                        f"Segmentation model has {len(names)} classes; "
+                        f"expected {expected_n}. Set DEFIRM_EXPECTED_CLASSES to override."
+                    )
+            self._model = model
+            self.class_names = {int(k): str(v) for k, v in names.items()}
             self.model_type = f"yolo:{resolved.name}"
 
     def segment(self, image: np.ndarray) -> dict[str, np.ndarray]:
@@ -66,7 +80,7 @@ class GlassesSegmenter:
         return self._segment_opencv(image)
 
     def _segment_yolo(self, image: np.ndarray) -> dict[str, np.ndarray]:
-        results = self._model(image, verbose=False)
+        results = self._model(image, verbose=False, retina_masks=True)
         h, w = image.shape[:2]
         mask = np.zeros((h, w), dtype=np.uint8)
         detections = 0
