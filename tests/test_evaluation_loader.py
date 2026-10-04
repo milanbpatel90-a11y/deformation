@@ -73,3 +73,19 @@ def test_csv_loader_requires_mm_and_preserves_measurements(tmp_path):
     dataset = load_csv(path)
     assert dataset.samples[0].ground_truth["lens_width"] == 50.0
     assert dataset.samples[0].tolerance["temple_length"] == 1.0
+
+
+def test_real_measurement_entrypoint_is_deterministic():
+    from pathlib import Path
+    import cv2
+    from backend.measurement.extractor import MeasurementExtractor
+    from backend.segmentation.segmenter import GlassesSegmenter
+
+    image_path = Path("dataset/images/train/synth_0001_metal.jpg")
+    image = cv2.imread(str(image_path))
+    assert image is not None
+    segmenter = GlassesSegmenter()
+    extractor = MeasurementExtractor()
+    first = extractor.extract_from_images(image, mask=segmenter.segment(image)["front"])[0]
+    second = extractor.extract_from_images(image, mask=segmenter.segment(image)["front"])[0]
+    assert first.model_dump() == second.model_dump()
