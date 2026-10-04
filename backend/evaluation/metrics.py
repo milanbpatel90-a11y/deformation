@@ -36,7 +36,13 @@ def evaluate_predictions(
     rows = list(rows)
     if not rows:
         raise ValueError("Cannot evaluate an empty prediction set")
+    allowed_keys = {"id", "archetype", "source", "measured_by"}
+    for field in fields:
+        allowed_keys.update({field, f"gt_{field}", f"tolerance_{field}"})
     for row_index, row in enumerate(rows):
+        unknown = set(row) - allowed_keys
+        if unknown:
+            raise ValueError(f"Prediction row {row_index} has unknown fields: {sorted(unknown)}")
         for field in fields:
             if field not in row:
                 raise ValueError(f"Prediction row {row_index} missing field '{field}'")
@@ -50,6 +56,8 @@ def evaluate_predictions(
             tol_key = f"tolerance_{field}"
             if tol_key not in row:
                 raise ValueError(f"Prediction row {row_index} missing field '{tol_key}'")
+            if not isinstance(row[tol_key], (int, float)) or isinstance(row[tol_key], bool):
+                raise ValueError(f"Prediction row {row_index} field '{tol_key}' must be numeric")
 
     overall = {field: _field_metrics(rows, field) for field in fields}
     archetypes = sorted({str(row.get("archetype", "unknown")) for row in rows})
