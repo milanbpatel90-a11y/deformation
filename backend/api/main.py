@@ -13,7 +13,7 @@ from fastapi.staticfiles import StaticFiles
 from backend.models import FrameMaterial, FrameShape, Measurements
 from backend.pipeline import DeformationPipeline
 from backend.template_library.loader import TemplateLibrary
-from backend.api import rim_detection_routes
+from backend.api import rim_detection_routes\nfrom backend.api.jobs import router as jobs_router\n\nRUNTIME_DIR = Path("/app/runtime") if Path("/app/runtime").exists() else Path("runtime")\nRUNTIME_DIR.mkdir(parents=True, exist_ok=True)
 
 app = FastAPI(
     title="Defirmation API",
@@ -38,7 +38,7 @@ viewer_dir = Path(__file__).resolve().parents[2] / "viewer"
 if viewer_dir.exists():
     app.mount("/viewer", StaticFiles(directory=str(viewer_dir), html=True), name="viewer")
 
-app.include_router(rim_detection_routes.router)
+app.include_router(rim_detection_routes.router)\napp.include_router(jobs_router)\napp.mount("/runtime", StaticFiles(directory=str(RUNTIME_DIR)), name="runtime")
 
 
 @app.get("/")
