@@ -28,9 +28,22 @@ services:
     volumes: [runtime:/app/runtime]
     depends_on: [redis]
     restart: unless-stopped
+  dashboard:
+    image: node:20-alpine
+    working_dir: /app
+    command: sh -c "npm install && npm run dev -- --hostname 0.0.0.0"
+    ports: ["3000:3000"]
+    environment:
+      NEXT_PUBLIC_API: http://localhost:8000
+    volumes:
+      - ./dashboard:/app
+      - dashboard_node_modules:/app/node_modules
+    depends_on: [api]
+    restart: unless-stopped
   redis:
     image: redis:7-alpine
     expose: ["6379"]
     restart: unless-stopped
 volumes:
   runtime:
+  dashboard_node_modules:
