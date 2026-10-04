@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Sequence
 
-from backend.models import FrameMaterial, FrameShape, Measurements
+from backend.models import Measurements
 from backend.multiview.fuse_measurements import robust_estimate
 
 
