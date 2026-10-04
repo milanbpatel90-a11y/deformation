@@ -7,7 +7,7 @@ import json
 from pathlib import Path
 from typing import Callable
 
-from backend.evaluation.dataset import GroundTruthDataset, GroundTruthSample
+from backend.evaluation.dataset import GroundTruthDataset
 from backend.evaluation.metrics import EvaluationReport, evaluate_predictions
 
 FIELDS = ("frame_width", "bridge_width", "lens_width", "lens_height", "temple_length")
