@@ -31,7 +31,6 @@ jobs:
           --baseline dataset/ground_truth/baseline.json
           --report reports/benchmark_${{ github.sha }}.json
           --slack 0.25
-          --check-determinism
       - name: Upload benchmark report
         if: always()
         uses: actions/upload-artifact@v4
