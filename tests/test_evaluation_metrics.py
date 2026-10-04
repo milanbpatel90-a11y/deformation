@@ -75,3 +75,10 @@ def test_missing_ground_truth_field_raises():
     del bad["gt_lens_width"]
     with pytest.raises(ValueError, match="gt_lens_width"):
         evaluate_predictions([bad])
+
+
+def test_unknown_prediction_field_raises():
+    bad = row({field: 100.0 for field in FIELDS})
+    bad["unexpected"] = 1
+    with pytest.raises(ValueError, match="unknown"):
+        evaluate_predictions([bad])
