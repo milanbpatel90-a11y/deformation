@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any\nimport csv
 
 FIELDS = (
     "frame_width",
@@ -98,6 +98,13 @@ class GroundTruthDataset:
                 tolerance=tol,
             ))
         return cls(version=1, units="mm", samples=tuple(samples))
+
+
+def _csv_float(value: str, label: str) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError) as exc:
+        raise DatasetValidationError(f"{label} must be numeric") from exc
 
 
 def _strict_measurement_map(value: Any, label: str) -> dict[str, float]:
