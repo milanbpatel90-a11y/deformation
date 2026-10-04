@@ -8,10 +8,6 @@ on:
       - 'backend/segmentation/**'
       - 'backend/measurement/**'
       - 'backend/pipeline/**'
-      - 'backend/evaluation/**'
-      - 'scripts/run_benchmark.py'
-      - 'dataset/ground_truth/**'
-      - '.github/workflows/accuracy.yml'
 
 jobs:
   benchmark:
