@@ -1,8 +1,9 @@
 {
   "version": 1,
+  "status": "not_established",
   "units": "mm",
   "metrics": {
     "overall": {}
   },
-  "note": "Populate from a real ground-truth benchmark run; never fabricate baseline metrics."
+  "note": "No real-eyewear baseline is established. Populate only from real hand-measured data; synthetic seed data is plumbing-only."
 }
