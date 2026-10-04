@@ -1,6 +1,6 @@
 # Ground-truth measurement benchmark
 
-This directory intentionally contains no fabricated measurements or product images. Populate samples.json with 15–25+ real eyewear samples measured in millimetres, then run the benchmark locally with the production pipeline.
+The checked-in samples.json contains three synthetic plumbing samples so the benchmark path has deterministic fixtures. They are not an accuracy baseline. Replace or extend samples.json with 15–25+ real eyewear samples measured in millimetres before claiming accuracy.
 
 Required fields per sample:
 - id, image, archetype, source, measured_by
