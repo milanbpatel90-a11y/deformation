@@ -110,6 +110,11 @@ class LensDeformer(BaseDeformer):
         target_radius = np.linalg.norm(resampled_target - target_center, axis=1)
         radial_scale = np.divide(target_radius, np.maximum(front_radius, 1e-6))
         back_relative = template_back - template_back_center
+        if len(radial_scale) != len(back_relative):
+            front_t = np.linspace(0.0, 1.0, len(radial_scale), endpoint=False)
+            back_t = np.linspace(0.0, 1.0, len(back_relative), endpoint=False)
+            radial_scale = np.interp(back_t, front_t, radial_scale, period=1.0)
+
         vertices[ordered_back_idx, :2] = target_center + back_relative * radial_scale[:, None]
         lens_mesh.vertices = vertices
 
@@ -123,7 +128,9 @@ class LensDeformer(BaseDeformer):
         vertices = lens_mesh.vertices.copy()
         front_idx = self._surface_indices(vertices, front=True)
         back_idx = self._surface_indices(vertices, front=False)
-        original_thickness = float(np.mean(selection.lens_before[front_idx, 2] - selection.lens_before[back_idx, 2]))
+        original_thickness = float(
+            np.mean(selection.lens_before[front_idx, 2]) - np.mean(selection.lens_before[back_idx, 2])
+        )
         front_z = float(np.max(vertices[front_idx, 2]))
         vertices[front_idx, 2] = front_z
         vertices[back_idx, 2] = front_z - original_thickness
@@ -162,7 +169,7 @@ class LensDeformer(BaseDeformer):
         lens_center = lens_boundary.mean(axis=0)
         rim_radius = np.linalg.norm(rim_boundary - rim_center, axis=1).mean()
         lens_radius = np.linalg.norm(lens_boundary - lens_center, axis=1).mean()
-        thickness = float(np.mean(lens_vertices[front_idx, 2] - lens_vertices[back_idx, 2]))
+        thickness = float(np.mean(lens_vertices[front_idx, 2]) - np.mean(lens_vertices[back_idx, 2]))
         uv_count = 0
         if hasattr(lens_mesh.visual, "uv") and lens_mesh.visual.uv is not None:
             uv_count = int(len(lens_mesh.visual.uv))
