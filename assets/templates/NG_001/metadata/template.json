@@ -1,0 +1,43 @@
+{
+  "template_id": "NG_001",
+  "display_name": "Nerd Glasses",
+  "template_version": "1.0.0",
+  "shape": "rectangle",
+  "material": "acetate",
+  "frame_family": "rectangle",
+  "rim_type": "full_rim",
+  "bridge_type": "saddle",
+  "parts": [
+    "Frame",
+    "LeftLens",
+    "RightLens",
+    "LeftTemple",
+    "RightTemple"
+  ],
+  "tags": [
+    "ng_001",
+    "rectangle",
+    "acetate"
+  ],
+  "description": "Imported and annotated from nerd_glasses.3dm; see source_objects.json and scale_config.json for classification assumptions.",
+  "dimensions": {
+    "frame_width": 144.669167,
+    "lens_width": 53.321532,
+    "lens_height": 41.641577,
+    "bridge_width": 23.2,
+    "temple_length": 92.024797,
+    "rim_thickness": 1.2
+  },
+  "source_file": "source/nerd_glasses.3dm",
+  "source_model_units": "mm",
+  "source_geometry_scale": 0.15388609437104864,
+  "landmark_method": "Lens bounds and temple end vertex clusters in PCA-aligned canonical eyewear coordinates.",
+  "lens_geometry_method": "generated elliptical optical placeholders; source has no separately identifiable lens shells",
+  "geometry_object_names": [
+    "Frame",
+    "LeftLens",
+    "RightLens",
+    "LeftTemple",
+    "RightTemple"
+  ]
+}

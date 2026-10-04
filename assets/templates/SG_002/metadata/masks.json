@@ -1,0 +1,32 @@
+{
+  "unified_vertex_order": [
+    "Frame",
+    "LeftLens",
+    "RightLens",
+    "LeftTemple",
+    "RightTemple"
+  ],
+  "vertex_count": 7114,
+  "part_masks": {
+    "Frame": {
+      "start": 0,
+      "stop": 5712
+    },
+    "LeftLens": {
+      "start": 5712,
+      "stop": 5810
+    },
+    "RightLens": {
+      "start": 5810,
+      "stop": 5908
+    },
+    "LeftTemple": {
+      "start": 5908,
+      "stop": 6520
+    },
+    "RightTemple": {
+      "start": 6520,
+      "stop": 7114
+    }
+  }
+}

@@ -1,0 +1,38 @@
+{
+  "coordinate_system": {
+    "x": "left_right",
+    "y": "front_back",
+    "z": "up_down",
+    "units": "mm"
+  },
+  "parts": {
+    "Frame": {
+      "vertices": 9292,
+      "triangles": 16198
+    },
+    "LeftLens": {
+      "vertices": 1946,
+      "triangles": 3744
+    },
+    "RightLens": {
+      "vertices": 1946,
+      "triangles": 3744
+    },
+    "LeftTemple": {
+      "vertices": 3043,
+      "triangles": 2704
+    },
+    "RightTemple": {
+      "vertices": 3043,
+      "triangles": 2704
+    },
+    "NosePadLeft": {
+      "vertices": 454,
+      "triangles": 704
+    },
+    "NosePadRight": {
+      "vertices": 454,
+      "triangles": 704
+    }
+  }
+}

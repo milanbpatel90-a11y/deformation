@@ -1,46 +1,248 @@
 {
   "schema_version": "1.0",
-  "parameters": {
-    "frame_width": {
-      "type": "float",
-      "unit": "mm",
-      "min": 120,
-      "max": 160,
-      "default": 140,
-      "description": "Total frame width"
+  "parameters": [
+    {
+      "name": "frame_width",
+      "units": "mm",
+      "default": 140.0,
+      "min": 110,
+      "max": 170,
+      "normalized": {
+        "formula": "(value - min) / (max - min)",
+        "range": [
+          0.0,
+          1.0
+        ]
+      },
+      "affected_parts": [
+        "Frame",
+        "LeftFrameInsert",
+        "RightFrameInsert",
+        "LeftDecoration",
+        "RightDecoration",
+        "LeftLens",
+        "RightLens",
+        "LeftTemple",
+        "RightTemple",
+        "LeftHinge",
+        "RightHinge",
+        "LeftTempleJoint",
+        "RightTempleJoint"
+      ],
+      "affected_masks": [
+        "Frame",
+        "LeftFrameInsert",
+        "RightFrameInsert",
+        "LeftDecoration",
+        "RightDecoration",
+        "LeftLens",
+        "RightLens",
+        "LeftTemple",
+        "RightTemple",
+        "LeftHinge",
+        "RightHinge",
+        "LeftTempleJoint",
+        "RightTempleJoint"
+      ],
+      "deformation_type": "jacobian_calibrated_monotone_regional_field",
+      "constraints": [
+        "EQ_BRIDGE_CENTERING",
+        "EQ_LR_SYMMETRY",
+        "EQ_HINGE_ATTACHMENT"
+      ],
+      "known_limitation": null,
+      "test_cases_mm": [
+        140.0,
+        110,
+        170,
+        147.0,
+        133.0
+      ]
     },
-    "lens_width": {
-      "type": "float",
-      "unit": "mm",
-      "min": 45,
-      "max": 65,
-      "default": 55,
-      "description": "Width of each lens"
+    {
+      "name": "lens_width",
+      "units": "mm",
+      "default": 55.79,
+      "min": 40,
+      "max": 70,
+      "normalized": {
+        "formula": "(value - min) / (max - min)",
+        "range": [
+          0.0,
+          1.0
+        ]
+      },
+      "affected_parts": [
+        "LeftLens",
+        "RightLens"
+      ],
+      "affected_masks": [
+        "LeftLens",
+        "RightLens"
+      ],
+      "deformation_type": "jacobian_calibrated_monotone_regional_field",
+      "constraints": [
+        "EQ_BRIDGE_CENTERING",
+        "EQ_LR_SYMMETRY",
+        "INEQ_LENS_INSIDE_RIM"
+      ],
+      "known_limitation": "The calibrated field follows measured lens/frame region boundaries. Exact CAD surface clearance and non-rectangular silhouette fitting still require product-specific validation.",
+      "test_cases_mm": [
+        55.79,
+        40,
+        70,
+        58.58,
+        53.0
+      ]
     },
-    "lens_height": {
-      "type": "float",
-      "unit": "mm",
-      "min": 30,
+    {
+      "name": "lens_height",
+      "units": "mm",
+      "default": 36.92,
+      "min": 25,
       "max": 50,
-      "default": 40,
-      "description": "Height of each lens"
+      "normalized": {
+        "formula": "(value - min) / (max - min)",
+        "range": [
+          0.0,
+          1.0
+        ]
+      },
+      "affected_parts": [
+        "LeftLens",
+        "RightLens"
+      ],
+      "affected_masks": [
+        "LeftLens",
+        "RightLens"
+      ],
+      "deformation_type": "jacobian_calibrated_monotone_regional_field",
+      "constraints": [
+        "EQ_BRIDGE_CENTERING",
+        "EQ_LR_SYMMETRY",
+        "INEQ_LENS_INSIDE_RIM"
+      ],
+      "known_limitation": null,
+      "test_cases_mm": [
+        36.92,
+        25,
+        50,
+        38.77,
+        35.07
+      ]
     },
-    "bridge_width": {
-      "type": "float",
-      "unit": "mm",
-      "min": 14,
-      "max": 24,
-      "default": 18,
-      "description": "Bridge width between lenses"
+    {
+      "name": "bridge_width",
+      "units": "mm",
+      "default": 17.9,
+      "min": 12,
+      "max": 28,
+      "normalized": {
+        "formula": "(value - min) / (max - min)",
+        "range": [
+          0.0,
+          1.0
+        ]
+      },
+      "affected_parts": [
+        "LeftLens",
+        "RightLens",
+        "LeftTemple",
+        "RightTemple",
+        "LeftHinge",
+        "RightHinge",
+        "LeftTempleJoint",
+        "RightTempleJoint",
+        "LeftFrameInsert",
+        "RightFrameInsert",
+        "LeftDecoration",
+        "RightDecoration"
+      ],
+      "affected_masks": [
+        "LeftLens",
+        "RightLens",
+        "LeftTemple",
+        "RightTemple",
+        "LeftHinge",
+        "RightHinge",
+        "LeftTempleJoint",
+        "RightTempleJoint",
+        "LeftFrameInsert",
+        "RightFrameInsert",
+        "LeftDecoration",
+        "RightDecoration"
+      ],
+      "deformation_type": "jacobian_calibrated_monotone_regional_field",
+      "constraints": [
+        "EQ_BRIDGE_CENTERING",
+        "EQ_LR_SYMMETRY",
+        "EQ_HINGE_ATTACHMENT",
+        "INEQ_LENS_INSIDE_RIM"
+      ],
+      "known_limitation": "Bridge width is the horizontal gap between lens bounding boxes. The calibrated field couples adjacent frame regions, but does not measure CAD nose-bridge surface clearance.",
+      "test_cases_mm": [
+        17.9,
+        12,
+        28,
+        18.79,
+        17.0
+      ]
     },
-    "temple_length": {
-      "type": "float",
-      "unit": "mm",
-      "min": 135,
-      "max": 155,
-      "default": 145,
-      "description": "Length of temple arms"
+    {
+      "name": "temple_length",
+      "units": "mm",
+      "default": 155.02,
+      "min": 120,
+      "max": 180,
+      "normalized": {
+        "formula": "(value - min) / (max - min)",
+        "range": [
+          0.0,
+          1.0
+        ]
+      },
+      "affected_parts": [
+        "LeftTemple",
+        "RightTemple"
+      ],
+      "affected_masks": [
+        "LeftTemple",
+        "RightTemple"
+      ],
+      "deformation_type": "jacobian_calibrated_monotone_regional_field",
+      "constraints": [
+        "EQ_BRIDGE_CENTERING",
+        "EQ_LR_SYMMETRY",
+        "EQ_HINGE_ATTACHMENT"
+      ],
+      "known_limitation": "LeftTempleJoint/RightTempleJoint are rigid and do not stretch with the temple - large deltas could visually separate temple from joint housing.",
+      "test_cases_mm": [
+        155.02,
+        120,
+        180,
+        162.77,
+        147.27
+      ]
     }
-  },
-  "notes": "Placeholder schema. Replace with actual Gold Template parameter schema."
+  ],
+  "hinge_rotation": {
+    "name": "hinge_rotation_deg",
+    "units": "deg",
+    "default": 0,
+    "min": 0,
+    "max": 100,
+    "affected_parts": [
+      "LeftTemple",
+      "RightTemple"
+    ],
+    "deformation_type": "rigid_rotation_about_pivot_axis",
+    "note": "NOT part of the linear basis - call engine.rotate_hinge() separately.",
+    "test_cases_deg": [
+      -10,
+      0,
+      30,
+      60,
+      90
+    ]
+  }
 }

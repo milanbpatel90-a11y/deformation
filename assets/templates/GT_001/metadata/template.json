@@ -1,54 +1,113 @@
 {
   "template_id": "GT_001",
-  "template_version": "1.1.0",
+  "template_version": "1.2.0",
   "topology_version": "1",
-  "basis_version": "1.1",
+  "basis_version": "1.2",
   "metadata_version": "1",
-  "description": "Gold Template - Rectangle frame design with parametric deformation",
+  "description": "Gold Template v1.2 - rectangle-family eyewear frame, scale-corrected (140mm frame width, no authoritative source dimension existed - see metadata/scale_config.json), harmonic (Laplace-equation) lens/rim/bridge coupling, boundary-to-boundary + self-intersection tested. Built and validated across a separate engineering session - see basis_metadata.json changelog for full derivation.",
   "shape_category": "rectangular",
+  "coordinate_system": {
+    "x": "left_right",
+    "y": "front_back",
+    "z": "up_down",
+    "origin": "LM_BridgeCenter (world origin, verified)",
+    "units": "mm"
+  },
   "objects": {
     "Frame": {
-      "description": "Main eyeglass frame",
-      "vertex_count": null,
-      "face_count": null
+      "description": "Main eyeglass frame (single connected mesh; also contains the Bridge/LeftRim/RightRim regions - see region_masks below, these are NOT separate GLB meshes in this template)",
+      "vertex_count": 20718,
+      "face_count": 40448
     },
     "Lens_L": {
-      "description": "Left lens",
-      "vertex_count": null,
-      "face_count": null
+      "description": "Left lens (GLB mesh name: LeftLens)",
+      "vertex_count": 5122,
+      "face_count": 10240
     },
     "Lens_R": {
-      "description": "Right lens",
-      "vertex_count": null,
-      "face_count": null
+      "description": "Right lens (GLB mesh name: RightLens)",
+      "vertex_count": 5122,
+      "face_count": 10240
     },
     "Rim_L": {
-      "description": "Left rim",
-      "vertex_count": null,
+      "description": "Left rim - a REGION within the Frame mesh (harmonic-solve anchor region), not a separate GLB mesh. vertex_count is the count of Frame vertices in this region.",
+      "vertex_count": 10316,
       "face_count": null
     },
     "Rim_R": {
-      "description": "Right rim",
-      "vertex_count": null,
+      "description": "Right rim - region within Frame, see Rim_L note.",
+      "vertex_count": 10382,
       "face_count": null
     },
     "Bridge": {
-      "description": "Bridge connecting left and right frames",
-      "vertex_count": null,
+      "description": "Bridge - region within Frame near LM_BridgeCenter, see Rim_L note.",
+      "vertex_count": 4552,
       "face_count": null
     },
     "Temple_L": {
-      "description": "Left temple arm",
-      "vertex_count": null,
-      "face_count": null
+      "description": "Left temple arm (GLB mesh name: LeftTemple)",
+      "vertex_count": 8258,
+      "face_count": 16128
     },
     "Temple_R": {
-      "description": "Right temple arm",
-      "vertex_count": null,
-      "face_count": null
+      "description": "Right temple arm (GLB mesh name: RightTemple)",
+      "vertex_count": 8258,
+      "face_count": 16128
+    },
+    "Hinge_L": {
+      "description": "GLB mesh name: LeftHinge",
+      "vertex_count": 7294,
+      "face_count": 3648
+    },
+    "Hinge_R": {
+      "description": "GLB mesh name: RightHinge",
+      "vertex_count": 7290,
+      "face_count": 3648
+    },
+    "TempleJoint_L": {
+      "description": "GLB mesh name: LeftTempleJoint",
+      "vertex_count": 37876,
+      "face_count": 18944
+    },
+    "TempleJoint_R": {
+      "description": "GLB mesh name: RightTempleJoint",
+      "vertex_count": 37876,
+      "face_count": 18944
+    },
+    "FrameInsert_L": {
+      "description": "GLB mesh name: LeftFrameInsert",
+      "vertex_count": 20992,
+      "face_count": 10496
+    },
+    "FrameInsert_R": {
+      "description": "GLB mesh name: RightFrameInsert",
+      "vertex_count": 20992,
+      "face_count": 10496
+    },
+    "Decoration_L": {
+      "description": "GLB mesh name: LeftDecoration",
+      "vertex_count": 2944,
+      "face_count": 1472
+    },
+    "Decoration_R": {
+      "description": "GLB mesh name: RightDecoration",
+      "vertex_count": 2944,
+      "face_count": 1472
     }
   },
-  "created_date": "2026-08-26",
-  "author": "Deformation Engine Team",
-  "notes": "This is a placeholder. Extract and place actual Gold_Template.zip contents here."
+  "measured_dimensions_mm": {
+    "frame_width_mm": 140.0,
+    "frame_height_mm": 41.26,
+    "bridge_width_mm": 17.9,
+    "lens_width_left_mm": 55.79,
+    "lens_width_right_mm": 55.79,
+    "lens_height_left_mm": 36.92,
+    "lens_height_right_mm": 36.92,
+    "lens_center_distance_mm": 71.74,
+    "temple_length_left_mm": 155.02,
+    "temple_length_right_mm": 155.02
+  },
+  "created_date": "2026-09-01",
+  "author": "Claude (engineering session) - geometry sourced from Milan's Rhino model",
+  "notes": "REAL populated template (not a placeholder) - Gold_Template.zip contents extracted here. See metadata/basis_metadata.json and README below for the full validation trail: scale correction, harmonic lens/rim/bridge coupling, boundary-to-boundary and self-intersection testing."
 }

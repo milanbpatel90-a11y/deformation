@@ -26,6 +26,7 @@
       width: 300px; min-width: 300px; max-width: 300px; background: #12122a; border-right: 1px solid #2a2a4a;
       display: flex; flex-direction: column; padding: 16px; gap: 14px; overflow-y: auto; height: 100vh;
     }
+    #sidebar > * { flex-shrink: 0; }
     #sidebar h2 { font-size: 15px; font-weight: 700; color: #fff; border-bottom: 1px solid #2a2a4a; padding-bottom: 10px; }
 
     .section-title { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: #8888aa; margin-bottom: 8px; font-weight: 600; }
@@ -54,7 +55,7 @@
     /* ── Form inputs ── */
     label.field { display: block; font-size: 12px; color: #aaa; margin-bottom: 4px; font-weight: 500; }
     input[type=color] { width: 100%; height: 32px; border: none; border-radius: 4px; cursor: pointer; padding: 2px; background: #1e1e3a; }
-    input[type=text], input[type=file] {
+    input[type=text], input[type=file], input[type=number], select {
       width: 100%; padding: 7px 10px; border-radius: 4px; border: 1px solid #3a3a5a;
       background: #1e1e3a; color: #eee; font-size: 13px;
     }
@@ -121,7 +122,7 @@
 
     <div class="img-card" id="card-front" onclick="document.getElementById('input-front').click()">
       <input type="file" id="input-front" accept="image/*" />
-      <div class="label">Front view <span class="badge required">required</span></div>
+      <div class="label">Front view <span class="badge optional">optional</span></div>
       <img class="preview" id="prev-front" />
       <div class="placeholder" id="ph-front">Click to choose</div>
     </div>
@@ -148,19 +149,34 @@
     </div>
   </div>
 
+  <form id="measurements-form" class="section">
+    <div class="section-title">Suggested measurements (mm)</div>
+    <p style="font-size:12px;color:#aaa">Upload glasses photos to suggest sizes, then review or edit any value. You can also enter all sizes manually.</p>
+    <label class="field">Frame width<input name="frame_width" type="number" min="1" max="300" step="any" required></label>
+    <label class="field">Lens width<input name="lens_width" type="number" min="1" max="300" step="any" required></label>
+    <label class="field">Lens height<input name="lens_height" type="number" min="1" max="300" step="any" required></label>
+    <label class="field">Bridge width<input name="bridge_width" type="number" min="1" max="300" step="any" required></label>
+    <label class="field">Temple length<input name="temple_length" type="number" min="1" max="300" step="any" required></label>
+    <label class="field">Rim thickness<input name="rim_thickness" type="number" min="0.1" max="20" step="any" required></label>
+    <label class="field">Material<select name="material"><option>metal</option><option>plastic</option><option>acetate</option><option>titanium</option><option>mixed</option></select></label>
+    <label class="field">Shape<select name="shape"><option>geometric</option><option>rectangle</option><option>round</option><option>square</option><option>aviator</option><option>cat_eye</option><option>browline</option><option>rimless</option></select></label>
+  </form>
+  <button type="button" id="suggest-btn" style="padding:9px;border-radius:6px;border:1px solid #3a3a5a;background:#2a3a6a;color:#fff;cursor:pointer">Suggest sizes from images</button>
+  <div id="suggestion-note" role="status" style="font-size:12px;color:#8be9fd;white-space:pre-wrap">Image estimates need review; photos alone do not provide a physical scale.</div>
   <!-- Options -->
   <div class="section">
     <div class="section-title">Options</div>
+    <label class="field"><input type="checkbox" id="auto-appearance" checked> Detect colour, shape and material from images</label>
     <label class="field">Frame colour</label>
     <input type="color" id="color-pick" value="#d9a7a2" />
     <label class="field">Template</label>
-    <input type="text" id="template-input" placeholder="auto-detect" />
+    <select id="template-input" aria-label="Template"><option value="">Auto-select</option></select>
   </div>
 
   <button id="generate-btn" disabled>Generate 3D Mesh</button>
   <button id="tryon-btn" style="margin-top: 8px; width: 100%; padding: 10px; border-radius: 6px; border: none; background: #8be9fd; color: #1a1a2e; font-weight: 700; font-size: 14px; cursor: pointer; transition: background .2s;">Enable Webcam Try-On</button>
 
-  <div id="status-box">Upload a front image to begin.</div>
+  <div id="status-box">Enter product measurements to begin.</div>
   <button id="download-btn">⬇ Download GLB</button>
 
   <!-- Pipeline stages appear here after generation -->
@@ -198,6 +214,7 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 
 // ── Three.js scene setup ──────────────────────────────────────────────────────
 const container = document.getElementById('canvas-container');
@@ -219,6 +236,12 @@ const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true;
 controls.dampingFactor = 0.05;
 
+const studio = new RoomEnvironment();
+const pmrem = new THREE.PMREMGenerator(renderer);
+const environment = pmrem.fromScene(studio, 0.04);
+scene.environment = environment.texture;
+studio.dispose();
+pmrem.dispose();
 scene.add(new THREE.AmbientLight(0xffffff, 0.6));
 const key = new THREE.DirectionalLight(0xffffff, 1.2);
 key.position.set(50, 80, 100);
@@ -228,6 +251,9 @@ fill.position.set(-60, -20, 50);
 scene.add(fill);
 
 let currentModel = null;
+let modelWidth = 1;
+let loadSequence = 0;
+let videoTexture = null;
 let isTryOnActive = false;
 let tryOnCamera = null;
 let tryOnVideo = null;
@@ -246,33 +272,66 @@ function fitCamera(obj) {
   const size = box.getSize(new THREE.Vector3());
   const center = box.getCenter(new THREE.Vector3());
   const maxDim = Math.max(size.x, size.y, size.z);
-  camera.position.set(center.x, center.y, center.z + maxDim * 2.5);
+  camera.near = maxDim / 1000;
+  camera.far = maxDim * 100;
+  camera.updateProjectionMatrix();
+  const halfFov = THREE.MathUtils.degToRad(camera.fov / 2);
+  const halfHorizontalFov = Math.atan(Math.tan(halfFov) * camera.aspect);
+  const distance = size.length() / (2 * Math.sin(Math.min(halfFov, halfHorizontalFov))) * 1.1;
+  camera.far = Math.max(camera.far, distance * 10);
+  camera.updateProjectionMatrix();
+  camera.position.set(center.x, center.y, center.z + distance);
   controls.target.copy(center);
   controls.update();
 }
 
+function disposeModel(model) {
+  model.traverse(obj => {
+    obj.geometry?.dispose();
+    const materials = Array.isArray(obj.material) ? obj.material : [obj.material];
+    for (const mat of materials) {
+      if (!mat) continue;
+      for (const value of Object.values(mat)) if (value?.isTexture) value.dispose();
+      mat.dispose();
+    }
+  });
+}
 function loadGLB(url) {
+  const sequence = ++loadSequence;
+  const release = () => { if (url.startsWith('blob:')) URL.revokeObjectURL(url); };
   const loader = new GLTFLoader();
   overlayStatus.textContent = 'Loading model…';
   loader.load(url, (gltf) => {
-    if (currentModel) scene.remove(currentModel);
+    release();
+    if (sequence !== loadSequence) { disposeModel(gltf.scene); return; }
+    if (currentModel) { scene.remove(currentModel); disposeModel(currentModel); }
     currentModel = gltf.scene;
+    modelWidth = Math.max(new THREE.Box3().setFromObject(currentModel).getSize(new THREE.Vector3()).x, 0.001);
     scene.add(currentModel);
     if (!isTryOnActive) {
       fitCamera(currentModel);
     }
     overlayStatus.textContent = 'Loaded · Drag to rotate · Scroll to zoom';
   }, undefined, (err) => {
+    release();
+    if (sequence !== loadSequence) return;
     overlayStatus.textContent = 'Error loading model: ' + err.message;
   });
 }
 
+const renderDiagnostics = new URLSearchParams(location.search).has('diagnostics') ? document.createElement('div') : null;
+if (renderDiagnostics) {
+  renderDiagnostics.id = 'render-diagnostics';
+  renderDiagnostics.style.cssText = 'position:absolute;top:12px;right:12px;font-size:12px;background:#000b;padding:8px';
+  container.appendChild(renderDiagnostics);
+}
 (function animate() { 
   requestAnimationFrame(animate); 
   if (!isTryOnActive) {
     controls.update(); 
   }
   renderer.render(scene, camera); 
+  if (renderDiagnostics) renderDiagnostics.textContent = `Draw calls: ${renderer.info.render.calls} · Triangles: ${renderer.info.render.triangles}`;
 })();
 
 window.addEventListener('resize', () => {
@@ -289,7 +348,7 @@ function wirePreview(inputId, prevId, phId, cardId) {
   
   input.addEventListener('change', (e) => {
     const file = e.target.files[0];
-    if (!file) return;
+    if (!file) { preview.removeAttribute('src'); preview.style.display = 'none'; placeholder.style.display = 'block'; updateGenerateBtn(); return; }
     
     // Revoke old URL if exists to prevent memory leak
     if (preview.src && preview.src.startsWith('blob:')) {
@@ -316,7 +375,7 @@ const multiPreviewList = document.getElementById('multi-preview-list');
 inputMulti.addEventListener('change', (e) => {
   const files = e.target.files;
   multiPreviewList.innerHTML = '';
-  if (!files || files.length === 0) return;
+  if (!files || files.length === 0) { updateGenerateBtn(); return; }
   
   for (let file of files) {
     const reader = new FileReader();
@@ -340,8 +399,129 @@ inputMulti.addEventListener('change', (e) => {
 function updateGenerateBtn() {
   const hasFront = document.getElementById('input-front').files.length > 0;
   const hasMulti = document.getElementById('input-multi').files.length > 0;
-  document.getElementById('generate-btn').disabled = !(hasFront || hasMulti);
+  document.getElementById('generate-btn').disabled = isGenerating || isSuggesting || !templatesReady || !document.getElementById('measurements-form').checkValidity();
 }
+
+let isGenerating = false;
+let templatesReady = false;
+let isSuggesting = false;
+let suggestionSequence = 0;
+let suggestionTimer;
+let templateRanges = {};
+const editedMeasurements = new Set();
+const measurementForm = document.getElementById('measurements-form');
+const autoAppearance = document.getElementById('auto-appearance');
+let detectedAppearance = null;
+measurementForm.addEventListener('input', event => {
+  if (event.target.name) editedMeasurements.add(event.target.name);
+});
+function syncAppearanceControls() {
+  const hasDetection = Boolean(detectedAppearance);
+  const automatic = autoAppearance.checked;
+  for (const name of ['material', 'shape']) {
+    const control = measurementForm.elements.namedItem(name);
+    control.disabled = automatic && hasDetection;
+  }
+  if (automatic && hasDetection) {
+    measurementForm.elements.material.value = detectedAppearance.material;
+    measurementForm.elements.shape.value = detectedAppearance.shape;
+    if (detectedAppearance.color) document.getElementById('color-pick').value = detectedAppearance.color;
+  }
+}
+function displayRanges(template) {
+  const ranges = templateRanges[template] || {};
+  for (const input of measurementForm.querySelectorAll('input[type=number]')) {
+    const range = ranges[input.name];
+    input.min = range ? range.min : (input.name === 'rim_thickness' ? 0.1 : 1);
+    input.max = range ? range.max : (input.name === 'rim_thickness' ? 20 : 300);
+    let hint = input.parentElement.querySelector('small');
+    if (!hint) { hint = document.createElement('small'); input.parentElement.appendChild(hint); }
+    hint.textContent = range ? `Supported: ${range.min}–${range.max} mm` : '';
+  }
+  updateGenerateBtn();
+}
+function scheduleSuggestion() {
+  ++suggestionSequence;
+  detectedAppearance = null;
+  syncAppearanceControls();
+  isSuggesting = true;
+  document.getElementById('suggestion-note').textContent = 'Reading the new glasses images…';
+  updateGenerateBtn();
+  clearTimeout(suggestionTimer);
+  suggestionTimer = setTimeout(() => requestSuggestions(), 450);
+}
+async function requestSuggestions() {
+  const sequence = ++suggestionSequence;
+  const note = document.getElementById('suggestion-note');
+  const multi = document.getElementById('input-multi').files;
+  const front = document.getElementById('input-front').files[0];
+  const files = multi.length ? [...multi] : (front ? [front] : []);
+  if (!files.length || files.length > 6) {
+    isSuggesting = false;
+    note.textContent = 'Choose a front photo or up to 6 glasses images to suggest sizes.';
+    updateGenerateBtn();
+    return;
+  }
+  const form = new FormData();
+  for (const file of files) form.append('images', file);
+  for (const view of ['side', 'top']) {
+    const file = document.getElementById(`input-${view}`).files[0];
+    if (file && !multi.length) form.append(view, file);
+  }
+  isSuggesting = true;
+  updateGenerateBtn();
+  note.textContent = 'Reading glasses images and suggesting sizes…';
+  try {
+    const response = await fetch('/api/measurements/suggest', {method: 'POST', body: form});
+    const data = await response.json();
+    if (sequence !== suggestionSequence) return;
+    if (response.status === 404) throw new Error('The server needs restarting to enable image suggestions.');
+    if (!response.ok) throw new Error(typeof data.detail === 'string' ? data.detail : 'Size suggestion failed. Please retry.');
+    for (const [name, value] of Object.entries(data.measurements)) {
+      if (['material', 'shape', 'color'].includes(name)) continue;
+      const input = measurementForm.elements.namedItem(name);
+      if (input && value !== null && !editedMeasurements.has(name)) input.value = value;
+    }
+    detectedAppearance = {
+      material: data.measurements.material,
+      shape: data.measurements.shape,
+      color: data.measurements.color
+    };
+    syncAppearanceControls();
+    templateRanges[data.template] = data.ranges;
+    const templateSelect = document.getElementById('template-input');
+    templateSelect.value = '';
+    templateSelect.options[0].textContent = `Auto-select (suggested: ${data.template})`;
+    displayRanges(data.template);
+    note.textContent = data.note + '\n' + data.adjustments.join('\n') +
+      (editedMeasurements.size ? '\nYour manually edited fields were kept.' : '');
+  } catch (error) {
+    if (sequence === suggestionSequence) note.textContent = error.message + ' You can still enter sizes manually.';
+  } finally {
+    if (sequence === suggestionSequence) { isSuggesting = false; updateGenerateBtn(); }
+  }
+}
+for (const view of ['front', 'side', 'top', 'multi']) {
+  document.getElementById(`input-${view}`).addEventListener('change', scheduleSuggestion);
+}
+document.getElementById('suggest-btn').addEventListener('click', () => {
+  editedMeasurements.clear();
+  clearTimeout(suggestionTimer);
+  editedMeasurements.clear();
+  requestSuggestions();
+});
+autoAppearance.addEventListener('change', () => {
+  if (autoAppearance.checked && !detectedAppearance) {
+    requestSuggestions();
+    return;
+  }
+  syncAppearanceControls();
+});
+document.getElementById('template-input').addEventListener('change', event => {
+  displayRanges(event.target.value || (Object.keys(templateRanges).length === 1 ? Object.keys(templateRanges)[0] : ''));
+});
+document.getElementById('measurements-form').addEventListener('input', updateGenerateBtn);
+document.getElementById('measurements-form').addEventListener('submit', e => e.preventDefault());
 
 // ── Pipeline stages renderer ──────────────────────────────────────────────────
 function renderPipelineStages(stages) {
@@ -373,11 +553,12 @@ function renderPipelineStages(stages) {
       .join('  ·  ');
     const icon = STAGE_ICONS[s.name] || '▸';
     const tr = document.createElement('tr');
-    tr.innerHTML =
-      `<td>${i + 1}</td>` +
-      `<td class="name">${icon} ${s.name}</td>` +
-      `<td class="ms">${s.duration_ms}</td>` +
-      `<td class="detail status-${s.status}">${detailStr || '—'}</td>`;
+    for (const [value, className] of [[i + 1, ''], [`${icon} ${s.name}`, 'name'], [s.duration_ms, 'ms'], [detailStr || '—', 'detail']]) {
+      const td = document.createElement('td');
+      td.textContent = value;
+      td.className = className;
+      tr.appendChild(td);
+    }
     tbody.appendChild(tr);
   });
   wrap.style.display = 'block';
@@ -390,9 +571,18 @@ const downloadBtn = document.getElementById('download-btn');
 document.getElementById('generate-btn').addEventListener('click', async () => {
   const frontFile = document.getElementById('input-front').files[0];
   const multiFiles = document.getElementById('input-multi').files;
-  if (!frontFile && (!multiFiles || multiFiles.length === 0)) return;
+  const measurementForm = document.getElementById('measurements-form');
+  if (!measurementForm.reportValidity()) return;
+  const manual = Object.fromEntries(new FormData(measurementForm));
+  // Disabled auto-detected selects are omitted by FormData; include the
+  // current values explicitly for the API's validated measurements payload.
+  manual.material = measurementForm.elements.material.value;
+  manual.shape = measurementForm.elements.shape.value;
+  for (const key of ['frame_width', 'lens_width', 'lens_height', 'bridge_width', 'temple_length', 'rim_thickness']) manual[key] = Number(manual[key]);
+  if (multiFiles.length > 6) { statusBox.textContent = 'Choose at most 6 images.'; return; }
 
   const btn = document.getElementById('generate-btn');
+  isGenerating = true;
   btn.disabled = true;
   btn.textContent = 'Generating…';
   statusBox.className = '';
@@ -401,7 +591,7 @@ document.getElementById('generate-btn').addEventListener('click', async () => {
   document.getElementById('pipeline-stages').style.display = 'none';
 
   const form = new FormData();
-  const API_BASE = 'http://localhost:8000';
+  const API_BASE = window.location.origin;
   let endpoint = `${API_BASE}/api/deform`;
 
   if (multiFiles && multiFiles.length > 0) {
@@ -409,7 +599,7 @@ document.getElementById('generate-btn').addEventListener('click', async () => {
     for (let file of multiFiles) {
       form.append('images', file);
     }
-  } else {
+  } else if (frontFile) {
     form.append('front', frontFile);
     const sideFile = document.getElementById('input-side').files[0];
     if (sideFile) form.append('side', sideFile);
@@ -417,6 +607,13 @@ document.getElementById('generate-btn').addEventListener('click', async () => {
     if (topFile) form.append('top', topFile);
   }
 
+  if (!frontFile && !multiFiles.length) {
+    endpoint = `${API_BASE}/api/deform/measurements`;
+    for (const [key, value] of Object.entries(manual)) form.append(key, value);
+  } else {
+    form.append('measurements', JSON.stringify(manual));
+  }
+  form.append('automatic_appearance', document.getElementById('auto-appearance').checked);
   form.append('color', document.getElementById('color-pick').value);
   const tpl = document.getElementById('template-input').value.trim();
   if (tpl) form.append('template', tpl);
@@ -432,12 +629,20 @@ document.getElementById('generate-btn').addEventListener('click', async () => {
     }
 
     const m = data.measurements || {};
+    if (m.color) document.getElementById('color-pick').value = m.color;
+    if (autoAppearance.checked) {
+      if (m.material && m.shape) {
+        detectedAppearance = {material: m.material, shape: m.shape, color: m.color};
+        syncAppearanceControls();
+      }
+    }
     statusBox.textContent =
-      `✓ Done  ·  Template: ${data.template}\n` +
+      `${data.quality?.passed === false ? 'Generated — dimensional review required' : '✓ Done'}  ·  Template: ${data.template}\n` +
       `Frame ${m.frame_width}mm  ·  Lens ${m.lens_width}×${m.lens_height}mm\n` +
       `Bridge ${m.bridge_width}mm  ·  Temple ${m.temple_length}mm  ·  Rim ${m.rim_thickness}mm`;
 
     renderPipelineStages(data.pipeline);
+    if (data.quality?.warnings?.length) statusBox.textContent += '\n' + data.quality.warnings.join('\n');
 
     const fullDownloadUrl = data.download_url.startsWith('http') 
       ? data.download_url 
@@ -451,6 +656,7 @@ document.getElementById('generate-btn').addEventListener('click', async () => {
     statusBox.className = 'error';
     statusBox.textContent = 'Network error: ' + err.message;
   } finally {
+    isGenerating = false;
     btn.disabled = false;
     btn.textContent = 'Generate 3D Mesh';
     updateGenerateBtn();
@@ -504,7 +710,7 @@ function onResults(results) {
       currentModel.position.addScaledVector(v_dir, face_width * 0.15);
       
       // 2. Scale the model dynamically based on face width
-      const base_scale = face_width * 0.72;
+      const base_scale = face_width / modelWidth;
       currentModel.scale.set(base_scale, base_scale, base_scale);
       
       overlayStatus.textContent = 'Webcam Try-On active · Face tracked';
@@ -531,6 +737,7 @@ function mapLandmark(lm) {
 }
 
 async function startTryOn() {
+  try {
   if (faceMesh === null) {
     faceMesh = new FaceMesh({
       locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`
@@ -544,18 +751,15 @@ async function startTryOn() {
     faceMesh.onResults(onResults);
   }
   
-  try {
-    const stream = await navigator.mediaDevices.getUserMedia({
-      video: { width: 640, height: 480, facingMode: 'user' }
-    });
-    tryOnVideo.srcObject = stream;
-    await tryOnVideo.play();
-    
-    const videoTexture = new THREE.VideoTexture(tryOnVideo);
+    videoTexture = new THREE.VideoTexture(tryOnVideo);
     videoTexture.colorSpace = THREE.SRGBColorSpace;
     scene.background = videoTexture;
     
     camera.position.set(0, 0, 200);
+    camera.near = 0.1;
+    camera.far = 1000;
+    camera.updateProjectionMatrix();
+    camera.lookAt(0, 0, 0);
     controls.enabled = false;
     
     tryOnCamera = new Camera(tryOnVideo, {
@@ -567,7 +771,7 @@ async function startTryOn() {
       width: 640,
       height: 480
     });
-    tryOnCamera.start();
+    await tryOnCamera.start();
     
     isTryOnActive = true;
     const tryonBtn = document.getElementById('tryon-btn');
@@ -596,6 +800,8 @@ function stopTryOn() {
     tryOnVideo.srcObject = null;
   }
   
+  videoTexture?.dispose();
+  videoTexture = null;
   scene.background = new THREE.Color(0x1a1a2e);
   controls.enabled = true;
   if (currentModel) {
@@ -607,14 +813,49 @@ function stopTryOn() {
   overlayStatus.textContent = 'Drag to rotate · Scroll to zoom';
 }
 
-document.getElementById('tryon-btn').addEventListener('click', () => {
+document.getElementById('tryon-btn').addEventListener('click', async (event) => {
+  event.currentTarget.disabled = true;
+  try {
   if (isTryOnActive) {
     stopTryOn();
   } else {
-    startTryOn();
+    await startTryOn();
   }
+  } finally { document.getElementById('tryon-btn').disabled = false; }
 });
+window.addEventListener('pagehide', stopTryOn);
 
+async function checkTemplates() {
+  try {
+    const response = await fetch('/api/templates');
+    if (!response.ok) throw new Error('Unable to check templates');
+    const catalog = await response.json();
+    templatesReady = catalog.templates.length > 0;
+    const select = document.getElementById('template-input');
+    for (const name of catalog.templates) {
+      const option = document.createElement('option');
+      option.value = name;
+      option.textContent = catalog.labels?.[name] || (name === 'GT_001' ? 'Gold Template (GT_001)' : name);
+      select.appendChild(option);
+    }
+    templateRanges = catalog.ranges || {};
+    select.value = '';
+    if (catalog.templates.length === 1) displayRanges(catalog.templates[0]);
+    if (templatesReady) {
+      statusBox.className = '';
+      statusBox.textContent = `Automatic template selection ready. Upload images for suggested sizes or enter measurements.`;
+    }
+    if (!templatesReady) {
+      statusBox.className = 'error';
+      statusBox.textContent = 'No prepared templates are available. Model generation is unavailable until template assets are configured. You can still load an existing GLB.';
+    }
+  } catch (error) {
+    statusBox.className = 'error';
+    statusBox.textContent = error.message + '. Reload the page to retry.';
+  }
+  updateGenerateBtn();
+}
+checkTemplates();
 const params = new URLSearchParams(window.location.search);
 if (params.get('glb')) loadGLB(params.get('glb'));
 </script>

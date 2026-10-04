@@ -1,0 +1,90 @@
+{
+  "regions": {
+    "Frame": {
+      "parts": [
+        "Frame"
+      ],
+      "vertex_range": {
+        "start": 0,
+        "stop": 9292
+      }
+    },
+    "LeftLens": {
+      "parts": [
+        "LeftLens"
+      ],
+      "vertex_range": {
+        "start": 9292,
+        "stop": 11238
+      }
+    },
+    "RightLens": {
+      "parts": [
+        "RightLens"
+      ],
+      "vertex_range": {
+        "start": 11238,
+        "stop": 13184
+      }
+    },
+    "LeftTemple": {
+      "parts": [
+        "LeftTemple"
+      ],
+      "vertex_range": {
+        "start": 13184,
+        "stop": 16227
+      }
+    },
+    "RightTemple": {
+      "parts": [
+        "RightTemple"
+      ],
+      "vertex_range": {
+        "start": 16227,
+        "stop": 19270
+      }
+    },
+    "NosePadLeft": {
+      "parts": [
+        "NosePadLeft"
+      ],
+      "vertex_range": {
+        "start": 19270,
+        "stop": 19724
+      }
+    },
+    "NosePadRight": {
+      "parts": [
+        "NosePadRight"
+      ],
+      "vertex_range": {
+        "start": 19724,
+        "stop": 20178
+      }
+    }
+  },
+  "front_frame": {
+    "parts": [
+      "Frame"
+    ]
+  },
+  "optical": {
+    "parts": [
+      "LeftLens",
+      "RightLens"
+    ]
+  },
+  "temples": {
+    "parts": [
+      "LeftTemple",
+      "RightTemple"
+    ]
+  },
+  "nose_pads": {
+    "parts": [
+      "NosePadLeft",
+      "NosePadRight"
+    ]
+  }
+}

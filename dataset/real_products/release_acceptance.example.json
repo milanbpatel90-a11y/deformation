@@ -1,0 +1,7 @@
+{
+  "browser_vto_verified": false,
+  "mobile_vto_verified": false,
+  "reviewed_by": "",
+  "tested_devices": [],
+  "notes": "Copy to release_acceptance.json only after recording completed release checks."
+}

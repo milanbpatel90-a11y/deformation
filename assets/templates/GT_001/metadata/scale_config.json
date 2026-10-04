@@ -1,0 +1,24 @@
+{
+  "status": "NO_AUTHORITATIVE_REFERENCE_FOUND",
+  "search_performed": [
+    "All Rhino layers enumerated (25 total, including empty 99_REFERENCE layer)",
+    "Rhino document ModelUnitSystem checked -> 'Millimeters' (this is Rhino's unit TAG, not proof the geometry is correctly scaled to real mm)",
+    "Rhino document Notes field checked -> empty",
+    "Rhino document Strings/user-text table checked -> empty",
+    "Scanned for annotation/dimension/text objects in the file -> none exist (only Mesh and Point object types present)",
+    "99_REFERENCE layer exists but contains zero objects"
+  ],
+  "conclusion": "The source package contains no ground-truth real-world dimension anywhere. The file is tagged as millimeters but the geometry itself (frame_width=360mm, temple_length=399mm) is not physically plausible as real eyewear at that tag value. A scale factor had to be chosen; it is NOT derived from the file, it is an industry-standard default, and it is isolated here so it is a one-line change if you have the real number.",
+  "chosen_reference": {
+    "parameter": "frame_width",
+    "target_value_mm": 140.0,
+    "rationale": "140mm is a common 'medium' adult eyewear total frame width (typical adult range ~125-150mm). This is a labeled placeholder, not a measurement.",
+    "how_to_override": "Change target_value_mm in this file and re-run scale_and_regenerate.py to rescale the whole package consistently."
+  },
+  "measured_before_scale": {
+    "frame_width_mm": 360.05,
+    "temple_length_mm": 398.68,
+    "lens_width_mm": 143.47
+  },
+  "scale_factor_applied": 0.388835
+}

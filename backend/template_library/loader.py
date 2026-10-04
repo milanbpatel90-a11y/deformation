@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 from backend.models import (
@@ -23,7 +24,8 @@ class TemplateLibrary:
     """Load template metadata and resolve the backing GLB for deformation."""
 
     def __init__(self, templates_dir: Path | None = None):
-        self.templates_dir = templates_dir or TEMPLATES_DIR
+        self.templates_dir = Path(templates_dir or TEMPLATES_DIR)
+        self.bundle_dir = self.templates_dir.parent / "assets" / "templates"
         self._cache: dict[str, TemplateInfo] = {}
 
     _NON_TEMPLATE_STEMS = {"templates", "registry"}
@@ -41,11 +43,43 @@ class TemplateLibrary:
             if not isinstance(data, dict) or "dimensions" not in data:
                 continue
             names.append(path.stem)
-        return sorted(names)
+        for metadata in self.bundle_dir.glob("*/deformation/basis_metadata.json"):
+            if (metadata.parents[1] / "geometry/template.glb").is_file():
+                names.append(metadata.parents[1].name)
+        return sorted(set(names))
 
     def load(self, name: str) -> TemplateInfo:
+        if not re.fullmatch(r"[A-Za-z0-9_-]+", name):
+            raise ValueError("Invalid template name")
         if name in self._cache:
             return self._cache[name]
+
+        bundle = self.bundle_dir / name
+        if (bundle / "deformation/basis_metadata.json").is_file():
+            basis_meta = json.loads((bundle / "deformation/basis_metadata.json").read_text(encoding="utf-8"))
+            params = basis_meta["parameters"]
+            descriptor_path = bundle / "metadata/template.json"
+            descriptor = json.loads(descriptor_path.read_text(encoding="utf-8")) if descriptor_path.is_file() else {}
+            dimension_values = {p["name"]: p["default"] for p in params}
+            dimension_values.update(descriptor.get("dimensions", {}))
+            dimensions = TemplateDimensions(**dimension_values)
+            shape = FrameShape(descriptor.get("shape", "rectangle"))
+            material = self._coerce_material(descriptor.get("material", "plastic"))
+            family = FrameFamily(descriptor.get("frame_family", "rectangle"))
+            rim_type = RimType(descriptor.get("rim_type", "full_rim"))
+            bridge_type = BridgeType(descriptor.get("bridge_type", "saddle"))
+            info = TemplateInfo(
+                name=descriptor.get("name", name), deformation_mode="basis", shape=shape,
+                material=material, glb_path=str(bundle / "geometry/template.glb"),
+                dimensions=dimensions,
+                parts=descriptor.get("parts", ["Frame", "LeftLens", "RightLens", "LeftTemple", "RightTemple"]),
+                profile=TemplateProfile(frame_family=family, material=material,
+                    rim_type=rim_type, bridge_type=bridge_type,
+                    lens_aspect_ratio=dimensions.lens_aspect_ratio,
+                    tags=descriptor.get("tags", [family.value, shape.value, material.value])),
+            )
+            self._cache[name] = info
+            return info
 
         meta_path = self.templates_dir / f"{name}.json"
         if not meta_path.exists():

@@ -1,0 +1,126 @@
+{
+  "landmarks": {
+    "LM_BridgeCenter": [
+      0.0,
+      0.0,
+      -0.073303
+    ],
+    "LM_BridgeLeftAttach": [
+      8.140869,
+      0.0,
+      -0.073303
+    ],
+    "LM_BridgeRightAttach": [
+      -8.209562,
+      0.0,
+      -0.073303
+    ],
+    "LM_LeftLensCenter": [
+      38.496118,
+      0.0,
+      -0.073303
+    ],
+    "LM_RightLensCenter": [
+      -38.564811,
+      0.0,
+      -0.073303
+    ],
+    "LM_LeftLensTop": [
+      38.496118,
+      0.0,
+      23.995892
+    ],
+    "LM_LeftLensBottom": [
+      38.496118,
+      0.0,
+      -24.142498
+    ],
+    "LM_LeftLensNasal": [
+      8.140869,
+      0.0,
+      -0.073303
+    ],
+    "LM_LeftLensTemporal": [
+      68.851367,
+      0.0,
+      -0.073303
+    ],
+    "LM_RightLensTop": [
+      -38.564811,
+      0.0,
+      23.995892
+    ],
+    "LM_RightLensBottom": [
+      -38.564811,
+      0.0,
+      -24.142498
+    ],
+    "LM_RightLensNasal": [
+      -8.209562,
+      0.0,
+      -0.073303
+    ],
+    "LM_RightLensTemporal": [
+      -68.92006,
+      0.0,
+      -0.073303
+    ],
+    "LM_LeftTempleRoot": [
+      71.178238,
+      0.260286,
+      9.900102
+    ],
+    "LM_LeftTempleTip": [
+      71.218149,
+      89.172127,
+      -10.978626
+    ],
+    "LM_LeftHinge": [
+      71.178238,
+      0.260286,
+      9.900102
+    ],
+    "LM_LeftHingeAxis": [
+      71.178238,
+      0.260286,
+      10.900102
+    ],
+    "LM_LeftTemplePivot": [
+      71.178238,
+      0.260286,
+      9.900102
+    ],
+    "LM_RightTempleRoot": [
+      -71.217599,
+      0.31645,
+      9.900152
+    ],
+    "LM_RightTempleTip": [
+      -71.163377,
+      89.223291,
+      -10.984899
+    ],
+    "LM_RightHinge": [
+      -71.217599,
+      0.31645,
+      9.900152
+    ],
+    "LM_RightHingeAxis": [
+      -71.217599,
+      0.31645,
+      10.900152
+    ],
+    "LM_RightTemplePivot": [
+      -71.217599,
+      0.31645,
+      9.900152
+    ]
+  },
+  "coordinate_system": {
+    "x": "left_right; positive is Left",
+    "y": "front_back",
+    "z": "up_down",
+    "units": "mm"
+  },
+  "derivation": "Optical landmarks use named lens bounds. Hinge pivots use temple roots because source hinge landmarks are absent."
+}

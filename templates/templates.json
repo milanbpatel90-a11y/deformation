@@ -1,0 +1,234 @@
+{
+  "geometric_metal": {
+    "name": "geometric_metal",
+    "style": "metal",
+    "glb_path": "C:\\Users\\Petpooja-607\\Desktop\\defirmation\\templates\\geometric_metal.glb",
+    "bridge_width_mm": 16.0,
+    "temple_length_mm": 135.0,
+    "nose_bridge_landmark": 6,
+    "left_hinge_landmark": 234,
+    "right_hinge_landmark": 454,
+    "ffd_grid_dims": [
+      4,
+      4,
+      4
+    ],
+    "lens_edge_vertices": [
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15
+    ],
+    "rim_pull_strength": 0.65,
+    "fallback_glb": "geometric_metal.glb",
+    "created_at": "2026-09-27T16:00:27.654164",
+    "last_calibrated": null
+  },
+  "plastic_tortoise": {
+    "name": "plastic_tortoise",
+    "style": "plastic",
+    "glb_path": "C:\\Users\\Petpooja-607\\Desktop\\defirmation\\templates\\plastic_tortoise.glb",
+    "bridge_width_mm": 16.13,
+    "temple_length_mm": 135.0,
+    "nose_bridge_landmark": 6,
+    "left_hinge_landmark": 234,
+    "right_hinge_landmark": 454,
+    "ffd_grid_dims": [
+      4,
+      4,
+      4
+    ],
+    "lens_edge_vertices": [
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15
+    ],
+    "rim_pull_strength": 0.65,
+    "fallback_glb": "geometric_metal.glb",
+    "created_at": "2026-09-27T16:01:19.220500",
+    "last_calibrated": null
+  },
+  "acetate_black": {
+    "name": "acetate_black",
+    "style": "acetate",
+    "glb_path": "C:\\Users\\Petpooja-607\\Desktop\\defirmation\\templates\\acetate_black.glb",
+    "bridge_width_mm": 15.47,
+    "temple_length_mm": 135.0,
+    "nose_bridge_landmark": 6,
+    "left_hinge_landmark": 234,
+    "right_hinge_landmark": 454,
+    "ffd_grid_dims": [
+      4,
+      4,
+      4
+    ],
+    "lens_edge_vertices": [
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15
+    ],
+    "rim_pull_strength": 0.65,
+    "fallback_glb": "geometric_metal.glb",
+    "created_at": "2026-09-27T16:01:19.233061",
+    "last_calibrated": null
+  },
+  "cat_eye_gold": {
+    "name": "cat_eye_gold",
+    "style": "cat_eye",
+    "glb_path": "C:\\Users\\Petpooja-607\\Desktop\\defirmation\\templates\\cat_eye_gold.glb",
+    "bridge_width_mm": 15.98,
+    "temple_length_mm": 135.0,
+    "nose_bridge_landmark": 6,
+    "left_hinge_landmark": 234,
+    "right_hinge_landmark": 454,
+    "ffd_grid_dims": [
+      4,
+      4,
+      4
+    ],
+    "lens_edge_vertices": [
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15
+    ],
+    "rim_pull_strength": 0.65,
+    "fallback_glb": "geometric_metal.glb",
+    "created_at": "2026-09-27T16:01:19.250888",
+    "last_calibrated": null
+  },
+  "clubmaster_brown": {
+    "name": "clubmaster_brown",
+    "style": "browline",
+    "glb_path": "C:\\Users\\Petpooja-607\\Desktop\\defirmation\\templates\\clubmaster_brown.glb",
+    "bridge_width_mm": 15.97,
+    "temple_length_mm": 135.0,
+    "nose_bridge_landmark": 6,
+    "left_hinge_landmark": 234,
+    "right_hinge_landmark": 454,
+    "ffd_grid_dims": [
+      4,
+      4,
+      4
+    ],
+    "lens_edge_vertices": [
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15
+    ],
+    "rim_pull_strength": 0.65,
+    "fallback_glb": "geometric_metal.glb",
+    "created_at": "2026-09-27T16:01:19.250888",
+    "last_calibrated": null
+  },
+  "oversized_clear": {
+    "name": "oversized_clear",
+    "style": "geometric",
+    "glb_path": "C:\\Users\\Petpooja-607\\Desktop\\defirmation\\templates\\oversized_clear.glb",
+    "bridge_width_mm": 16.51,
+    "temple_length_mm": 135.0,
+    "nose_bridge_landmark": 6,
+    "left_hinge_landmark": 234,
+    "right_hinge_landmark": 454,
+    "ffd_grid_dims": [
+      4,
+      4,
+      4
+    ],
+    "lens_edge_vertices": [
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15
+    ],
+    "rim_pull_strength": 0.65,
+    "fallback_glb": "geometric_metal.glb",
+    "created_at": "2026-09-27T16:01:19.265709",
+    "last_calibrated": null
+  },
+  "browline_metal": {
+    "name": "browline_metal",
+    "style": "browline",
+    "glb_path": "C:\\Users\\Petpooja-607\\Desktop\\defirmation\\templates\\browline_metal.glb",
+    "bridge_width_mm": 15.71,
+    "temple_length_mm": 135.0,
+    "nose_bridge_landmark": 6,
+    "left_hinge_landmark": 234,
+    "right_hinge_landmark": 454,
+    "ffd_grid_dims": [
+      4,
+      4,
+      4
+    ],
+    "lens_edge_vertices": [
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15
+    ],
+    "rim_pull_strength": 0.65,
+    "fallback_glb": "geometric_metal.glb",
+    "created_at": "2026-09-27T16:01:19.265709",
+    "last_calibrated": null
+  },
+  "rimless_titanium": {
+    "name": "rimless_titanium",
+    "style": "rimless",
+    "glb_path": "C:\\Users\\Petpooja-607\\Desktop\\defirmation\\templates\\rimless_titanium.glb",
+    "bridge_width_mm": 16.1,
+    "temple_length_mm": 135.0,
+    "nose_bridge_landmark": 6,
+    "left_hinge_landmark": 234,
+    "right_hinge_landmark": 454,
+    "ffd_grid_dims": [
+      4,
+      4,
+      4
+    ],
+    "lens_edge_vertices": [
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15
+    ],
+    "rim_pull_strength": 0.65,
+    "fallback_glb": "geometric_metal.glb",
+    "created_at": "2026-09-27T16:01:19.281665",
+    "last_calibrated": null
+  }
+}

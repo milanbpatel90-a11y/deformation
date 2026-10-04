@@ -1,0 +1,43 @@
+{
+  "template_id": "SG_002",
+  "display_name": "Sunglasses (Model 2)",
+  "template_version": "1.0.0",
+  "shape": "geometric",
+  "material": "plastic",
+  "frame_family": "geometric",
+  "rim_type": "full_rim",
+  "bridge_type": "saddle",
+  "parts": [
+    "Frame",
+    "LeftLens",
+    "RightLens",
+    "LeftTemple",
+    "RightTemple"
+  ],
+  "tags": [
+    "sg_002",
+    "geometric",
+    "plastic"
+  ],
+  "description": "Imported and annotated from sun_glasses (1).3dm; see source_objects.json and scale_config.json for classification assumptions.",
+  "dimensions": {
+    "frame_width": 139.264534,
+    "lens_width": 34.597712,
+    "lens_height": 27.019166,
+    "bridge_width": 23.2,
+    "temple_length": 130.406161,
+    "rim_thickness": 1.2
+  },
+  "source_file": "source/sun_glasses (1).3dm",
+  "source_model_units": "mm",
+  "source_geometry_scale": 0.033188872601732505,
+  "landmark_method": "Lens bounds and temple end vertex clusters in PCA-aligned canonical eyewear coordinates.",
+  "lens_geometry_method": "generated elliptical optical placeholders; source has no separately identifiable lens shells",
+  "geometry_object_names": [
+    "Frame",
+    "LeftLens",
+    "RightLens",
+    "LeftTemple",
+    "RightTemple"
+  ]
+}
