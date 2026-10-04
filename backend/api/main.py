@@ -31,7 +31,7 @@ from backend.template_library.compatibility import (
 app = FastAPI(
     title="Defirmation API",
     description="Template deformation pipeline for eyewear virtual try-on",
-    version="1.0.0",
+    version="1.2.0",
 )
 
 app.add_middleware(
@@ -111,7 +111,7 @@ def ready():
 def root():
     return {
         "service": "defirmation",
-        "version": "1.0.0",
+        "version": "1.2.0",
         "endpoints": {
             "deform_from_images": "POST /api/deform",
             "deform_from_multi_view": "POST /api/deform/multi-view",
