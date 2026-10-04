@@ -9,6 +9,7 @@ from pathlib import Path
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
+from pydantic import BaseModel
 from fastapi.staticfiles import StaticFiles
 
 from backend.models import FrameMaterial, FrameShape, Measurements
@@ -16,6 +17,9 @@ from backend.pipeline import DeformationPipeline
 from backend.template_library.loader import TemplateLibrary
 from backend.api import rim_detection_routes
 from backend.api.jobs import router as jobs_router
+from backend.logging_config import configure_logging
+
+configure_logging()
 
 RUNTIME_DIR = Path("/app/runtime") if Path("/app/runtime").exists() else Path("runtime")
 RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
@@ -46,6 +50,58 @@ if viewer_dir.exists():
 app.include_router(rim_detection_routes.router)
 app.include_router(jobs_router)
 app.mount("/runtime", StaticFiles(directory=str(RUNTIME_DIR)), name="runtime")
+
+class ModelAdjustRequest(BaseModel):
+    frame_width: float | None = None
+    bridge_width: float | None = None
+    lens_width: float | None = None
+    lens_height: float | None = None
+    temple_length: float | None = None
+    rim_thickness: float | None = None
+    temple_curve_angle: float | None = None
+    template: str | None = None
+    color: str | None = None
+
+
+@app.get("/healthz")
+def healthz():
+    return {"status": "ok", "runtime": str(RUNTIME_DIR)}
+
+
+@app.post("/api/models/{model_id}/adjust")
+def adjust_model(model_id: str, request: ModelAdjustRequest):
+    """Re-run the real deformation pipeline from persisted job measurements."""
+    import json
+
+    job_dir = RUNTIME_DIR / "jobs" / model_id
+    measurements_path = job_dir / "measurements.json"
+    if not measurements_path.exists():
+        raise HTTPException(status_code=404, detail="Model job or measurements not found")
+
+    try:
+        data = json.loads(measurements_path.read_text(encoding="utf-8"))
+        measurements = Measurements.model_validate(data)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Invalid persisted measurements: {exc}") from exc
+
+    updates = request.model_dump(exclude_none=True)
+    template = updates.pop("template", None)
+    for field, value in updates.items():
+        setattr(measurements, field, value)
+
+    output = job_dir / "glasses_adjusted.glb"
+    try:
+        result = pipeline.run_from_measurements(measurements, output, template)
+    except (ValueError, KeyError, FileNotFoundError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return {
+        "model_id": model_id,
+        "glb_url": f"/runtime/jobs/{model_id}/{output.name}",
+        "output_glb": str(output),
+        "measurements": result["measurements"],
+        "template": result["template"],
+    }
 
 
 @app.get("/")
