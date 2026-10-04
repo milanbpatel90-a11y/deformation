@@ -1,0 +1,8 @@
+{
+  "version": 1,
+  "units": "mm",
+  "metrics": {
+    "overall": {}
+  },
+  "note": "Populate from a real ground-truth benchmark run; never fabricate baseline metrics."
+}
