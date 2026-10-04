@@ -97,7 +97,8 @@ def _field_metrics(rows: list[Mapping[str, object]], field: str) -> FieldMetrics
     mae = sum(absolute) / count
     median_ae = median(absolute)
     ordered = sorted(absolute)
-    import math\n    rank = max(0, min(count - 1, math.ceil(0.90 * count) - 1))
+    import math
+    rank = max(0, min(count - 1, math.ceil(0.90 * count) - 1))
     p90_ae = ordered[rank]
     max_ae = max(absolute)
     mean_gt = sum(gt) / count
