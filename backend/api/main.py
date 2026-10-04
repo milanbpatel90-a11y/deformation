@@ -9,6 +9,7 @@ import re
 import json
 from pydantic import ValidationError
 from backend.api.safety import read_image, run_job
+from backend.video_pipeline import VideoTo3DPipeline
 
 logger = logging.getLogger(__name__)
 from pathlib import Path
@@ -46,6 +47,7 @@ OUTPUT_DIR = OUTPUT_ROOT / ("production" if PRODUCTION_MODE else "development")
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 pipeline = DeformationPipeline()
+video_pipeline = VideoTo3DPipeline(pipeline=pipeline)
 library = TemplateLibrary()
 
 viewer_dir = Path(__file__).resolve().parents[2] / "viewer"
@@ -113,6 +115,7 @@ def root():
         "endpoints": {
             "deform_from_images": "POST /api/deform",
             "deform_from_multi_view": "POST /api/deform/multi-view",
+            "deform_from_video": "POST /api/deform/video",
             "deform_from_measurements": "POST /api/deform/measurements",
             "templates": "GET /api/templates",
             "download": "GET /api/output/{filename}",
@@ -311,6 +314,61 @@ async def deform_from_multiple_images(
     except Exception as exc:
         logger.exception("Deformation job %s failed", job_id)
         raise HTTPException(500, "Deformation failed. Check server logs with job ID " + job_id) from exc
+    finally:
+        import shutil as _shutil
+        _shutil.rmtree(work_dir, ignore_errors=True)
+
+
+@app.post("/api/deform/video")
+async def deform_from_video(
+    video: UploadFile = File(..., description="Controlled 360-degree eyewear video"),
+    color: str = Form("#d9a7a2"),
+    template: str | None = Form(None),
+    reference_width_mm: float | None = Form(None),
+):
+    """Generate a calibrated, template-deformed GLB from a controlled 360-degree video."""
+    job_id = uuid.uuid4().hex
+    work_dir = OUTPUT_DIR / f"_upload_video_{job_id}"
+    work_dir.mkdir(parents=True, exist_ok=True)
+    max_video_bytes = 200 * 1024 * 1024
+
+    try:
+        validate_template(template)
+        if not video.filename:
+            raise HTTPException(400, "No video file supplied")
+        suffix = Path(video.filename).suffix.lower()
+        if suffix not in {".mp4", ".mov", ".m4v", ".avi", ".webm"}:
+            raise HTTPException(400, "Unsupported video format. Use MP4, MOV, M4V, AVI, or WebM.")
+        contents = await video.read(max_video_bytes + 1)
+        if len(contents) > max_video_bytes:
+            raise HTTPException(413, "Video exceeds 200 MiB")
+        if not contents:
+            raise HTTPException(400, "Video upload is empty")
+
+        video_path = work_dir / f"input{suffix}"
+        video_path.write_bytes(contents)
+        out_path = OUTPUT_DIR / f"{job_id}.glb"
+
+        result = await run_job(
+            video_pipeline.process,
+            video_path,
+            out_path,
+            color=color,
+            template_override=template,
+            reference_width_mm=reference_width_mm,
+        )
+        result["job_id"] = job_id
+        result["download_url"] = f"/api/output/{job_id}.glb"
+        result["video_metadata_url"] = f"/api/output/{job_id}.video.json"
+        return result
+    except HTTPException:
+        raise
+    except ValueError as exc:
+        logger.info("Rejected video deformation job %s: %s", job_id, exc)
+        raise HTTPException(422, "Video input or calibration is unsuitable for production deformation") from exc
+    except Exception as exc:
+        logger.exception("Video deformation job %s failed", job_id)
+        raise HTTPException(500, "Video deformation failed. Check server logs with job ID " + job_id) from exc
     finally:
         import shutil as _shutil
         _shutil.rmtree(work_dir, ignore_errors=True)
