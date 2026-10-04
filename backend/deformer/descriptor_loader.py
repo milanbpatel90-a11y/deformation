@@ -310,7 +310,16 @@ class DescriptorLoader:
             if not isinstance(node_name, str):
                 raise ValueError(f"Empty '{role}' must name a scene node")
             if node_name not in nodes:
-                raise ValueError(f"Descriptor empty '{role}' references missing scene node '{node_name}'")
+                # Not every declared empty is load-bearing (e.g. temple-tip markers
+                # aren't consumed anywhere yet). Hinge/bridge loaders already fall
+                # back to geometric inference when their anchor is absent here, so
+                # skip-and-warn instead of failing the whole deformation.
+                import warnings
+                warnings.warn(
+                    f"Descriptor empty '{role}' references missing scene node "
+                    f"'{node_name}' — skipping, will fall back to geometric inference."
+                )
+                continue
             transform, _ = scene.graph.get(node_name)
             anchors[node_name] = np.asarray(transform[:3, 3], dtype=np.float64)
         return anchors

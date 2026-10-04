@@ -13,6 +13,16 @@
     "left_rim": "LeftRim",
     "right_rim": "RightRim"
   },
+  "mesh_aliases": {
+    "Frame": "Object_2",
+    "Bridge": "Object_2",
+    "LeftRim": "Object_2",
+    "RightRim": "Object_2",
+    "LeftLens": "Object_3",
+    "RightLens": "Object_4",
+    "LeftTemple": "Object_5",
+    "RightTemple": "Object_1"
+  },
   "empties": {
     "bridge": "Bridge_Center",
     "left_hinge": "Left_Hinge",
