@@ -310,7 +310,12 @@ class DescriptorLoader:
             if not isinstance(node_name, str):
                 raise ValueError(f"Empty '{role}' must name a scene node")
             if node_name not in nodes:
-                raise ValueError(f"Descriptor empty '{role}' references missing scene node '{node_name}'")
+                import warnings
+                warnings.warn(
+                    f"Descriptor empty '{role}' references missing scene node "
+                    f"'{node_name}' — skipping, will fall back to geometric inference."
+                )
+                continue
             transform, _ = scene.graph.get(node_name)
             anchors[node_name] = np.asarray(transform[:3, 3], dtype=np.float64)
         return anchors
