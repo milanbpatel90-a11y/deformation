@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import uuid
+import uuid\nimport os
 from pathlib import Path
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
@@ -23,7 +23,7 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[o.strip() for o in os.getenv("CORS_ORIGINS", "*").split(",") if o.strip()],
     allow_methods=["*"],
     allow_headers=["*"],
 )
