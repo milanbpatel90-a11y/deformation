@@ -57,7 +57,7 @@ class GlassesSegmenter:
             names = getattr(model, "names", {}) or {}
             if not isinstance(names, dict):
                 names = dict(enumerate(names))
-            expected = os.environ.get("DEFIRM_EXPECTED_CLASSES")
+            expected = os.environ.get("DEFIRM_EXPECTED_CLASSES", "1")
             if expected:
                 expected_n = int(expected)
                 if len(names) != expected_n:
