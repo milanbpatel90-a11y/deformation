@@ -1,5 +1,69 @@
 {
   "version": 1,
   "units": "mm",
-  "samples": []
+  "samples": [
+    {
+      "id": "synthetic_001",
+      "image": "../images/train/synth_0001_metal.jpg",
+      "archetype": "geometric",
+      "source": "synthetic_seed",
+      "measured_by": "fixture",
+      "ground_truth": {
+        "frame_width": 140,
+        "bridge_width": 18,
+        "lens_width": 50,
+        "lens_height": 40,
+        "temple_length": 140
+      },
+      "tolerance": {
+        "frame_width": 5,
+        "bridge_width": 2,
+        "lens_width": 3,
+        "lens_height": 3,
+        "temple_length": 5
+      }
+    },
+    {
+      "id": "synthetic_002",
+      "image": "../images/train/synth_0007_plastic.jpg",
+      "archetype": "wayfarer",
+      "source": "synthetic_seed",
+      "measured_by": "fixture",
+      "ground_truth": {
+        "frame_width": 140,
+        "bridge_width": 18,
+        "lens_width": 50,
+        "lens_height": 40,
+        "temple_length": 140
+      },
+      "tolerance": {
+        "frame_width": 5,
+        "bridge_width": 2,
+        "lens_width": 3,
+        "lens_height": 3,
+        "temple_length": 5
+      }
+    },
+    {
+      "id": "synthetic_003",
+      "image": "../images/train/synth_0008_cat_eye.jpg",
+      "archetype": "cat_eye",
+      "source": "synthetic_seed",
+      "measured_by": "fixture",
+      "ground_truth": {
+        "frame_width": 140,
+        "bridge_width": 18,
+        "lens_width": 50,
+        "lens_height": 40,
+        "temple_length": 140
+      },
+      "tolerance": {
+        "frame_width": 5,
+        "bridge_width": 2,
+        "lens_width": 3,
+        "lens_height": 3,
+        "temple_length": 5
+      }
+    }
+  ]
 }
