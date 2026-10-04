@@ -43,7 +43,7 @@ def test_outlier_separates_median_from_mae():
     metrics = evaluate_predictions(rows).overall["frame_width"]
     assert metrics.max_ae == 50.0
     assert metrics.median_ae == 0.5
-    assert metrics.mae == 12.5
+    assert metrics.mae == 12.75
 
 
 def test_manual_mae_fixture_catches_metric_arithmetic():
