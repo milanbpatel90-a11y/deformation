@@ -19,6 +19,7 @@ from typing import Any
 
 import numpy as np
 import trimesh
+from scipy.spatial import cKDTree
 
 from backend.deformer.base_deformer import BaseDeformer
 from backend.deformer.deformation_context import DeformationContext
@@ -201,21 +202,11 @@ class SymmetrySolver(BaseDeformer):
     @staticmethod
     def _nearest_distances(source: np.ndarray, target: np.ndarray) -> np.ndarray:
         """Return the distance from each source point to its nearest target."""
-        # For meshes of typical size (< 50 k vertices) this brute-force
-        # approach is fast enough and avoids a KD-tree dependency.
         if len(source) == 0 or len(target) == 0:
             return np.zeros(len(source), dtype=np.float64)
-
-        # Chunk to avoid O(N²) memory for very large meshes.
-        chunk = 512
-        errors = np.empty(len(source), dtype=np.float64)
-        for start in range(0, len(source), chunk):
-            end = min(start + chunk, len(source))
-            diff = source[start:end, None, :] - target[None, :, :]  # (C, M, 3)
-            dist = np.linalg.norm(diff, axis=-1)                    # (C, M)
-            errors[start:end] = dist.min(axis=1)
-
-        return errors
+        tree = cKDTree(target)
+        dists, _ = tree.query(source)
+        return dists
 
     # ------------------------------------------------------------------
     # Step 3+4 — compute and apply local correction
@@ -254,30 +245,18 @@ class SymmetrySolver(BaseDeformer):
         if len(over_threshold) == 0:
             return displacements
 
-        for idx in over_threshold:
-            v = vertices[idx]
-            error = float(errors[idx])
-
-            # Find nearest reference point
-            diff = mirrored_ref - v
-            dists = np.linalg.norm(diff, axis=1)
-            nearest_idx = int(np.argmin(dists))
-            nearest_ref = mirrored_ref[nearest_idx]
-
-            # Direction and correction magnitude
-            direction = nearest_ref - v
-            dist = float(np.linalg.norm(direction))
-            if dist < 1e-9:
-                continue
-
-            # Correct only the excess beyond the threshold
-            excess = error - self.threshold_mm
-            correction_magnitude = excess * 0.5  # move halfway
-
-            # Spatial falloff: contribution decays with distance from neighbours
-            falloff_weight = self._spatial_falloff(vertices, idx)
-
-            displacements[idx] = (direction / dist) * correction_magnitude * falloff_weight
+        tree = cKDTree(mirrored_ref)
+        query_points = vertices[over_threshold]
+        dists, nearest_idx = tree.query(query_points)
+        directions = mirrored_ref[nearest_idx] - query_points
+        valid = dists >= 1e-9
+        excess = errors[over_threshold] - self.threshold_mm
+        correction_magnitude = excess * 0.5
+        safe_dists = np.where(valid, dists, 1.0)
+        unit_directions = directions / safe_dists[:, None]
+        displacements[over_threshold] = unit_directions * np.where(
+            valid, correction_magnitude, 0.0
+        )[:, None]
 
         return displacements
 
