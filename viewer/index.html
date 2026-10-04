@@ -140,6 +140,14 @@
       <div class="placeholder" id="ph-top">Click to choose</div>
     </div>
 
+    <div class="img-card" id="card-video" onclick="document.getElementById('input-video').click()">
+      <input type="file" id="input-video" accept="video/mp4,video/quicktime,video/webm,video/x-m4v,video/x-msvideo" />
+      <div class="label">360° Glasses Video <span class="badge required">recommended</span></div>
+      <video class="preview" id="prev-video" muted playsinline controls></video>
+      <div class="placeholder" id="ph-video">Upload one full rotation video</div>
+      <div id="video-info" style="font-size:10px;color:#888;margin-top:5px;"></div>
+    </div>
+
     <div class="img-card" id="card-multi" onclick="document.getElementById('input-multi').click()">
       <input type="file" id="input-multi" accept="image/*" multiple />
       <div class="label">Multi-View (4-6 images) <span class="badge optional">multi-fusion</span></div>
@@ -151,6 +159,9 @@
   <!-- Options -->
   <div class="section">
     <div class="section-title">Options</div>
+    <div style="font-size:10px;color:#888;line-height:1.4;">Video capture: keep glasses centered, camera fixed, plain background, and rotate through a complete 360°. Add known frame width below when available.</div>
+    <label class="field">Known frame width (mm) <span style="color:#666;">optional</span></label>
+    <input type="text" id="reference-width" placeholder="e.g. 140" />
     <label class="field">Frame colour</label>
     <input type="color" id="color-pick" value="#d9a7a2" />
     <label class="field">Template</label>
@@ -310,6 +321,21 @@ wirePreview('input-side',  'prev-side',  'ph-side', 'card-side');
 wirePreview('input-top',   'prev-top',   'ph-top', 'card-top');
 
 // Wire up multi-view selection
+const inputVideo = document.getElementById('input-video');
+const videoPreview = document.getElementById('prev-video');
+const videoInfo = document.getElementById('video-info');
+
+inputVideo.addEventListener('change', (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  if (videoPreview.src && videoPreview.src.startsWith('blob:')) URL.revokeObjectURL(videoPreview.src);
+  videoPreview.src = URL.createObjectURL(file);
+  videoPreview.style.display = 'block';
+  document.getElementById('ph-video').style.display = 'none';
+  videoInfo.textContent = file.name + ' · ' + (file.size / 1048576).toFixed(1) + ' MB';
+  updateGenerateBtn();
+});
+
 const inputMulti = document.getElementById('input-multi');
 const multiPreviewList = document.getElementById('multi-preview-list');
 
@@ -340,7 +366,8 @@ inputMulti.addEventListener('change', (e) => {
 function updateGenerateBtn() {
   const hasFront = document.getElementById('input-front').files.length > 0;
   const hasMulti = document.getElementById('input-multi').files.length > 0;
-  document.getElementById('generate-btn').disabled = !(hasFront || hasMulti);
+  const hasVideo = document.getElementById('input-video').files.length > 0;
+  document.getElementById('generate-btn').disabled = !(hasFront || hasMulti || hasVideo);
 }
 
 // ── Pipeline stages renderer ──────────────────────────────────────────────────
@@ -390,7 +417,8 @@ const downloadBtn = document.getElementById('download-btn');
 document.getElementById('generate-btn').addEventListener('click', async () => {
   const frontFile = document.getElementById('input-front').files[0];
   const multiFiles = document.getElementById('input-multi').files;
-  if (!frontFile && (!multiFiles || multiFiles.length === 0)) return;
+  const videoFile = document.getElementById('input-video').files[0];
+  if (!frontFile && (!multiFiles || multiFiles.length === 0) && !videoFile) return;
 
   const btn = document.getElementById('generate-btn');
   btn.disabled = true;
@@ -404,7 +432,12 @@ document.getElementById('generate-btn').addEventListener('click', async () => {
   const API_BASE = 'http://localhost:8000';
   let endpoint = `${API_BASE}/api/deform`;
 
-  if (multiFiles && multiFiles.length > 0) {
+  if (videoFile) {
+    endpoint = `${API_BASE}/api/deform/video`;
+    form.append('video', videoFile);
+    const referenceWidth = document.getElementById('reference-width').value.trim();
+    if (referenceWidth) form.append('reference_width_mm', referenceWidth);
+  } else if (multiFiles && multiFiles.length > 0) {
     endpoint = `${API_BASE}/api/deform/multi-view`;
     for (let file of multiFiles) {
       form.append('images', file);
@@ -432,10 +465,12 @@ document.getElementById('generate-btn').addEventListener('click', async () => {
     }
 
     const m = data.measurements || {};
+    const videoConfidence = data.video_confidence ? `\nVideo confidence: ${data.video_confidence.level} (${data.video_confidence.score})` : '';
     statusBox.textContent =
       `✓ Done  ·  Template: ${data.template}\n` +
       `Frame ${m.frame_width}mm  ·  Lens ${m.lens_width}×${m.lens_height}mm\n` +
-      `Bridge ${m.bridge_width}mm  ·  Temple ${m.temple_length}mm  ·  Rim ${m.rim_thickness}mm`;
+      `Bridge ${m.bridge_width}mm  ·  Temple ${m.temple_length}mm  ·  Rim ${m.rim_thickness}mm` +
+      videoConfidence;
 
     renderPipelineStages(data.pipeline);
 
