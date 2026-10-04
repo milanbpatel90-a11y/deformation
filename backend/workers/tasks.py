@@ -14,7 +14,7 @@ def _upload(path:Path,job_id:str)->str:
         key=f"models/{job_id}/{path.name}"
         client.upload_file(str(path),bucket,key,ExtraArgs={"ContentType":"model/gltf-binary"})
         return os.getenv("S3_PUBLIC_BASE",f"https://{bucket}.s3.amazonaws.com")+"/"+key
-    return f"/runtime/{job_id}/{path.name}"
+    return f"/runtime/jobs/{job_id}/{path.name}"
 
 @celery_app.task(bind=True)
 def process_job(self,job_id:str,inputs:list[str],is_video:bool):
