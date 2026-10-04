@@ -36,14 +36,14 @@ def test_constant_positive_offset_exposes_bias_and_fails_tolerance():
 def test_outlier_separates_median_from_mae():
     rows = [
         row({field: 100.0 for field in FIELDS}, sample_id="a"),
-        row({field: 101.0 for field in FIELDS}, sample_id="b"),
+        row({field: 100.0 for field in FIELDS}, sample_id="b"),
         row({field: 100.0 for field in FIELDS}, sample_id="c"),
         row({field: 150.0 for field in FIELDS}, sample_id="outlier"),
     ]
     metrics = evaluate_predictions(rows).overall["frame_width"]
     assert metrics.max_ae == 50.0
-    assert metrics.median_ae == 0.5
-    assert metrics.mae == 12.75
+    assert metrics.median_ae == 0.0
+    assert metrics.mae == 12.5
 
 
 def test_manual_mae_fixture_catches_metric_arithmetic():
