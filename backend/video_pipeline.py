@@ -128,7 +128,7 @@ class VideoTo3DPipeline:
             "sampled_frames": len(observations),
             "selected_frames": [x["frame_index"] for x in selected],
             "selected_timestamps_seconds": [x["timestamp_seconds"] for x in selected],
-            "view_coverage_degrees": round(360.0 * len(observations) / max(total, 1), 2),
+            "sampling_coverage": round(len(observations) / max(len(indices), 1), 3),
             "capture_mode": "video_assisted_template_deformation",
             "confidence": self._confidence(selected, observations),
             "measurements": model.model_dump(),
