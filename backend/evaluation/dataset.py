@@ -116,3 +116,69 @@ def _strict_measurement_map(value: Any, label: str) -> dict[str, float]:
             raise DatasetValidationError(f"{label}.{field} must be numeric")
         result[field] = float(raw)
     return result
+
+
+def load_csv(path: str | Path) -> GroundTruthDataset:
+    """Load strict bulk-entry CSV using one explicit units column per row."""
+    import csv
+
+    path = Path(path)
+    try:
+        with path.open("r", encoding="utf-8", newline="") as handle:
+            reader = csv.DictReader(handle)
+            if reader.fieldnames is None:
+                raise DatasetValidationError("CSV has no header")
+            required = {
+                "id", "image", "archetype", "source", "measured_by", "units",
+                *FIELDS,
+                *(f"{field}_tolerance" for field in FIELDS),
+            }
+            unknown = set(reader.fieldnames) - required
+            missing = required - set(reader.fieldnames)
+            if unknown:
+                raise DatasetValidationError(f"Unknown CSV fields: {sorted(unknown)}")
+            if missing:
+                raise DatasetValidationError(f"Missing CSV fields: {sorted(missing)}")
+            samples = []
+            for index, row in enumerate(reader, start=2):
+                if row.get("units") != "mm":
+                    raise DatasetValidationError(f"CSV row {index} units must be exactly 'mm'")
+                gt = _strict_csv_measurement_map(row, FIELDS, f"CSV row {index} measurements")
+                tolerance = _strict_csv_measurement_map(
+                    row, tuple(f"{field}_tolerance" for field in FIELDS), f"CSV row {index} tolerances"
+                )
+                tolerance = {field.removesuffix("_tolerance"): value for field, value in tolerance.items()}
+                samples.append({
+                    "id": row["id"],
+                    "image": row["image"],
+                    "archetype": row["archetype"],
+                    "source": row["source"],
+                    "measured_by": row["measured_by"],
+                    "ground_truth": gt,
+                    "tolerance": tolerance,
+                })
+    except FileNotFoundError as exc:
+        raise DatasetValidationError(f"CSV file not found: {path}") from exc
+
+    if not samples:
+        raise DatasetValidationError("Ground-truth CSV is empty")
+    payload = {"version": 1, "units": "mm", "samples": samples}
+    temp_path = path.with_suffix(".validated.json")
+    try:
+        temp_path.write_text(json.dumps(payload), encoding="utf-8")
+        return GroundTruthDataset.load(temp_path)
+    finally:
+        temp_path.unlink(missing_ok=True)
+
+
+def _strict_csv_measurement_map(row: dict[str, str], keys: tuple[str, ...], label: str) -> dict[str, float]:
+    result = {}
+    for key in keys:
+        raw = row.get(key)
+        if raw is None or raw == "":
+            raise DatasetValidationError(f"{label}.{key} is required")
+        try:
+            result[key] = float(raw)
+        except ValueError as exc:
+            raise DatasetValidationError(f"{label}.{key} must be numeric") from exc
+    return result
