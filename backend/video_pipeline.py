@@ -180,7 +180,9 @@ class VideoTo3DPipeline:
         total_frames: int,
     ) -> dict[str, Any] | None:
         masks = self.pipeline.segmenter.segment(frame)
-        mask = masks.get("front") or masks.get("full")
+        mask = masks.get("front")
+        if mask is None or int(mask.sum()) == 0:
+            mask = masks.get("full")
         if mask is None or int(mask.sum()) == 0:
             return None
 
@@ -310,8 +312,18 @@ class VideoTo3DPipeline:
         ]
         spread = float(np.std(widths) / max(np.mean(widths), 1e-6)) if widths else 1.0
         score = float(np.mean(scores)) if scores else 0.0
-        coverage = len({x["angular_bin"] for x in selected}) / max(1, max(x["angular_bin"] for x in selected) + 1)
-        confidence = max(0.0, min(1.0, score * (1.0 - min(1.0, spread * 5.0))))
+        coverage = len({x["angular_bin"] for x in selected}) / max(
+            1, self.coverage_bins
+        )
+        confidence = max(
+            0.0,
+            min(
+                1.0,
+                score
+                * (1.0 - min(1.0, spread * 5.0))
+                * coverage,
+            ),
+        )
         return {
             "score": round(confidence, 4),
             "level": "high" if confidence >= 0.80 else "medium" if confidence >= 0.60 else "low",
