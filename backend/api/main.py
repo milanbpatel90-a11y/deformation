@@ -436,7 +436,7 @@ async def deform_from_measurements(
 
 @app.get("/api/output/{filename}")
 def download_output(filename: str):
-    if not re.fullmatch(r"[A-Za-z0-9_-]+\.(?:glb|metadata\.json|manifest\.json)", filename):
+    if not re.fullmatch(r"[A-Za-z0-9_-]+\.(?:glb|metadata\.json|manifest\.json|video\.json)", filename):
         raise HTTPException(404, "File not found")
     path = (OUTPUT_DIR / filename).resolve()
     if path.parent != OUTPUT_DIR.resolve() or not path.is_file():
