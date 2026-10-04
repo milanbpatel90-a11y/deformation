@@ -1,6 +1,6 @@
 import numpy as np
 from backend.multiview.fuse_measurements import Measurement, fuse_measurements
-from backend.video.quality_gate import frame_score
+from backend.video.quality_gate import frame_score, is_acceptable
 
 def test_quality_gate_returns_bounded_score():
     frame=np.zeros((100,100,3),dtype=np.uint8)
@@ -12,3 +12,13 @@ def test_robust_multiview_fusion_rejects_large_outlier():
     out=fuse_measurements(ms)
     assert 138 < out["frame_width"] < 143
     assert out["overall_confidence"] > 0.8
+
+
+def test_quality_gate_rejects_uniform_blur():
+    frame = np.ones((100, 100, 3), dtype=np.uint8) * 80
+    assert not is_acceptable(frame)
+
+
+def test_quality_gate_rejects_glare():
+    frame = np.ones((100, 100, 3), dtype=np.uint8) * 255
+    assert not is_acceptable(frame)
