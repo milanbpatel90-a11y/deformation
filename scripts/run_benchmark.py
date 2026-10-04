@@ -11,7 +11,7 @@ import sys
 from pathlib import Path
 
 from backend.evaluation.benchmark import default_report_name, run_benchmark
-from backend.evaluation.dataset import GroundTruthDataset
+from backend.evaluation.dataset import GroundTruthDataset, load_csv
 from backend.evaluation.report import print_report, write_report
 from backend.pipeline import DeformationPipeline
 
@@ -27,7 +27,7 @@ def main() -> int:
     args = parser.parse_args()
 
     dataset_path = Path(args.dataset)
-    dataset = GroundTruthDataset.load(dataset_path)
+    dataset = load_csv(dataset_path) if dataset_path.suffix.lower() == ".csv" else GroundTruthDataset.load(dataset_path)
 
     def factory():
         return DeformationPipeline()
