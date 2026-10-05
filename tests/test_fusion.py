@@ -103,3 +103,20 @@ class TestFusionModules(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+    def test_robust_front_fusion_rejects_large_outlier(self) -> None:
+        fuser = MeasurementFuser()
+        def make(width):
+            return Measurements(
+                frame_width=width, lens_width=50.0, lens_height=40.0,
+                bridge_width=18.0, temple_length=140.0, rim_thickness=1.2,
+                material=FrameMaterial.METAL, shape=FrameShape.GEOMETRIC,
+                nose_pads=True, color="#000000",
+            )
+        fused = fuser.fuse([
+            ("front", make(140.0)),
+            ("front", make(141.0)),
+            ("front", make(220.0)),
+        ])
+        assert fused.frame_width <= 141.0

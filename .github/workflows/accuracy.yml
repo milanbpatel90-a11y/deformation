@@ -1,0 +1,39 @@
+name: Accuracy Benchmark
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'models/**'
+      - 'backend/segmentation/**'
+      - 'backend/measurement/**'
+      - 'backend/pipeline/**'
+
+jobs:
+  benchmark:
+    if: github.event_name == 'workflow_dispatch' || vars.RUN_ACCURACY == '1'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: System dependencies
+        run: sudo apt-get update && sudo apt-get install -y libgl1 libglib2.0-0 libgomp1
+      - name: Install
+        run: pip install -r requirements.txt
+      - name: Validate dataset and run benchmark
+        env:
+          PYTHONUNBUFFERED: '1'
+        run: >-
+          python scripts/run_benchmark.py
+          --dataset dataset/ground_truth/samples.json
+          --baseline dataset/ground_truth/baseline.json
+          --report reports/benchmark_${{ github.sha }}.json
+          --slack 0.25
+      - name: Upload benchmark report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: measurement-benchmark-${{ github.sha }}
+          path: reports/benchmark_${{ github.sha }}.json
