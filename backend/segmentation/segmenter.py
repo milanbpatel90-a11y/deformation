@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 from pathlib import Path
 
@@ -13,14 +14,27 @@ try:
 except ImportError:
     YOLO = None  # type: ignore[misc, assignment]
 
-# Candidate model paths searched in order. Override with DEFIRM_YOLO_MODEL env var.
+LOGGER = logging.getLogger(__name__)
+
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
 _MODEL_EXTENSIONS = {".pt", ".pth", ".onnx", ".engine", ".xml", ".mlpackage", ".tflite"}
+# Candidate model paths searched in order. Override with DEFIRM_YOLO_MODEL env var.
+#
+# models/best.pt is deliberately searched LAST. It currently holds a six-class
+# part model (eyewear_rim, eyewear_temple, bridge, left_lens, right_lens,
+# nose_pad) that returns zero detections on every image in test_images/. While
+# it was listed first it silently shadowed the trained one-class `eyewear`
+# weights under runs/segment/train/, so the pipeline received an empty mask and
+# the measurement stage quietly substituted default sizes. The one-class weights
+# are what this repo's own setup guide means by "cp
+# runs/segment/train/weights/best.pt models/best.pt", and a single foreground
+# class is what the measurement and view-classification stages expect.
 _CANDIDATE_PATHS = [
     os.environ.get("DEFIRM_YOLO_MODEL"),
     _PROJECT_ROOT / "models" / "glasses_seg.pt",
-    _PROJECT_ROOT / "models" / "best.pt",
     _PROJECT_ROOT / "runs" / "segment" / "train" / "weights" / "best.pt",
+    _PROJECT_ROOT / "runs" / "segment" / "runs" / "segment" / "eyewear_seg" / "weights" / "best.pt",
+    _PROJECT_ROOT / "models" / "best.pt",
 ]
 
 
@@ -40,12 +54,16 @@ class GlassesSegmenter:
 
     Stage: YOLO
     - Loads YOLOv8-seg model from DEFIRM_YOLO_MODEL env var or standard paths.
-    - Falls back to OpenCV threshold/contour when no model is found.
+    - Merges every detected class mask into one foreground mask, so a part model
+      still yields the single "eyewear" region the measurement stages expect.
+    - Falls back to OpenCV threshold/contour when no model is found, and also
+      when a model is present but detects nothing in the frame.
     """
 
     def __init__(self, model_path: str | Path | None = None):
         self._model = None
         self.model_type = "opencv_fallback"
+        self.class_count = 0
 
         if YOLO is None:
             return  # ultralytics not installed
@@ -54,16 +72,44 @@ class GlassesSegmenter:
         if resolved and resolved.is_file():
             self._model = YOLO(str(resolved))
             self.model_type = f"yolo:{resolved.name}"
+            names = getattr(self._model, "names", None) or {}
+            self.class_count = len(names)
+            if self.class_count > 1:
+                # Every class mask is still merged into one foreground mask, so
+                # a part model works -- it is just not what the measurement
+                # stages are tuned against, and some of them detect nothing.
+                LOGGER.warning(
+                    "Segmentation model %s has %d classes (%s); this pipeline expects a "
+                    "single foreground 'eyewear' class and merges all masks.",
+                    resolved.name, self.class_count, sorted(names.values())[:6],
+                )
+        else:
+            self.class_count = 0
 
     def segment(self, image: np.ndarray) -> dict[str, np.ndarray]:
         """
         Return binary masks + metadata for frame regions.
 
-        Keys: front, side, full, model_type
+        Keys: front, side, full, model_type, detections, fallback
         """
         if self._model is not None:
-            return self._segment_yolo(image)
-        return self._segment_opencv(image)
+            result = self._segment_yolo(image)
+            if result["detections"] > 0:
+                result["fallback"] = False
+                return result
+            # The model found nothing. A classical mask is strictly better than
+            # an empty one, because downstream code cannot tell "no glasses
+            # here" from "the model missed" and would substitute default sizes.
+            classical = self._segment_opencv(image)
+            if classical["detections"] > 0:
+                classical["model_type"] = f"{self.model_type}+opencv_fallback"
+                classical["fallback"] = True
+                return classical
+            result["fallback"] = False
+            return result
+        result = self._segment_opencv(image)
+        result["fallback"] = False
+        return result
 
     def _segment_yolo(self, image: np.ndarray) -> dict[str, np.ndarray]:
         results = self._model(image, verbose=False)

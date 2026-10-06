@@ -52,6 +52,29 @@
     }
     .img-card .placeholder { font-size: 11px; color: #666; text-align: center; padding: 12px 0; }
 
+    /* ── 360° orbit video card ── */
+    .img-card video.preview {
+      width: 100%; height: 70px; object-fit: contain; border-radius: 4px;
+      background: #12122a; display: none;
+    }
+    .img-card .hint { font-size: 11px; color: #8888aa; margin-top: 6px; line-height: 1.4; }
+    .img-card .hint.warn { color: #ffb86c; }
+    .img-card .hint.good { color: #50fa7b; }
+
+    /* ── Selected orbit views ── */
+    #orbit-report { display: none; }
+    #orbit-frames { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+    #orbit-frames figure { margin: 0; width: 62px; }
+    #orbit-frames img {
+      width: 62px; height: 46px; object-fit: cover; border-radius: 3px;
+      border: 1px solid #3a3a5a; background: #12122a; display: block;
+    }
+    #orbit-frames figcaption {
+      font-size: 8px; color: #8888aa; line-height: 1.25; margin-top: 2px;
+      word-break: break-word;
+    }
+    #orbit-frames a:hover img { border-color: #8be9fd; }
+
     /* ── Form inputs ── */
     label.field { display: block; font-size: 12px; color: #aaa; margin-bottom: 4px; font-weight: 500; }
     input[type=color] { width: 100%; height: 32px; border: none; border-radius: 4px; cursor: pointer; padding: 2px; background: #1e1e3a; }
@@ -147,6 +170,14 @@
       <div class="placeholder" id="ph-multi">Click to choose multiple files</div>
       <div id="multi-preview-list" style="display: flex; gap: 4px; flex-wrap: wrap; margin-top: 6px;"></div>
     </div>
+
+    <div class="img-card" id="card-video" onclick="document.getElementById('input-video').click()">
+      <input type="file" id="input-video" accept="video/*" />
+      <div class="label">360&deg; orbit video <span class="badge optional">8-12 s</span></div>
+      <video class="preview" id="prev-video" muted playsinline preload="metadata"></video>
+      <div class="placeholder" id="ph-video">Click to choose a video</div>
+      <div class="hint" id="video-hint">Turn the glasses a full 360&deg; in even light. 18-24 views are chosen automatically.</div>
+    </div>
   </div>
 
   <form id="measurements-form" class="section">
@@ -186,6 +217,16 @@
       <thead><tr><th>#</th><th>Stage</th><th>ms</th><th>Detail</th></tr></thead>
       <tbody id="stages-body"></tbody>
     </table>
+  </div>
+
+  <!-- Orbit video: which views were selected and how much they agreed -->
+  <div class="section" id="orbit-report">
+    <div class="section-title">Orbit views used</div>
+    <div id="orbit-summary" style="font-size:11px;color:#bbb;white-space:pre-wrap;line-height:1.5"></div>
+    <div id="orbit-fusion" style="font-size:11px;color:#888;white-space:pre-wrap;margin-top:6px;line-height:1.5"></div>
+    <div id="orbit-frames"></div>
+    <a id="orbit-grid-link" target="_blank" style="font-size:11px;color:#8be9fd;display:none;margin-top:6px">Open contact sheet ↗</a>
+    <a id="orbit-manifest-link" target="_blank" style="font-size:11px;color:#8be9fd;display:none;margin-top:6px">Open orbit manifest ↗</a>
   </div>
 
   <!-- Manual load -->
@@ -402,6 +443,169 @@ function updateGenerateBtn() {
   document.getElementById('generate-btn').disabled = isGenerating || isSuggesting || !templatesReady || !document.getElementById('measurements-form').checkValidity();
 }
 
+// ── 360° orbit video selection ────────────────────────────────────────────────
+const VIDEO_HINT_DEFAULT = 'Turn the glasses a full 360° in even light. 18-24 views are chosen automatically.';
+const inputVideo = document.getElementById('input-video');
+const videoPreview = document.getElementById('prev-video');
+const videoPlaceholder = document.getElementById('ph-video');
+const videoHint = document.getElementById('video-hint');
+let videoDuration = null;
+
+function resetVideoHint() {
+  videoHint.className = 'hint';
+  videoHint.textContent = VIDEO_HINT_DEFAULT;
+}
+
+inputVideo.addEventListener('change', (event) => {
+  const file = event.target.files && event.target.files[0];
+  videoDuration = null;
+  if (!file) {
+    videoPreview.style.display = 'none';
+    videoPreview.removeAttribute('src');
+    videoPlaceholder.style.display = 'block';
+    resetVideoHint();
+    updateGenerateBtn();
+    return;
+  }
+
+  videoPreview.src = URL.createObjectURL(file);
+  videoPreview.style.display = 'block';
+  videoPlaceholder.style.display = 'none';
+  videoHint.className = 'hint';
+  videoHint.textContent = `${file.name} · ${(file.size / 1048576).toFixed(1)} MB`;
+
+  // Client-side duration advice only; the server enforces the real limits.
+  videoPreview.onloadedmetadata = () => {
+    videoDuration = videoPreview.duration;
+    const size = `${file.name} · ${(file.size / 1048576).toFixed(1)} MB`;
+    if (!isFinite(videoDuration)) {
+      videoHint.className = 'hint';
+      videoHint.textContent = `${size} — duration unknown; the server will check it.`;
+    } else if (videoDuration < 2) {
+      videoHint.className = 'hint warn';
+      videoHint.textContent = `${videoDuration.toFixed(1)}s is too short to orbit — record 8-12 s.`;
+    } else if (videoDuration < 8 || videoDuration > 12) {
+      videoHint.className = 'hint warn';
+      videoHint.textContent = `${videoDuration.toFixed(1)}s · ${size.split(' · ')[1]} — 8-12 s gives the fullest coverage.`;
+    } else {
+      videoHint.className = 'hint good';
+      videoHint.textContent = `${videoDuration.toFixed(1)}s · ${size.split(' · ')[1]} — good.`;
+    }
+    updateGenerateBtn();
+  };
+  updateGenerateBtn();
+});
+
+function renderOrbitReport(video, apiBase, response) {
+  const wrap = document.getElementById('orbit-report');
+  const frames = document.getElementById('orbit-frames');
+  const gridLink = document.getElementById('orbit-grid-link');
+  frames.innerHTML = '';
+  if (!video) { wrap.style.display = 'none'; return; }
+
+  const decode = video.decode || {};
+  const selection = video.selection || {};
+  const views = video.view_distribution || {};
+  const confidence = video.confidence || {};
+  const timings = video.timings || {};
+  const scale = video.scale || {};
+  const viewText = Object.entries(views).map(([name, count]) => `${name} ×${count}`).join('  ·  ') || '—';
+
+  // Counts, confidence and the chosen template are the headline facts.
+  const lines = [
+    `Selected ${selection.selected_count || 0} of ${selection.candidates || 0} candidate views ` +
+      `(target ${selection.target_views || 0}, range ${selection.min_selected || 0}-${selection.max_selected || 0})`,
+    `Decoded ${decode.decoded_frames || 0} frames at ${(decode.sampled_fps || 0).toFixed(1)} fps ` +
+      `· ${selection.gated_out || 0} rejected by the quality gate ` +
+      `· ${selection.dropped_redundant || 0} duplicates removed`,
+    `Views: ${viewText}`,
+    `Template: ${(response && response.template) || '—'}   ·   ` +
+      `Angular spread: ${selection.occupied_sectors || 0}/${selection.total_sectors || 0} sectors, ` +
+      `span ${((selection.span_ratio || 0) * 100).toFixed(0)}% of clip`,
+  ];
+  if (video.unusable_frames && video.unusable_frames.length) {
+    lines.push(`${video.unusable_frames.length} candidate frame(s) failed the eyewear-visibility check`);
+  }
+  if (video.rear_available === false) {
+    lines.push('Rear views are not classified: the one-class mask carries no front/rear evidence');
+  }
+  if (confidence.level) {
+    lines.push(
+      `Confidence: ${String(confidence.level).toUpperCase()} (score ${confidence.score})  ·  ` +
+      `measurement consistency ${confidence.measurement_consistency}  ·  ` +
+      `quality consistency ${confidence.quality_consistency}`
+    );
+  }
+  if (confidence.notes && confidence.notes.length) {
+    lines.push(`Notes: ${confidence.notes.join('; ')}`);
+  }
+  lines.push(
+    `Scale: ${scale.source || 'extractor_default'} reference width ` +
+    `${scale.reference_width_mm || '—'} mm${scale.calibrated ? ' (calibrated)' : ' — image-space estimate'}`
+  );
+  if (timings.total_seconds) {
+    lines.push(`Runtime: ${timings.total_seconds}s total ` +
+      `(segmentation ${timings.segmentation_seconds || 0}s, decode ${timings.decode_seconds || 0}s)`);
+  }
+  document.getElementById('orbit-summary').textContent = lines.join('\n');
+
+  // MAD is the robust spread; showing it makes disagreement visible instead of
+  // hiding it behind a single averaged number.
+  const dimensions = (video.fusion || {}).dimensions || {};
+  document.getElementById('orbit-fusion').textContent = Object.entries(dimensions)
+    .map(([name, d]) => `${name} ${d.value}${d.unit === 'deg' ? '°' : 'mm'} ` +
+      `(±${(d.robust_sigma || 0).toFixed(2)}, ${d.kept}/${d.contributors} views` +
+      `${d.rejected && d.rejected.length ? `, ${d.rejected.length} outlier(s) removed` : ''}` +
+      `${d.source === 'derived' ? ', estimated' : ''})`)
+    .join('\n');
+
+  // Per-view metadata so each thumbnail can be identified and justified.
+  const perView = new Map((video.per_view || []).map(entry => [entry.frame_index, entry]));
+  const previews = video.previews || {};
+  (previews.frame_urls || []).forEach((href, index) => {
+    const link = document.createElement('a');
+    link.href = `${apiBase}${href}`;
+    link.target = '_blank';
+    link.rel = 'noopener';
+    const img = document.createElement('img');
+    img.src = `${apiBase}${href}`;
+    img.loading = 'lazy';
+    // Frame filenames are frame_<index>.jpg, so recover the sampled index.
+    const match = /frame_(\d+)\.jpg$/.exec(href);
+    const frameIndex = match ? Number(match[1]) : null;
+    const meta = frameIndex === null ? null : perView.get(frameIndex);
+    const caption = meta
+      ? `#${frameIndex} · ${meta.timestamp}s · ${meta.view} · q${meta.quality_score}`
+      : `view ${index + 1}`;
+    link.title = caption;
+    img.alt = caption;
+    const figure = document.createElement('figure');
+    const label = document.createElement('figcaption');
+    label.textContent = caption;
+    figure.appendChild(link);
+    figure.appendChild(label);
+    link.appendChild(img);
+    frames.appendChild(figure);
+  });
+
+  if (previews.grid_url) {
+    gridLink.href = `${apiBase}${previews.grid_url}`;
+    gridLink.style.display = 'inline-block';
+  } else {
+    gridLink.style.display = 'none';
+  }
+
+  const manifestLink = document.getElementById('orbit-manifest-link');
+  const manifestUrl = response && response.video_manifest_url;
+  if (manifestUrl) {
+    manifestLink.href = manifestUrl.startsWith('http') ? manifestUrl : `${apiBase}${manifestUrl}`;
+    manifestLink.style.display = 'inline-block';
+  } else {
+    manifestLink.style.display = 'none';
+  }
+  wrap.style.display = 'block';
+}
+
 let isGenerating = false;
 let templatesReady = false;
 let isSuggesting = false;
@@ -539,7 +743,13 @@ function renderPipelineStages(stages) {
     'GLB Export':           '📦',
     'Multi-View Classification and Extraction': '🖼️',
     'Template Scoring': '📋',
-    'Mesh Quality Optimization': '🧼'
+    'Mesh Quality Optimization': '🧼',
+    'Video Decode': '🎞️',
+    'Frame Quality Gate': '🧪',
+    'View Selection': '🎯',
+    'Segmentation and View Classification': '🔍',
+    'Per-View Measurement': '📐',
+    'Weighted Median + MAD Fusion': '⚖️'
   };
   stages.forEach((s, i) => {
     // Summarise detail as key: val pairs, skip large arrays
@@ -571,6 +781,7 @@ const downloadBtn = document.getElementById('download-btn');
 document.getElementById('generate-btn').addEventListener('click', async () => {
   const frontFile = document.getElementById('input-front').files[0];
   const multiFiles = document.getElementById('input-multi').files;
+  const videoFile = document.getElementById('input-video').files[0];
   const measurementForm = document.getElementById('measurements-form');
   if (!measurementForm.reportValidity()) return;
   const manual = Object.fromEntries(new FormData(measurementForm));
@@ -594,7 +805,12 @@ document.getElementById('generate-btn').addEventListener('click', async () => {
   const API_BASE = window.location.origin;
   let endpoint = `${API_BASE}/api/deform`;
 
-  if (multiFiles && multiFiles.length > 0) {
+  if (videoFile) {
+    // An orbit clip supersedes the still-image inputs: it feeds the same
+    // pipeline with many automatically selected views.
+    endpoint = `${API_BASE}/api/deform/video`;
+    form.append('video', videoFile);
+  } else if (multiFiles && multiFiles.length > 0) {
     endpoint = `${API_BASE}/api/deform/multi-view`;
     for (let file of multiFiles) {
       form.append('images', file);
@@ -607,10 +823,12 @@ document.getElementById('generate-btn').addEventListener('click', async () => {
     if (topFile) form.append('top', topFile);
   }
 
-  if (!frontFile && !multiFiles.length) {
+  if (!frontFile && !multiFiles.length && !videoFile) {
     endpoint = `${API_BASE}/api/deform/measurements`;
     for (const [key, value] of Object.entries(manual)) form.append(key, value);
   } else {
+    // The orbit endpoint takes manual measurements as an optional override; the
+    // fused estimate is used when they are supplied but the report keeps both.
     form.append('measurements', JSON.stringify(manual));
   }
   form.append('automatic_appearance', document.getElementById('auto-appearance').checked);
@@ -643,6 +861,7 @@ document.getElementById('generate-btn').addEventListener('click', async () => {
 
     renderPipelineStages(data.pipeline);
     if (data.quality?.warnings?.length) statusBox.textContent += '\n' + data.quality.warnings.join('\n');
+    renderOrbitReport(data.video, API_BASE, data);
 
     const fullDownloadUrl = data.download_url.startsWith('http') 
       ? data.download_url 

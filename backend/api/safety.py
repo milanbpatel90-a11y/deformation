@@ -1,5 +1,6 @@
 """Shared bounded upload handling and serialized CPU jobs."""
 from io import BytesIO
+from pathlib import Path
 from threading import Lock
 
 import cv2
@@ -10,6 +11,12 @@ from starlette.concurrency import run_in_threadpool
 
 MAX_IMAGE_BYTES = 10 * 1024 * 1024
 MAX_IMAGE_PIXELS = 16_000_000
+#: An 8-15 second 1080p orbit clip is 15-50 MiB, so this leaves generous room
+#: while still bounding the bytes read into memory. The video is never decoded
+#: into memory: the extractor samples frames incrementally with grab/retrieve.
+MAX_VIDEO_BYTES = 200 * 1024 * 1024
+#: Containers OpenCV's bundled FFmpeg decodes. An allow-list, not a probe.
+ALLOWED_VIDEO_SUFFIXES = frozenset({".mp4", ".m4v", ".mov", ".avi", ".mkv", ".webm"})
 _job_lock = Lock()
 
 
@@ -43,3 +50,27 @@ async def read_image(file: UploadFile) -> tuple[bytes, np.ndarray]:
     if not contents:
         raise HTTPException(400, "Image upload is empty")
     return contents, await run_in_threadpool(decode_image, contents)
+
+
+def video_suffix(filename: str | None) -> str:
+    """Validate the upload's container extension and return it for writing.
+
+    The extension is all that is checked here; whether the bytes actually decode
+    is settled by the frame extractor, which reports a codec failure as a 4xx
+    with advice rather than a 500.
+    """
+    suffix = Path(filename or "").suffix.lower()
+    if suffix not in ALLOWED_VIDEO_SUFFIXES:
+        allowed = ", ".join(sorted(ALLOWED_VIDEO_SUFFIXES))
+        raise HTTPException(400, f"Unsupported video format. Upload one of: {allowed}.")
+    return suffix
+
+
+async def read_video(file: UploadFile) -> bytes:
+    """Read an orbit video with a hard byte ceiling, without decoding it."""
+    contents = await file.read(MAX_VIDEO_BYTES + 1)
+    if len(contents) > MAX_VIDEO_BYTES:
+        raise HTTPException(413, "Video exceeds 200 MiB")
+    if not contents:
+        raise HTTPException(400, "Video upload is empty")
+    return contents

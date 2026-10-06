@@ -8,7 +8,7 @@ import os
 import re
 import json
 from pydantic import ValidationError
-from backend.api.safety import read_image, run_job
+from backend.api.safety import read_image, read_video, run_job, video_suffix
 
 logger = logging.getLogger(__name__)
 from pathlib import Path
@@ -20,6 +20,7 @@ from fastapi.staticfiles import StaticFiles
 
 from backend.models import FrameMaterial, FrameShape, Measurements
 from backend.pipeline import DeformationPipeline
+from backend.pipeline.video_pipeline import VideoDeformationPipeline
 from backend.template_library.loader import TemplateLibrary
 from backend.template_library.readiness import template_readiness
 from backend.api import rim_detection_routes
@@ -46,6 +47,9 @@ OUTPUT_DIR = OUTPUT_ROOT / ("production" if PRODUCTION_MODE else "development")
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 pipeline = DeformationPipeline()
+# Share the loaded YOLO weights, template library and matcher rather than
+# loading a second copy of each.
+video_pipeline = VideoDeformationPipeline.sharing(pipeline)
 library = TemplateLibrary()
 
 viewer_dir = Path(__file__).resolve().parents[2] / "viewer"
@@ -113,9 +117,11 @@ def root():
         "endpoints": {
             "deform_from_images": "POST /api/deform",
             "deform_from_multi_view": "POST /api/deform/multi-view",
+            "deform_from_orbit_video": "POST /api/deform/video",
             "deform_from_measurements": "POST /api/deform/measurements",
             "templates": "GET /api/templates",
             "download": "GET /api/output/{filename}",
+            "download_orbit_frame": "GET /api/output/frames/{job_id}/{filename}",
             "detect_rim": "POST /api/rim-detection/detect",
             "apply_rim_to_template": "POST /api/rim-detection/apply-to-template",
             "rim_status": "GET /api/rim-detection/status",
@@ -306,6 +312,99 @@ async def deform_from_multiple_images(
         _shutil.rmtree(work_dir, ignore_errors=True)
 
 
+@app.post("/api/deform/video")
+async def deform_from_orbit_video(
+    video: UploadFile = File(..., description="8-12 second 360-degree orbit video of the eyewear"),
+    color: str = Form("#d9a7a2"),
+    template: str | None = Form(None),
+    measurements: str | None = Form(None, description="Optional manual Measurements JSON to override the fused sizes"),
+    automatic_appearance: bool = Form(True),
+    min_views: int = Form(5, description="Fewest views to accept for fusion"),
+    target_views: int = Form(8, description="Preferred number of views to fuse"),
+    max_views: int = Form(10, description="Most views to fuse"),
+    target_fps: float = Form(6.0, description="Frame sampling rate for the decode"),
+    reference_width_mm: float | None = Form(
+        None,
+        description="Known real frame width in mm; scales the estimate off the extractor default",
+    ),
+):
+    """Deform a template from a 360-degree orbit video.
+
+    Decode -> quality gate -> bounded candidate pool -> 1-class eyewear
+    segmentation + visibility gate -> coverage-aware selection of 5-10 views ->
+    per-view measurement -> weighted median + MAD fusion -> the existing
+    DeformationPipeline -> validated GLB + manifest.
+
+    Absolute scale is not measured from the video: ``frame_width`` is anchored to
+    the extractor's reference width unless ``reference_width_mm`` is supplied.
+    """
+    job_id = uuid.uuid4().hex
+    # Project-local, ASCII-safe paths: Windows 8.3 tilde paths break OpenCV's
+    # path-based file APIs.
+    work_dir = OUTPUT_DIR / f"_upload_video_{job_id}"
+    work_dir.mkdir(parents=True, exist_ok=True)
+    preview_dir = OUTPUT_DIR / f"{job_id}_frames"
+
+    try:
+        validate_template(template)
+        if not 1 <= min_views <= target_views <= max_views <= 48:
+            raise HTTPException(
+                400, "View counts must satisfy 1 <= min_views <= target_views <= max_views <= 48"
+            )
+        if reference_width_mm is not None and not 20.0 <= float(reference_width_mm) <= 250.0:
+            raise HTTPException(400, "reference_width_mm must be between 20 and 250 mm")
+        manual = None
+        if measurements:
+            manual = parse_measurements(measurements, color)
+            check_combination(manual, template)
+
+        suffix = video_suffix(video.filename)
+        contents = await read_video(video)
+        video_path = work_dir / f"orbit{suffix}"
+        video_path.write_bytes(contents)
+
+        out_path = OUTPUT_DIR / f"{job_id}.glb"
+        result = await run_job(
+            video_pipeline.run_from_video,
+            video_path,
+            out_path,
+            color=color,
+            template_override=template,
+            manual_measurements=manual,
+            automatic_appearance=automatic_appearance,
+            min_views=min_views,
+            max_views=max_views,
+            target_views=target_views,
+            target_fps=target_fps,
+            preview_dir=preview_dir,
+            reference_width_mm=reference_width_mm,
+        )
+        result["ranges"] = input_ranges(Measurements(**result["measurements"]), result.get("template"))
+        result["job_id"] = job_id
+        result["selected_views"] = (result.get("video") or {}).get("selection", {}).get("selected_count")
+        result["confidence"] = (result.get("video") or {}).get("confidence", {})
+        result["download_url"] = f"/api/output/{job_id}.glb"
+        result["manifest_url"] = f"/api/output/{job_id}.manifest.json"
+        result["video_manifest_url"] = f"/api/output/{job_id}.video.json"
+        attach_preview_urls(result, job_id)
+        return result
+    except HTTPException:
+        raise
+    except MeasurementCompatibilityError:
+        raise
+    except ValueError as exc:
+        # These messages are written for the person holding the camera, so they
+        # are surfaced verbatim rather than collapsed into a generic failure.
+        logger.info("Rejected orbit video job %s: %s", job_id, exc)
+        raise HTTPException(422, str(exc)) from exc
+    except Exception as exc:
+        logger.exception("Orbit video job %s failed", job_id)
+        raise HTTPException(500, "Video deformation failed. Check server logs with job ID " + job_id) from exc
+    finally:
+        import shutil as _shutil
+        _shutil.rmtree(work_dir, ignore_errors=True)
+
+
 @app.post("/api/deform/measurements")
 async def deform_from_measurements(
     frame_width: float = Form(...),
@@ -366,12 +465,46 @@ async def deform_from_measurements(
         raise HTTPException(500, "Deformation failed. Check server logs with job ID " + job_id) from exc
 
 
+def attach_preview_urls(result: dict, job_id: str) -> None:
+    """Replace absolute preview paths with bearer URLs the viewer can fetch."""
+    previews = (result.get("video") or {}).get("previews")
+    if not previews:
+        return
+    # Output URLs are bearer links, so the server directory is not disclosed.
+    previews.pop("directory", None)
+    base = f"/api/output/frames/{job_id}"
+    names = previews.get("frames") or []
+    previews["frame_urls"] = [f"{base}/{name}" for name in names]
+    previews["grid_url"] = f"{base}/{previews['grid']}" if previews.get("grid") else None
+    if previews["grid_url"]:
+        # Convenience alias for the documented response contract.
+        result["contact_sheet_url"] = previews["grid_url"]
+
+
 @app.get("/api/output/{filename}")
 def download_output(filename: str):
-    if not re.fullmatch(r"[A-Za-z0-9_-]+\.(?:glb|metadata\.json|manifest\.json)", filename):
+    # .video.json is the orbit manifest; it is served by the same confined route
+    # as the GLB and the deformation manifest.
+    if not re.fullmatch(
+        r"[A-Za-z0-9_-]+\.(?:glb|metadata\.json|manifest\.json|video\.json)", filename
+    ):
         raise HTTPException(404, "File not found")
     path = (OUTPUT_DIR / filename).resolve()
     if path.parent != OUTPUT_DIR.resolve() or not path.is_file():
         raise HTTPException(status_code=404, detail="File not found")
     media_type = "application/json" if filename.endswith(".json") else "model/gltf-binary"
     return FileResponse(path, media_type=media_type, filename=filename)
+
+
+@app.get("/api/output/frames/{job_id}/{filename}")
+def download_preview_frame(job_id: str, filename: str):
+    """Serve one selected orbit frame, or the contact sheet, for the viewer."""
+    if not re.fullmatch(r"[A-Za-z0-9_-]+", job_id):
+        raise HTTPException(404, "File not found")
+    if not re.fullmatch(r"[A-Za-z0-9_-]+\.jpg", filename):
+        raise HTTPException(404, "File not found")
+    directory = (OUTPUT_DIR / f"{job_id}_frames").resolve()
+    path = (directory / filename).resolve()
+    if path.parent != directory or not path.is_file():
+        raise HTTPException(404, "File not found")
+    return FileResponse(path, media_type="image/jpeg")
