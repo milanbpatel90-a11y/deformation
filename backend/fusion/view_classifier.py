@@ -29,9 +29,18 @@ labelled data.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Any
 
 import cv2
 import numpy as np
+
+from backend.video.geometry import (
+    MaskGeometry,
+    OrbitGeometry,
+    OrbitViewGeometry,
+    analyse_mask,
+    analyse_orbit,
+)
 
 #: Orbit labels, in the order they are reported.
 ORBIT_LABELS = (
@@ -49,13 +58,16 @@ class OrbitView:
 
     label: str
     confidence: float
-    metrics: dict[str, float] = field(default_factory=dict)
+    metrics: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict:
         return {
             "label": self.label,
             "confidence": round(self.confidence, 4),
-            "metrics": {key: round(value, 4) for key, value in self.metrics.items()},
+            "evidence": {
+                key: (round(value, 4) if isinstance(value, (int, float)) else value)
+                for key, value in self.metrics.items()
+            },
         }
 
 
@@ -69,14 +81,27 @@ class ViewClassifier:
     #: A thin horizontal band is a plan (top) view of the frame.
     TOP_VERTICAL_FILL = 0.18
     TOP_MIN_ASPECT = 1.6
-    #: Bilateral agreement that marks the frontal hemisphere. 0.70 is where the
-    #: clearly square-on photos in test_images/ cluster (0.73-0.99); below it the
-    #: frame is measurably off-axis and is classified as a perspective instead.
+    #: Bilateral agreement that marks a frame as mirror-symmetric. 0.70 is where
+    #: the clearly square-on photos in test_images/ cluster (0.73-0.99).
     FRONTAL_SYMMETRY = 0.70
     PERSPECTIVE_SYMMETRY = 0.45
-    #: Minimum signed area skew before a frame is called a left or right
-    #: perspective rather than a square-on front view.
-    PERSPECTIVE_SKEW = 0.06
+    #: Minimum |skew| before the lateral sign is treated as unambiguous.
+    PERSPECTIVE_SKEW = 0.02
+    #: Orbit yaw bands, in degrees, measured from frame-width foreshortening.
+    #: A rendered orbit with known yaws reproduces them to within a degree, and
+    #: its temple_visibility rises monotonically with |yaw| (0.06 square-on,
+    #: 0.24 at 40, 0.41 at 60, 0.67 at 80), so these bands are where the two cues
+    #: agree rather than where a single frame looks small.
+    FRONT_YAW = 15.0
+    SIDE_YAW = 55.0
+    #: A frame this many times wider than tall is the frame head seen edge-on.
+    EDGE_ASPECT = 6.0
+    #: Plan-view signatures: a box that is mostly empty, or a silhouette taller
+    #: than it is wide, or a lens cluster that has grown vertically while yaw
+    #: stays low (an angled-top view).
+    TOP_FILL_MAX = 0.16
+    TOP_CLUSTER_ASPECT = 0.75
+    TOP_MAX_YAW = 40.0
     #: The mask carries no validated front/rear evidence, so ``rear`` is never
     #: emitted. Reported in the manifest rather than guessed at.
     REAR_AVAILABLE = False
@@ -106,59 +131,131 @@ class ViewClassifier:
             return "front"
 
     # ── orbit classifier ────────────────────────────────────────────────────
+    def classify_sequence(self, masks: list[np.ndarray | None]) -> list[OrbitView]:
+        """Classify a whole orbit, using each frame's yaw within the clip.
+
+        An orbit is classified as a sequence, not frame by frame, because pose is
+        only measurable *relative to the orbit*: the frame head is widest
+        square-on and compresses by ``cos(yaw)`` as the product turns, so the
+        clip itself supplies the frontal reference. Measuring a rendered orbit
+        with known yaws recovers them to within a degree, which is why yaw -- not
+        silhouette size -- drives the label here. A single frame carries no
+        foreshortening information, so it falls back to lateral skew alone.
+        """
+        orbit = analyse_orbit(masks)
+        results: list[OrbitView] = []
+        for view in orbit.views:
+            results.append(self._classify_one(view, orbit))
+        return results
+
     def classify_orbit_view(self, image: np.ndarray, mask: np.ndarray) -> OrbitView:
-        """Label one orbit frame within :data:`ORBIT_LABELS`."""
-        metrics = self._silhouette(mask)
-        if metrics is None:
+        """Label one orbit frame within :data:`ORBIT_LABELS`.
+
+        Convenience for a single frame; callers holding a whole clip should use
+        :meth:`classify_sequence` so the yaw estimate is available.
+        """
+        return self.classify_sequence([mask])[0]
+
+    def _classify_one(self, view: OrbitViewGeometry, orbit: OrbitGeometry) -> OrbitView:
+        geometry = view.mask_geometry
+        if geometry is None:
             # An empty mask carries no angle information; callers reject these
             # frames on visibility, so the label only has to be safe.
             return OrbitView(label="front", confidence=0.0, metrics={"empty_mask": 1.0})
 
-        aspect = metrics["aspect_ratio"]
-        symmetry = metrics["symmetry"]
-        vertical_fill = metrics["vertical_fill"]
+        metrics = self._evidence(view, orbit, geometry)
+        aspect = geometry.aspect
+        yaw = view.yaw_deg
+        yaw_known = view.yaw_source in {"foreshortening", "edge_on"}
 
-        # 1. Plan views: a thin, wide band (frame seen from above), or a
-        #    silhouette taller than it is wide (looking along the temple axis).
+        # 1. Plan views. Looking down on the frame collapses its vertical extent
+        #    or leaves a mostly empty box; an angled-top view keeps full width but
+        #    a tall lens cluster while yaw stays low.
         if aspect < self.TOP_ASPECT:
-            return self._orbit("top", 0.7, metrics)
-        if aspect >= self.TOP_MIN_ASPECT and vertical_fill < self.TOP_VERTICAL_FILL:
+            return self._orbit("top", 0.75, metrics)
+        if geometry.bbox_fill <= self.TOP_FILL_MAX:
             return self._orbit("top", 0.8, metrics)
+        if geometry.lens_cluster_aspect >= self.TOP_CLUSTER_ASPECT and yaw < self.TOP_MAX_YAW:
+            return self._orbit("top", 0.65, metrics)
 
-        # 2. Profiles: very wide, or clearly asymmetric.
-        if aspect >= self.SIDE_ASPECT:
-            confidence = 0.85 if symmetry < self.PERSPECTIVE_SYMMETRY else 0.6
-            return self._orbit("side", confidence, metrics)
-        if symmetry < 0.30 and aspect >= 2.6:
-            return self._orbit("side", 0.65, metrics)
+        # 2. Edge-on profiles: the frame head collapses into a wide thin bar.
+        if aspect >= self.EDGE_ASPECT:
+            return self._orbit("side", 0.85, metrics)
 
-        # 3. The frontal hemisphere: square-on, or turned to one side.
-        return self._label_lateral(metrics)
+        # 3. Profiles by measured yaw.
+        if yaw_known and yaw >= self.SIDE_YAW:
+            margin = min(1.0, (yaw - self.SIDE_YAW) / 25.0)
+            return self._orbit("side", 0.75 + 0.2 * margin, metrics)
 
-    def _label_lateral(self, metrics: dict[str, float]) -> OrbitView:
-        """Split the frontal hemisphere into square-on and left/right perspective.
+        # 4. Square-on: needs a resolved pair of rims, not merely a big blob.
+        if yaw_known and yaw <= self.FRONT_YAW and geometry.lens_count >= 2:
+            margin = 1.0 - (yaw / self.FRONT_YAW)
+            symmetry_bonus = 0.15 if geometry.symmetry >= self.FRONTAL_SYMMETRY else 0.0
+            return self._orbit("front", 0.7 + 0.15 * margin + symmetry_bonus, metrics)
+
+        # 5. In between: a perspective view. The sign names the side whose
+        #    silhouette projects wider, which is the side presented to the camera.
+        return self._label_lateral(metrics, geometry, yaw_known)
+
+    def _label_lateral(
+        self, metrics: dict[str, float], geometry: MaskGeometry, yaw_known: bool
+    ) -> OrbitView:
+        """Label a frontal-hemisphere frame as square-on or left/right perspective.
 
         The convention is stated plainly because it is an assumption: whichever
-        half of the silhouette carries more mask area is treated as the side
-        turned towards the camera, since the nearer lens and rim subtend more
-        area. ``lateral_skew`` is returned so the decision can be re-thresholded
-        once labelled orbit data exists.
+        half of the silhouette is heavier is treated as the side turned towards
+        the camera. ``lateral_skew`` is reported so the decision can be
+        re-thresholded once labelled orbit data exists. When yaw is known, a
+        frame that is clearly turned is never called ``front`` merely because its
+        skew happens to be small -- the sign is still taken, and the ambiguity is
+        reported instead.
         """
         metrics = dict(metrics)
         metrics["rear_available"] = 1.0 if self.REAR_AVAILABLE else 0.0
         skew = metrics["lateral_skew"]
         margin = max(0.0, abs(skew) - self.PERSPECTIVE_SKEW)
         confidence = float(min(1.0, 0.45 + margin * 3.0))
-        if skew >= self.PERSPECTIVE_SKEW:
-            return self._orbit("right_front_perspective", confidence, metrics)
-        if skew <= -self.PERSPECTIVE_SKEW:
-            return self._orbit("left_front_perspective", confidence, metrics)
-        square_on = metrics["symmetry"] >= self.FRONTAL_SYMMETRY
-        return self._orbit("front", 0.75 if square_on else 0.5, metrics)
+        if not yaw_known:
+            # No foreshortening evidence: skew is all there is.
+            if skew >= self.PERSPECTIVE_SKEW:
+                return self._orbit("right_front_perspective", confidence, metrics)
+            if skew <= -self.PERSPECTIVE_SKEW:
+                return self._orbit("left_front_perspective", confidence, metrics)
+            square_on = geometry.symmetry >= self.FRONTAL_SYMMETRY
+            return self._orbit("front", 0.75 if square_on else 0.5, metrics)
+
+        metrics["lateral_sign_ambiguous"] = 1.0 if abs(skew) < self.PERSPECTIVE_SKEW else 0.0
+        if abs(skew) < self.PERSPECTIVE_SKEW:
+            confidence = min(confidence, 0.4)
+        label = "right_front_perspective" if skew >= 0.0 else "left_front_perspective"
+        return self._orbit(label, confidence, metrics)
 
     @staticmethod
-    def _orbit(label: str, confidence: float, metrics: dict[str, float]) -> OrbitView:
-        return OrbitView(label=label, confidence=float(max(0.0, min(1.0, confidence))), metrics=metrics)
+    def _evidence(
+        view: OrbitViewGeometry, orbit: OrbitGeometry, geometry: MaskGeometry
+    ) -> dict[str, float]:
+        """Everything behind the label, so a wrong call can be argued with."""
+        evidence = dict(geometry.to_dict())
+        evidence.update(
+            {
+                "yaw_deg": round(view.yaw_deg, 2),
+                "cos_yaw": round(view.cos_yaw, 4),
+                "foreshortening": round(view.foreshortening, 4),
+                "frontal_reference_width": float(orbit.frontal_reference_width),
+                "rear_available": 1.0 if ViewClassifier.REAR_AVAILABLE else 0.0,
+            }
+        )
+        evidence["yaw_source"] = view.yaw_source  # type: ignore[assignment]
+        return evidence
+
+    @staticmethod
+    def _orbit(label: str, confidence: float, metrics: dict) -> OrbitView:
+        return OrbitView(
+            label=label,
+            confidence=float(max(0.0, min(1.0, confidence))),
+            metrics=metrics,  # type: ignore[arg-type]
+        )
+
 
     # ── shared geometry ─────────────────────────────────────────────────────
     def _silhouette(self, mask: np.ndarray) -> dict[str, float] | None:

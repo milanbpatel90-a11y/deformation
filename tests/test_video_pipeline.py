@@ -658,6 +658,67 @@ class TestOrbitVideoEndToEnd(unittest.TestCase):
             )
         self.assertIn("reference_width_mm", str(raised.exception))
 
+    def test_measurement_only_estimate_returns_sizes_without_a_glb(self) -> None:
+        """The viewer's auto-measure step: sizes now, deformation only on request."""
+        from fastapi.testclient import TestClient
+
+        from backend.api.main import app
+
+        client = TestClient(app)
+        with self.video.open("rb") as handle:
+            response = client.post(
+                "/api/measurements/suggest/video",
+                files={"video": (self.video.name, handle, "video/mp4")},
+            )
+        self.assertEqual(response.status_code, 200, response.text[:300])
+        body = response.json()
+        for key in ("measurements", "template", "ranges", "confidence", "scale",
+                    "selection", "view_distribution", "note"):
+            self.assertIn(key, body)
+        self.assertGreaterEqual(body["selection"]["selected_count"], FrameSelector.MIN_VIEWS)
+        self.assertLessEqual(body["selection"]["selected_count"], FrameSelector.MAX_VIEWS)
+        self.assertEqual(body["scale"]["mode"], "reference_width")
+        self.assertIn(body["confidence"]["level"], {"low", "medium", "high"})
+        # Sizes are real and physically plausible, not placeholders.
+        self.assertTrue(100.0 <= body["measurements"]["frame_width"] <= 160.0)
+        # Measurement only: no deformation and no export ran.
+        names = [stage["name"] for stage in body["pipeline"]]
+        self.assertIn("Weighted Median + MAD Fusion", names)
+        self.assertNotIn("Template Deformation", names)
+        self.assertNotIn("GLB Export", names)
+
+    def test_the_previewed_estimate_matches_the_deformed_result(self) -> None:
+        """What the viewer previews must be what the build actually fuses."""
+        from fastapi.testclient import TestClient
+
+        from backend.api.main import app
+        from backend.pipeline.video_pipeline import VideoDeformationPipeline
+
+        client = TestClient(app)
+        with self.video.open("rb") as handle:
+            preview = client.post(
+                "/api/measurements/suggest/video",
+                files={"video": (self.video.name, handle, "video/mp4")},
+            ).json()
+
+        built = VideoDeformationPipeline().run_from_video(
+            self.video, self.work / "estimate_agreement.glb"
+        )
+        self.assertEqual(built["video"]["measurement_source"], "fused")
+        self.assertEqual(preview["template"], built["template"])
+        for name in ("frame_width", "lens_width", "lens_height", "bridge_width",
+                     "temple_length", "rim_thickness"):
+            self.assertAlmostEqual(
+                float(preview["measurements"][name]),
+                float(built["measurements"][name]),
+                delta=0.01,
+                msg=f"{name} differs between the preview and the build",
+            )
+        self.assertEqual(
+            preview["selection"]["selected_count"],
+            built["video"]["selection"]["selected_count"],
+        )
+
     def test_manual_measurements_override_the_fused_estimate(self) -> None:
         from backend.pipeline.video_pipeline import VideoDeformationPipeline
 
@@ -1059,6 +1120,22 @@ class TestVideoApiInputValidation(unittest.TestCase):
         detail = response.json()["detail"]
         self.assertIn("record at least", detail)
         self.assertIn("8-12s recommended", detail)
+
+    def test_estimate_endpoint_rejects_a_too_short_clip(self) -> None:
+        response = self.client.post(
+            "/api/measurements/suggest/video",
+            files={"video": ("too_short.mp4", self.short.read_bytes(), "video/mp4")},
+        )
+        self.assertEqual(response.status_code, 422)
+        self.assertIn("record at least", response.json()["detail"])
+
+    def test_estimate_endpoint_rejects_a_non_video(self) -> None:
+        response = self.client.post(
+            "/api/measurements/suggest/video",
+            files={"video": ("glasses.jpg", b"not a video", "image/jpeg")},
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("Unsupported video format", response.json()["detail"])
 
     def test_inverted_view_bounds_are_rejected(self) -> None:
         response = self._post(

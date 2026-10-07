@@ -60,6 +60,18 @@ class GlassesSegmenter:
       when a model is present but detects nothing in the frame.
     """
 
+    #: Detections below this confidence are discarded before any merging. The
+    #: model emits occasional low-confidence boxes on empty background, and on a
+    #: rendered orbit one such box (confidence 0.35) stretched a 431 px frame
+    #: into a 749 px mask.
+    MIN_DETECTION_CONFIDENCE = 0.35
+    #: Boxes overlapping the best detection at least this much are the same object.
+    DETECTION_MERGE_IOU = 0.6
+    #: A part of the same object sits within this fraction of the anchor's width...
+    DETECTION_MERGE_GAP_RATIO = 0.3
+    #: ...and is not dramatically wider than it. A coarse superset fails this.
+    DETECTION_MAX_WIDTH_RATIO = 2.5
+
     def __init__(self, model_path: str | Path | None = None):
         self._model = None
         self.model_type = "opencv_fallback"
@@ -116,18 +128,40 @@ class GlassesSegmenter:
         h, w = image.shape[:2]
         mask = np.zeros((h, w), dtype=np.uint8)
         detections = 0
+        scores: list[float] = []
+        boxes: list[tuple[float, float, float, float]] = []
+        kept_masks: list[np.ndarray] = []
 
         for result in results:
             if result.masks is None:
                 continue
-            for m in result.masks.data:
+            for index, m in enumerate(result.masks.data):
+                confidence = 1.0
+                if result.boxes is not None and index < len(result.boxes):
+                    confidence = float(result.boxes.conf[index])
+                if confidence < self.MIN_DETECTION_CONFIDENCE:
+                    continue
                 resized = cv2.resize(
                     m.cpu().numpy().astype(np.float32),
                     (w, h),
                     interpolation=cv2.INTER_LINEAR,
                 )
-                mask = np.maximum(mask, (resized > 0.5).astype(np.uint8) * 255)
-                detections += 1
+                binary = (resized > 0.5).astype(np.uint8)
+                rows = np.flatnonzero(binary.any(axis=1))
+                cols = np.flatnonzero(binary.any(axis=0))
+                if rows.size == 0 or cols.size == 0:
+                    continue
+                cols = np.flatnonzero(binary.any(axis=0))
+                boxes.append(
+                    (float(cols[0]), float(rows[0]), float(cols[-1]), float(rows[-1]))
+                )
+                scores.append(confidence)
+                kept_masks.append(binary)
+
+        keep = self._consistent_detections(boxes, scores)
+        for index in keep:
+            mask = np.maximum(mask, kept_masks[index] * 255)
+            detections += 1
 
         return {
             "front": mask,
@@ -135,7 +169,51 @@ class GlassesSegmenter:
             "full": mask,
             "model_type": self.model_type,
             "detections": detections,
+            "detection_scores": [round(scores[i], 3) for i in keep],
         }
+
+    def _consistent_detections(
+        self,
+        boxes: list[tuple[float, float, float, float]],
+        scores: list[float],
+    ) -> list[int]:
+        """Keep the detections that plausibly describe one pair of glasses.
+
+        The one-class model sometimes returns a second, coarser box that covers
+        the real object *and* a swathe of empty background. Unioning every
+        detection then inflates the silhouette -- measured on a rendered orbit,
+        a 347 px frame became a 668 px mask at one pose and a 431 px frame became
+        729 px at another, which corrupted the frontal reference width and made
+        every downstream angle and scale wrong.
+
+        Parts of one object (two rims, a bridge) are *near* each other, so a
+        detection is merged when it overlaps the anchor strongly or sits within a
+        short horizontal gap of it. A coarse superset is much wider than the
+        anchor and reaches far beyond it, so it is dropped instead.
+        """
+        if not boxes:
+            return []
+        anchor = int(np.argmax(scores))
+        ax0, _ay0, ax1, _ay1 = boxes[anchor]
+        anchor_w = max(ax1 - ax0, 1.0)
+        keep = [anchor]
+        for index, box in enumerate(boxes):
+            if index == anchor:
+                continue
+            bx0, _by0, bx1, _by1 = boxes[index]
+            overlap = max(0.0, min(ax1, bx1) - max(ax0, bx0))
+            union = max(ax1, bx1) - min(ax0, bx0)
+            iou = overlap / union if union > 0 else 0.0
+            gap = max(0.0, max(ax0, bx0) - min(ax1, bx1))
+            width = max(bx1 - bx0, 1.0)
+            if iou >= self.DETECTION_MERGE_IOU:
+                keep.append(index)
+            elif gap <= self.DETECTION_MERGE_GAP_RATIO * anchor_w and width <= (
+                self.DETECTION_MAX_WIDTH_RATIO * anchor_w
+            ):
+                # A nearby part of the same object.
+                keep.append(index)
+        return keep
 
     def _segment_opencv(self, image: np.ndarray) -> dict[str, np.ndarray]:
         """Fallback: dark-frame threshold with center-biased contour selection."""

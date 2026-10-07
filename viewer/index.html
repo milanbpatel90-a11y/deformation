@@ -438,13 +438,16 @@ inputMulti.addEventListener('change', (e) => {
 });
 
 function updateGenerateBtn() {
-  const hasFront = document.getElementById('input-front').files.length > 0;
-  const hasMulti = document.getElementById('input-multi').files.length > 0;
-  document.getElementById('generate-btn').disabled = isGenerating || isSuggesting || !templatesReady || !document.getElementById('measurements-form').checkValidity();
+  // An orbit video is measured automatically, so it is sufficient input on its
+  // own: the manual measurement fields are an override, not a prerequisite.
+  const hasVideo = document.getElementById('input-video').files.length > 0;
+  const formValid = document.getElementById('measurements-form').checkValidity();
+  document.getElementById('generate-btn').disabled =
+    isGenerating || isSuggesting || !templatesReady || !(hasVideo || formValid);
 }
 
 // ── 360° orbit video selection ────────────────────────────────────────────────
-const VIDEO_HINT_DEFAULT = 'Turn the glasses a full 360° in even light. 18-24 views are chosen automatically.';
+const VIDEO_HINT_DEFAULT = 'Turn the glasses a full 360° in even light. 8-12 s works best; 5-10 views are chosen automatically.';
 const inputVideo = document.getElementById('input-video');
 const videoPreview = document.getElementById('prev-video');
 const videoPlaceholder = document.getElementById('ph-video');
@@ -464,6 +467,9 @@ inputVideo.addEventListener('change', (event) => {
     videoPreview.removeAttribute('src');
     videoPlaceholder.style.display = 'block';
     resetVideoHint();
+    // Cancel any in-flight estimate so it cannot fill fields after clearing.
+    ++videoSuggestionSequence;
+    isSuggesting = false;
     updateGenerateBtn();
     return;
   }
@@ -494,7 +500,61 @@ inputVideo.addEventListener('change', (event) => {
     updateGenerateBtn();
   };
   updateGenerateBtn();
+  // Measure immediately so the sizes appear before the user commits to a build.
+  requestVideoSuggestions();
 });
+
+// ── Auto-measure an orbit video (measurement only, no deformation) ────────────
+let videoSuggestionSequence = 0;
+
+async function requestVideoSuggestions() {
+  const file = document.getElementById('input-video').files[0];
+  const note = document.getElementById('suggestion-note');
+  if (!file) return;
+  const sequence = ++videoSuggestionSequence;
+  isSuggesting = true;
+  updateGenerateBtn();
+  note.textContent = 'Measuring the orbit video (decode → gate → select → segment → fuse)…';
+
+  const form = new FormData();
+  form.append('video', file);
+  try {
+    const response = await fetch('/api/measurements/suggest/video', {method: 'POST', body: form});
+    const data = await response.json();
+    if (sequence !== videoSuggestionSequence) return;
+    if (response.status === 404) throw new Error('The server needs restarting to enable video measuring.');
+    if (!response.ok) {
+      throw new Error(typeof data.detail === 'string' ? data.detail : 'Video measurement failed. Please retry.');
+    }
+    // Fill any field the user has not deliberately edited.
+    for (const [name, value] of Object.entries(data.measurements)) {
+      if (['material', 'shape', 'color'].includes(name)) continue;
+      const input = measurementForm.elements.namedItem(name);
+      if (input && value !== null && !editedMeasurements.has(name)) input.value = value;
+    }
+    detectedAppearance = {
+      material: data.measurements.material,
+      shape: data.measurements.shape,
+      color: data.measurements.color
+    };
+    syncAppearanceControls();
+    templateRanges[data.template] = data.ranges;
+    const templateSelect = document.getElementById('template-input');
+    templateSelect.value = '';
+    templateSelect.options[0].textContent = `Auto-select (suggested: ${data.template})`;
+    displayRanges(data.template);
+    note.textContent = data.note +
+      (data.adjustments && data.adjustments.length ? '\n' + data.adjustments.join('\n') : '') +
+      (editedMeasurements.size ? '\nYour manually edited fields were kept.' : '');
+  } catch (error) {
+    if (sequence === videoSuggestionSequence) {
+      note.textContent = error.message +
+        ' You can still enter sizes manually, or press Generate to measure and deform in one step.';
+    }
+  } finally {
+    if (sequence === videoSuggestionSequence) { isSuggesting = false; updateGenerateBtn(); }
+  }
+}
 
 function renderOrbitReport(video, apiBase, response) {
   const wrap = document.getElementById('orbit-report');
@@ -783,7 +843,9 @@ document.getElementById('generate-btn').addEventListener('click', async () => {
   const multiFiles = document.getElementById('input-multi').files;
   const videoFile = document.getElementById('input-video').files[0];
   const measurementForm = document.getElementById('measurements-form');
-  if (!measurementForm.reportValidity()) return;
+  // An orbit video measures itself, so an incomplete manual form must not block
+  // it; the fields are an optional override on that path.
+  if (!videoFile && !measurementForm.reportValidity()) return;
   const manual = Object.fromEntries(new FormData(measurementForm));
   // Disabled auto-detected selects are omitted by FormData; include the
   // current values explicitly for the API's validated measurements payload.
@@ -826,9 +888,11 @@ document.getElementById('generate-btn').addEventListener('click', async () => {
   if (!frontFile && !multiFiles.length && !videoFile) {
     endpoint = `${API_BASE}/api/deform/measurements`;
     for (const [key, value] of Object.entries(manual)) form.append(key, value);
+  } else if (videoFile && editedMeasurements.size === 0) {
+    // Leave measurements out entirely so the orbit pipeline fuses its own views
+    // and reports measurement_source "fused". Sending the auto-filled fields
+    // back would relabel a fused estimate as a manual override.
   } else {
-    // The orbit endpoint takes manual measurements as an optional override; the
-    // fused estimate is used when they are supplied but the report keeps both.
     form.append('measurements', JSON.stringify(manual));
   }
   form.append('automatic_appearance', document.getElementById('auto-appearance').checked);

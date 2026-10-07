@@ -28,6 +28,10 @@ import numpy as np
 
 from backend.models import FrameMaterial, FrameShape, Measurements
 
+#: Provenance label meaning "no view in this capture could measure it". Kept in
+#: step with backend.video.measurement.INSUFFICIENT.
+INSUFFICIENT_EVIDENCE = "insufficient_evidence"
+
 #: Views that can measure each dimension, and how much to trust them.
 #: A weight of 0 removes the view from that dimension entirely.
 VIEW_DIMENSION_WEIGHTS: dict[str, dict[str, float]] = {
@@ -94,9 +98,17 @@ class ViewObservation:
     measurements: Measurements
     weight: float = 1.0
     label: str = ""
+    #: Per-dimension provenance, e.g. {"temple_length": "side"}. A dimension
+    #: marked "insufficient_evidence" is refused from this view even when the
+    #: view label would otherwise allow it, because provenance is measured per
+    #: frame rather than assumed from the view class.
+    evidence: dict[str, str] = field(default_factory=dict)
 
     def describe(self) -> str:
         return self.label or self.view
+
+    def allows(self, dimension: str) -> bool:
+        return self.evidence.get(dimension) != "insufficient_evidence"
 
 
 @dataclass(slots=True)
@@ -116,6 +128,13 @@ class DimensionReport:
     agreement: float = 0.0
     rejected: list[dict] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
+    #: Which views contributed, and with what provenance.
+    provenance: list[dict] = field(default_factory=list)
+    #: How many kept observations came from each provenance label.
+    evidence_mix: dict[str, int] = field(default_factory=dict)
+
+    def has(self, *sources: str) -> bool:
+        return any(self.evidence_mix.get(source, 0) > 0 for source in sources)
 
     def to_dict(self) -> dict:
         return {
@@ -131,6 +150,8 @@ class DimensionReport:
             "agreement": round(self.agreement, 4),
             "rejected": list(self.rejected),
             "warnings": list(self.warnings),
+            "evidence_mix": dict(self.evidence_mix),
+            "provenance": list(self.provenance),
         }
 
 
@@ -159,6 +180,7 @@ class FusionResult:
         self,
         scale_assumption: str = "reference_width",
         preferred_views: int = 8,
+        scale_calibrated: bool = False,
     ) -> dict:
         """Summarise how much evidence actually backs the fused measurement.
 
@@ -182,7 +204,9 @@ class FusionResult:
         agreement between eight, and the level should not pretend otherwise.
         """
         measured = [report for report in self.dimensions.values() if report.source == "fused"]
-        derived = [report for report in self.dimensions.values() if report.source != "fused"]
+        unevidenced = [
+            report for report in self.dimensions.values() if report.source != "fused"
+        ]
 
         agreement = float(np.mean([report.agreement for report in measured])) if measured else 0.0
         evidence_coverage = len(measured) / max(len(self.dimensions), 1)
@@ -199,21 +223,74 @@ class FusionResult:
             else "low"
         )
         notes: list[str] = []
-        if derived:
+        caps: list[str] = []
+
+        def cap(reason: str) -> None:
+            caps.append(reason)
+
+        if unevidenced:
             notes.append(
-                "estimated without direct evidence: "
-                + ", ".join(sorted(report.name for report in derived))
+                "insufficient evidence for: "
+                + ", ".join(sorted(report.name for report in unevidenced))
             )
+
+        # Geometric diversity: an orbit that only ever saw the front cannot have
+        # measured anything a front view cannot see, however good those frames are.
+        frontal_views = {"front"}
+        if self.view_counts and all(view in frontal_views for view in self.view_counts):
+            cap("all selected views are frontal; no perspective or side evidence")
+        elif len([v for v in self.view_counts if v not in frontal_views]) == 0:
+            cap("selection lacks geometric diversity")
+
+        # Dimension-specific evidence requirements.
+        temple = self.dimensions.get("temple_length")
+        if temple is not None and temple.source != "fused":
+            notes.append("temple_length: insufficient_side_evidence")
+            cap("temple length has no side evidence")
+        elif temple is not None and not temple.has("side"):
+            notes.append("temple_length: no observation came from a side view")
+            cap("temple length was not measured from a side view")
+
+        curve = self.dimensions.get("temple_curve_angle")
+        if curve is not None and curve.source != "fused":
+            notes.append("temple_curve_angle: no side evidence, a default is in use")
+            cap("temple curve is defaulted")
+        elif curve is not None and not curve.has("side"):
+            cap("temple curve was not measured from a side view")
+
+        lens = self.dimensions.get("lens_width")
+        lens_height = self.dimensions.get("lens_height")
+        for report in (lens, lens_height):
+            if report is not None and report.source == "fused" and report.spread > 0.08:
+                notes.append(
+                    f"{report.name}: views disagree by {report.spread:.0%}; "
+                    "lens dimensions are not reliable"
+                )
+                cap(f"{report.name} disagreement is too large")
+
+        if not scale_calibrated:
+            notes.append("absolute_scale: uncalibrated")
+            cap("scale is uncalibrated")
+
+        if level == "high" and views < preferred_views:
+            cap(f"{views} views is below the preferred {preferred_views}")
+        if views < 5:
+            notes.append(f"only {views} views contributed")
+
         rejected = sum(len(report.rejected) for report in self.dimensions.values())
         if rejected:
             notes.append(f"{rejected} outlying view measurement(s) excluded by MAD screening")
-        if level == "high" and views < preferred_views:
+
+        if level == "high" and caps:
             level = "medium"
-            notes.append(
-                f"capped at medium: {views} views is below the preferred {preferred_views}"
-            )
-        if views < 5:
-            notes.append(f"only {views} views contributed")
+            notes.append("capped at medium: " + "; ".join(caps))
+        elif level == "medium" and len(caps) >= 2:
+            # Several independent evidence gaps is a low-confidence result.
+            level = "low"
+            notes.append("lowered to low: " + "; ".join(caps))
+
+        seen: set[str] = set()
+        unique_notes = [n for n in notes if not (n in seen or seen.add(n))]
 
         return {
             "level": level,
@@ -222,7 +299,12 @@ class FusionResult:
             "measurement_consistency": round(float(measurement_consistency), 4),
             "quality_consistency": round(float(quality_consistency), 4),
             "scale_assumption": scale_assumption,
-            "notes": notes,
+            "scale_calibrated": bool(scale_calibrated),
+            "measured_dimensions": sorted(report.name for report in measured),
+            "insufficient_dimensions": sorted(report.name for report in unevidenced),
+            "view_distribution": dict(self.view_counts),
+            "caps": caps,
+            "notes": unique_notes,
         }
 
 
@@ -300,8 +382,20 @@ class RobustMeasurementFuser:
         observations: list[ViewObservation],
     ) -> DimensionReport:
         entries: list[tuple[float, float, ViewObservation]] = []
+        refused: list[dict] = []
         for observation in observations:
             view_weight = VIEW_DIMENSION_WEIGHTS.get(observation.view, {}).get(name, 0.0)
+            if view_weight > 0.0 and not observation.allows(name):
+                # The view class permits this dimension but the frame's own
+                # measured provenance does not: the orbit could not evidence it.
+                refused.append(
+                    {
+                        "view": observation.view,
+                        "label": observation.describe(),
+                        "source": observation.evidence.get(name, "insufficient_evidence"),
+                    }
+                )
+                continue
             # Quality scales a view's influence but never resurrects a view that
             # cannot see this dimension.
             weight = view_weight * max(0.0, observation.weight)
@@ -319,12 +413,20 @@ class RobustMeasurementFuser:
             report.unit = "deg"
 
         if not entries:
+            # Nothing measured this dimension. A fallback value keeps the
+            # engineering model valid, but it is labelled as missing evidence
+            # rather than presented as a fusion of observations.
             derived, note = self._derive(name, observations)
             report.value = round(derived, precision)
-            report.source = "derived"
+            report.source = "insufficient_evidence"
             report.median = derived
             report.agreement = 0.0
             report.warnings.append(note)
+            if refused:
+                report.warnings.append(
+                    f"{len(refused)} view(s) were refused for {name} on provenance"
+                )
+            report.evidence_mix = {INSUFFICIENT_EVIDENCE: len(refused)}
             return report
 
         report.value, report.median, report.mad, report.robust_sigma, kept, rejected = (
@@ -334,6 +436,22 @@ class RobustMeasurementFuser:
         report.rejected = rejected
         report.spread = report.robust_sigma / max(abs(report.median), 1e-9)
         report.agreement = float(max(0.0, min(1.0, 1.0 - report.spread)))
+
+        rejected_labels = {entry["label"] for entry in rejected}
+        report.evidence_mix = {}
+        for value, _weight, observation in entries:
+            if observation.describe() in rejected_labels:
+                continue
+            source = observation.evidence.get(name, "unspecified")
+            report.evidence_mix[source] = report.evidence_mix.get(source, 0) + 1
+            report.provenance.append(
+                {
+                    "view": observation.view,
+                    "label": observation.describe(),
+                    "source": source,
+                    "value": round(float(value), precision),
+                }
+            )
 
         if len(entries) == 1:
             report.warnings.append(

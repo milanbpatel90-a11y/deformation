@@ -70,6 +70,8 @@ class FrameQualityGate:
     MIN_CONTRAST = 18.0
     MIN_MEAN_LUMA = 35.0
     MAX_MEAN_LUMA = 232.0
+    #: A frame this bright overall is unusable whatever else it is.
+    HARD_MAX_MEAN_LUMA = 250.0
     MAX_GLARE_RATIO = 0.050
     MAX_GLARE_BLOB_RATIO = 0.060
     #: A mask this small is treated as "no eyewear found" rather than a small
@@ -305,8 +307,25 @@ class FrameQualityGate:
             reasons.append(f"glare ({metrics['glare_ratio']:.3f} > {self.MAX_GLARE_RATIO:.3f})")
         if metrics["mean_luma"] < self.MIN_MEAN_LUMA:
             reasons.append(f"underexposed (luma {metrics['mean_luma']:.0f} < {self.MIN_MEAN_LUMA:.0f})")
-        elif metrics["mean_luma"] > self.MAX_MEAN_LUMA:
-            reasons.append(f"overexposed (luma {metrics['mean_luma']:.0f} > {self.MAX_MEAN_LUMA:.0f})")
+        elif metrics["mean_luma"] > self.HARD_MAX_MEAN_LUMA:
+            reasons.append(
+                f"overexposed (luma {metrics['mean_luma']:.0f} > {self.HARD_MAX_MEAN_LUMA:.0f})"
+            )
+        elif (
+            metrics["mean_luma"] > self.MAX_MEAN_LUMA
+            and metrics["glare_ratio"] > self.MAX_GLARE_RATIO
+        ):
+            # A bright *backdrop* is not an overexposed subject. Judging a
+            # mask-free frame on mean luminance alone rejected every frame of a
+            # clean orbit against a white sweep (mean 238 against a 232 ceiling),
+            # so a bright frame is only called overexposed when it also carries
+            # blown highlights. Calibration agrees: a genuinely overexposed frame
+            # measured a glare blob of 0.83, far past the glare gate, while a
+            # white backdrop contributes almost none.
+            reasons.append(
+                f"overexposed (luma {metrics['mean_luma']:.0f} with "
+                f"{metrics['glare_ratio']:.3f} clipped)"
+            )
         if metrics["contrast"] < self.MIN_CONTRAST:
             reasons.append(f"low contrast ({metrics['contrast']:.0f} < {self.MIN_CONTRAST:.0f})")
         # Directional smear: energy survives on one axis only. A frame that is

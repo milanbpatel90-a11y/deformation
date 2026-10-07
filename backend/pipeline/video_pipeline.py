@@ -21,6 +21,8 @@ from __future__ import annotations
 
 import json
 import logging
+import math
+import os
 import time
 from collections import Counter
 from pathlib import Path
@@ -36,8 +38,16 @@ from backend.materials.pbr import apply_materials
 from backend.models import Measurements, PipelineReport
 from backend.pipeline.deformation_pipeline import DeformationPipeline
 from backend.video.frame_extractor import DEFAULT_TARGET_FPS, FrameExtractor
+from backend.video.geometry import (
+    OrbitGeometry,
+    OrbitViewGeometry,
+    analyse_mask,
+    analyse_orbit,
+)
+from backend.video.measurement import OrbitMeasurement, measure_orbit
 from backend.video.quality_gate import FrameQuality, FrameQualityGate
 from backend.video.selection import FrameSelector, SelectionResult
+from backend.video.validation import build_validation_report
 
 LOGGER = logging.getLogger(__name__)
 
@@ -91,8 +101,117 @@ class VideoDeformationPipeline(DeformationPipeline):
         preview_dir: Path | str | None = None,
         reference_width_mm: float | None = None,
     ) -> dict:
+        """Measure from a video, then deform with the existing engine.
+
+        The measurement half lives in :meth:`estimate_from_video` so that the
+        viewer can show the auto-measured sizes before committing to a
+        deformation; this method only adds template selection, deformation,
+        materials, export and validation.
+        """
         total_started = time.perf_counter()
-        report = PipelineReport()
+        estimate = self.estimate_from_video(
+            video_path,
+            color=color,
+            manual_measurements=manual_measurements,
+            automatic_appearance=automatic_appearance,
+            min_views=min_views,
+            max_views=max_views,
+            target_views=target_views,
+            target_fps=target_fps,
+            reference_width_mm=reference_width_mm,
+        )
+        # Timings are written here for the estimate endpoint's benefit and
+        # overwritten below with the complete picture once export has run.
+        video_section = self.video_payload(estimate, total_started)
+        return self._finish_from_measurements(
+            fused_measurements=estimate["measurements"],
+            anchor=estimate["anchor"],
+            style=estimate["style"],
+            template_override=template_override,
+            output_path=output_path,
+            report=estimate["report"],
+            video_section=video_section,
+            preview_dir=preview_dir,
+            selected_views=estimate["selected_views"],
+            total_started=total_started,
+        )
+
+    def video_payload(self, estimate: dict, total_started: float) -> dict:
+        """Assemble the public `video` section from an estimate."""
+        extraction = estimate["extraction"]
+        anchor = estimate["anchor"]
+        video_section = {
+            "decode": extraction.to_dict(),
+            "gate": estimate["gate_detail"],
+            "pool": {
+                "requested": estimate["pool_size"],
+                "selected": estimate["pool"].selected,
+                "dropped_redundant": estimate["pool"].dropped_redundant,
+            },
+            "selection": estimate["selection_summary"],
+            "unusable_frames": estimate["unusable"],
+            "view_distribution": estimate["view_distribution"],
+            "model": {
+                "type": self.segmenter.model_type,
+                "classes": self.segmenter.class_count,
+                "guard": estimate["model_guard"],
+            },
+            "anchor": {
+                "frame_index": anchor["index"],
+                "timestamp": round(anchor["frame"].timestamp, 3),
+                "view": anchor["view"],
+                "view_confidence": round(anchor["view_confidence"], 4),
+            },
+            "measurement_source": estimate["measurement_source"],
+            "fusion": estimate["fusion"].to_dict(),
+            "per_view": estimate["per_view"],
+            "per_view_classification": [
+                {
+                    "frame_index": entry["frame_index"],
+                    "view": entry["view"],
+                    "confidence": entry["view_confidence"],
+                    "yaw_deg": entry["yaw_deg"],
+                    "quality_score": entry["quality_score"],
+                    "evidence": entry["evidence"],
+                }
+                for entry in estimate["per_view"]
+            ],
+            "per_dimension_provenance": estimate["orbit_measurement"].provenance(),
+            "orbit_geometry": estimate["orbit"].to_dict(),
+            "sampled_fps": round(extraction.sampled_fps, 3),
+            "scale": estimate["scale"],
+            "confidence": estimate["confidence"],
+            "rear_available": self.view_classifier.REAR_AVAILABLE,
+            "warnings": list(estimate["scale_notes"]),
+        }
+        video_section["timings"] = self._timings(
+            estimate["report"], round(time.perf_counter() - total_started, 3)
+        )
+        return video_section
+
+    # ── front half, reusable as a pure estimate ─────────────────────────────
+    def estimate_from_video(
+        self,
+        video_path: Path | str,
+        color: str = "#d9a7a2",
+        manual_measurements: Measurements | None = None,
+        automatic_appearance: bool = True,
+        min_views: int = FrameSelector.MIN_VIEWS,
+        max_views: int = FrameSelector.MAX_VIEWS,
+        target_views: int = FrameSelector.PREFERRED_VIEWS,
+        target_fps: float = DEFAULT_TARGET_FPS,
+        reference_width_mm: float | None = None,
+        report: PipelineReport | None = None,
+    ) -> dict:
+        """Decode, gate, select, segment, measure and fuse -- without deforming.
+
+        This is the whole measurement half of the video path. Exposing it
+        separately lets the viewer populate the measurement fields *before* the
+        user commits to a deformation, and means there is exactly one
+        implementation of decode/gate/select/measure/fuse rather than a second
+        copy for the estimate endpoint.
+        """
+        report = report if report is not None else PipelineReport()
 
         # ── 1. decode ───────────────────────────────────────────────────────
         stage = report.add("Video Decode")
@@ -166,38 +285,56 @@ class VideoDeformationPipeline(DeformationPipeline):
                 "inside the picture and no occluding hands."
             )
 
-        # ── 5. final coverage-aware selection (5-10 views) ──────────────────
+        # ── 5. classify the orbit as a sequence ─────────────────────────────
+        # Pose is only measurable relative to the clip: the frame head is widest
+        # square-on and compresses by cos(yaw), so the orbit itself supplies the
+        # frontal reference. Classifying frame by frame is what previously left
+        # every view labelled "front".
+        stage = report.add("View Classification")
+        started = stage.start()
+        orbit = analyse_orbit([entry["mask"] for entry in analysed])
+        orbit_views = self.view_classifier.classify_sequence([entry["mask"] for entry in analysed])
+        for entry, view in zip(analysed, orbit_views):
+            entry["view"] = view.label
+            entry["view_confidence"] = view.confidence
+            entry["view_metrics"] = view.metrics
+            entry["yaw_deg"] = view.metrics.get("yaw_deg", 0.0)
+        classification_distribution = Counter(entry["view"] for entry in analysed)
+        stage.finish(
+            started,
+            frames_classified=len(analysed),
+            view_distribution=dict(classification_distribution),
+            frontal_reference_width=orbit.frontal_reference_width,
+            reference_frame=orbit.reference_frame,
+            yaw_source="foreshortening" if orbit.frontal_reference_width else "unavailable",
+            notes=orbit.notes,
+        )
+
+        # ── 6. geometric-diversity selection (5-10 views) ───────────────────
         stage = report.add("View Selection")
         started = stage.start()
-        selection = self.frame_selector.select(
-            [entry["frame"] for entry in analysed],
-            [entry["quality"] for entry in analysed],
-            min_views=min_views,
-            max_views=max_views,
-            target_views=target_views,
-            index_space=len(extraction.frames),
-        )
-        selected_indices = {entry.frame.index for entry in selection.selected}
-        analysed = [entry for entry in analysed if entry["frame"].index in selected_indices]
-        selection_summary = selection.to_dict()
-        # The final pass only sees the pool, so its own "candidates" count is the
-        # pool size. Report the whole-clip picture instead: how many frames the
-        # gate accepted, how many of those were segmented, and how many survived.
-        selection_summary["candidates"] = gate_detail["accepted"]
-        selection_summary["pool_candidates"] = len(pool.selected)
+        selection = self._select_diverse(analysed, target_views, max_views, min_views)
+        if not selection:
+            raise ValueError(
+                "The orbit did not yield a usable set of distinct views; at least "
+                f"{min_views} are required."
+            )
+        analysed = selection
+        selection_summary = self._selection_summary(analysed, pool, gate_detail, orbit)
         view_distribution = Counter(entry["view"] for entry in analysed)
         stage.finish(
             started,
-            **{key: value for key, value in selection_summary.items() if key != "frames"},
-            view_distribution=dict(view_distribution),
+            **{key: value for key, value in selection_summary.items() if key not in {"frames", "per_view"}},
         )
 
-        # ── 6. per-view measurement ─────────────────────────────────────────
+        # ── 7. perspective-aware per-view measurement ───────────────────────
         stage = report.add("Per-View Measurement")
         started = stage.start()
         anchor = self._pick_anchor(analysed)
         style = self.classifier.classify_style(anchor["image"], anchor["mask"])
-        observations, per_view = self._measure_views(analysed, style, color)
+        orbit_measurement, observations, per_view = self._measure_orbit_views(
+            analysed, orbit, reference_width_mm
+        )
         # The anchor's lens contour drives both material lookup and the
         # deformation's contour hint, so it must never be left as None.
         if anchor["lens_contour"] is None:
@@ -207,13 +344,23 @@ class VideoDeformationPipeline(DeformationPipeline):
             views_measured=len(observations),
             anchor_frame=anchor["index"],
             anchor_view=anchor["view"],
+            mm_per_px=orbit_measurement.scale["mm_per_px"],
+            measured_dimensions=sorted(
+                {
+                    item.name
+                    for view in orbit_measurement.views
+                    for item in view.observations
+                }
+            ),
         )
 
-        # ── 7. weighted median + MAD fusion ─────────────────────────────────
+        # ── 8. weighted median + MAD fusion, gated by provenance ────────────
         stage = report.add("Weighted Median + MAD Fusion")
         started = stage.start()
         fusion = self.robust_fuser.fuse(observations)
         fused = fusion.measurements
+        scale_report = orbit_measurement.scale
+        scale_notes = orbit_measurement.notes
 
         if automatic_appearance:
             # Colour, material and shape come from the clearest frontal frame,
@@ -256,115 +403,254 @@ class VideoDeformationPipeline(DeformationPipeline):
             # fusion report is still returned so the estimate stays auditable.
             fused = manual_measurements.model_copy(deep=True)
             measurement_source = "manual"
+        elif not automatic_appearance:
+            fused = fused.model_copy(update={"color": color})
 
-        # ── 8. absolute scale ───────────────────────────────────────────────
-        # The video provides image-space geometry, not millimetres. The extractor
-        # anchors frame width to a fixed reference, so that assumption -- or a
-        # caller-supplied reference -- is what the numbers mean, and it is
-        # recorded in the manifest rather than left implicit.
-        scale = self._apply_scale(fused, reference_width_mm, manual_measurements)
-        if scale["applied"]:
-            fused = scale["measurements"]
-
+        # The scale was applied once, in the measurement layer, from the orbit's
+        # frontal reference width; confidence reports whether it was calibrated.
         confidence = fusion.confidence(
-            scale_assumption=scale["mode"], preferred_views=target_views
+            scale_assumption=scale_report["mode"],
+            preferred_views=target_views,
+            scale_calibrated=bool(scale_report["calibrated"]),
         )
+        for note in scale_notes:
+            if note not in confidence["notes"]:
+                confidence["notes"].append(note)
 
-        # ── 9-13. template selection through validated export ───────────────
-        return self._finish_from_measurements(
-            fused_measurements=fused,
-            anchor=anchor,
-            style=style,
-            template_override=template_override,
-            output_path=output_path,
-            report=report,
-            video_section={
-                "decode": extraction.to_dict(),
-                "gate": gate_detail,
-                "pool": {
-                    "requested": pool_size,
-                    "selected": len(pool.selected),
-                    "dropped_redundant": pool.dropped_redundant,
-                },
-                "selection": selection_summary,
-                "unusable_frames": unusable,
-                "view_distribution": dict(view_distribution),
-                "model": {
-                    "type": self.segmenter.model_type,
-                    "classes": self.segmenter.class_count,
-                    "guard": model_guard,
-                },
-                "anchor": {
-                    "frame_index": anchor["index"],
-                    "timestamp": round(anchor["frame"].timestamp, 3),
-                    "view": anchor["view"],
-                    "view_confidence": round(anchor["view_confidence"], 4),
-                },
-                "measurement_source": measurement_source,
-                "fusion": fusion.to_dict(),
-                "per_view": per_view,
-                "sampled_fps": round(extraction.sampled_fps, 3),
-                "scale": scale["report"],
-                "confidence": confidence,
-                "rear_available": self.view_classifier.REAR_AVAILABLE,
-            },
-            preview_dir=preview_dir,
-            selection=selection,
-            total_started=total_started,
-        )
+        return {
+            "measurements": fused,
+            "measurement_source": measurement_source,
+            "confidence": confidence,
+            "scale": scale_report,
+            "scale_notes": scale_notes,
+            "selection_summary": selection_summary,
+            "orbit_measurement": orbit_measurement,
+            "per_view": per_view,
+            "view_distribution": dict(view_distribution),
+            "classification_distribution": dict(classification_distribution),
+            "gate_detail": gate_detail,
+            "pool_size": pool_size,
+            "pool": pool,
+            "selected_views": analysed,
+            "unusable": unusable,
+            "model_guard": model_guard,
+            "extraction": extraction,
+            "orbit": orbit,
+            "anchor": anchor,
+            "style": style,
+            "fusion": fusion,
+            "report": report,
+        }
 
-    # ── scale ───────────────────────────────────────────────────────────────
-    def _apply_scale(
+    # ── geometric-diversity selection ───────────────────────────────────────
+    #: Preference order when filling the selection. Profiles come first because
+    #: they are the only source of temple evidence and are usually the rarest
+    #: usable pose in a clip that spends most of its time facing the camera.
+    DIVERSITY_ORDER = (
+        "side",
+        "top",
+        "left_front_perspective",
+        "right_front_perspective",
+        "front",
+    )
+
+    def _select_diverse(
         self,
-        measurements: Measurements,
-        reference_width_mm: float | None,
-        manual_measurements: Measurements | None,
-    ) -> dict:
-        """Rescale fused measurements to a caller-supplied reference width.
+        analysed: list[dict],
+        target_views: int,
+        max_views: int,
+        min_views: int,
+    ) -> list[dict]:
+        """Choose 5-10 views that cover as many distinct poses as possible.
 
-        ``frame_width`` is anchored to :data:`MeasurementExtractor.DEFAULT_FRAME_WIDTH_MM`
-        by construction, so an orbit video alone cannot establish absolute
-        millimetres. Passing ``reference_width_mm`` re-expresses every dimension
-        against a real known width; without it the estimate stays on the
-        extractor's documented assumption. Neither case is a measurement claim.
+        Ranking purely by image quality would pick the eight sharpest frames of
+        whatever pose dominated the clip -- which is how an orbit produced eight
+        frontal views and no temple evidence. This walks the view classes in
+        preference order, taking the best frame still available from each, so a
+        single profile frame beats a ninth near-duplicate front frame.
+        """
+        if not analysed:
+            return []
+
+        by_view: dict[str, list[dict]] = {}
+        for entry in analysed:
+            by_view.setdefault(entry["view"], []).append(entry)
+        for candidates in by_view.values():
+            candidates.sort(key=lambda item: (-item["quality"].score, item["index"]))
+
+        target = int(min(max(target_views, min_views), max_views))
+        chosen: list[dict] = []
+        chosen_indices: set[int] = set()
+
+        # Round-robin over the preference order, then any remaining class.
+        order = [label for label in self.DIVERSITY_ORDER if label in by_view]
+        order += [label for label in sorted(by_view) if label not in self.DIVERSITY_ORDER]
+        while len(chosen) < target:
+            progressed = False
+            for label in order:
+                if len(chosen) >= target:
+                    break
+                candidates = by_view[label]
+                while candidates and candidates[0]["index"] in chosen_indices:
+                    candidates.pop(0)
+                if not candidates:
+                    continue
+                entry = candidates.pop(0)
+                chosen_indices.add(entry["index"])
+                chosen.append(entry)
+                progressed = True
+            if not progressed:
+                break
+
+        # If an unusual clip cannot fill the target, fall back to the best of
+        # whatever is left rather than returning a short selection.
+        if len(chosen) < target:
+            remaining = [item for item in analysed if item["index"] not in chosen_indices]
+            remaining.sort(key=lambda item: (-item["quality"].score, item["index"]))
+            chosen.extend(remaining[: target - len(chosen)])
+
+        chosen.sort(key=lambda item: item["index"])
+        return chosen
+
+    def _selection_summary(
+        self,
+        chosen: list[dict],
+        pool: SelectionResult,
+        gate_detail: dict,
+        orbit,
+    ) -> dict:
+        indices = [entry["index"] for entry in chosen]
+        sectors = FrameSelector._sectors(len(pool.selected) + max(indices or [0]))
+        return {
+            "selected_count": len(chosen),
+            "indices": indices,
+            "candidates": gate_detail["accepted"],
+            "pool_candidates": len(pool.selected),
+            "gated_out": gate_detail["rejected"],
+            "dropped_redundant": pool.dropped_redundant,
+            "target_views": None,
+            "occupied_sectors": len({FrameSelector._sector_for(i, 8, 8) for i in indices}),
+            "total_sectors": 8,
+            "span_ratio": (
+                (max(indices) - min(indices)) / max(max(indices), 1) if len(indices) > 1 else 0.0
+            ),
+            "vorbit": orbit.to_dict(),
+            "per_view": [
+                {
+                    "frame_index": entry["index"],
+                    "timestamp": round(entry["frame"].timestamp, 3),
+                    "view": entry["view"],
+                    "view_confidence": round(entry["view_confidence"], 4),
+                    "yaw_deg": round(entry.get("yaw_deg", 0.0), 1),
+                    "quality_score": round(entry["quality"].score, 4),
+                    "sharpness": round(entry["quality"].metrics.get("laplacian_variance", 0.0), 2),
+                    "glare_ratio": round(entry["quality"].metrics.get("glare_ratio", 0.0), 4),
+                    "coverage": round(entry.get("coverage", 0.0), 4),
+                }
+                for entry in chosen
+            ],
+        }
+
+    # ── perspective-aware measurement ───────────────────────────────────────
+    def _measure_orbit_views(
+        self,
+        analysed: list[dict],
+        orbit,
+        reference_width_mm: float | None,
+    ) -> tuple[OrbitMeasurement, list[ViewObservation], list[dict]]:
+        """Measure each selected view in pixels, then convert once.
+
+        This replaces calling the still-image extractor per frame, which treated
+        every view as square-on and produced lens heights that disagreed by 25 mm
+        across a single orbit.
         """
         default_width = float(self.measurer.DEFAULT_FRAME_WIDTH_MM)
-        report = {
-            "mode": "reference_width",
-            "reference_width_mm": default_width,
-            "source": "extractor_default",
-            "calibrated": False,
-        }
-        if reference_width_mm is None or manual_measurements is not None:
-            return {"applied": False, "mode": report["mode"], "measurements": measurements,
-                    "report": report}
+        if reference_width_mm is None:
+            reference = default_width
+            source = "extractor_default"
+            calibrated = False
+        else:
+            reference = float(reference_width_mm)
+            if not 20.0 <= reference <= 250.0:
+                raise ValueError("reference_width_mm must be between 20 and 250 mm.")
+            source = "caller_supplied"
+            calibrated = True
 
-        width = float(reference_width_mm)
-        if not 20.0 <= width <= 250.0:
-            raise ValueError("reference_width_mm must be between 20 and 250 mm.")
-        measured = float(measurements.frame_width)
-        if measured <= 0:
-            raise ValueError("Video produced an invalid frame-width estimate for calibration.")
-
-        factor = width / measured
-        scaled = measurements.model_copy(
-            update={
-                name: round(float(getattr(measurements, name)) * factor, 2)
-                for name in (
-                    "frame_width", "lens_width", "lens_height",
-                    "bridge_width", "temple_length", "rim_thickness",
+        # Restrict the orbit context to the selected frames, keeping their masks.
+        points = [
+            OrbitViewGeometry(
+                index=entry["index"],
+                mask_geometry=analyse_mask(entry["mask"]),
+                yaw_deg=entry.get("yaw_deg", 0.0),
+                cos_yaw=float(orbit.views[0].cos_yaw) if orbit.views else 1.0,
+            )
+            for entry in analysed
+        ]
+        # Rebuild yaw per selected frame from the orbit's frontal reference.
+        for point, entry in zip(points, analysed):
+            if point.mask_geometry is not None and orbit.frontal_reference_width > 0:
+                ratio = point.mask_geometry.lens_cluster_width / float(
+                    orbit.frontal_reference_width
                 )
-            }
+                point.cos_yaw = max(0.0, min(1.0, ratio))
+                point.yaw_deg = math.degrees(math.acos(point.cos_yaw))
+                point.yaw_source = "foreshortening"
+        selected_orbit = OrbitGeometry(
+            views=points,
+            frontal_reference_width=orbit.frontal_reference_width,
+            median_cluster_height=orbit.median_cluster_height,
+            fill_front=orbit.fill_front,
+            fill_side=orbit.fill_side,
+            reference_frame=orbit.reference_frame,
+            notes=list(orbit.notes),
         )
-        report.update(
-            {
-                "reference_width_mm": width,
-                "source": "caller_supplied",
-                "calibrated": True,
-                "scale_factor": round(factor, 6),
-            }
+
+        measurement = measure_orbit(
+            selected_orbit,
+            labels=[entry["view"] for entry in analysed],
+            confidences=[entry["view_confidence"] for entry in analysed],
+            quality_scores=[entry["quality"].score for entry in analysed],
+            reference_width_mm=reference,
+            default_width_mm=default_width,
+            scale_source=source,
+            calibrated=calibrated,
         )
-        return {"applied": True, "mode": report["mode"], "measurements": scaled, "report": report}
+
+        observations: list[ViewObservation] = []
+        per_view: list[dict] = []
+        for entry, view_measurement in zip(analysed, measurement.views):
+            observations.append(
+                ViewObservation(
+                    view=entry["view"],
+                    measurements=view_measurement.measurements,
+                    weight=entry["weight"],
+                    label=f"frame {entry['index']}@{entry['frame'].timestamp:.2f}s",
+                    evidence=dict(view_measurement.evidence),
+                )
+            )
+            per_view.append(
+                {
+                    "frame_index": entry["index"],
+                    "timestamp": round(entry["frame"].timestamp, 3),
+                    "view": entry["view"],
+                    "view_confidence": round(entry["view_confidence"], 4),
+                    "yaw_deg": round(view_measurement.yaw_deg, 1),
+                    "quality_score": round(entry["quality"].score, 4),
+                    "sharpness": round(entry["quality"].metrics.get("laplacian_variance", 0.0), 2),
+                    "glare_ratio": round(entry["quality"].metrics.get("glare_ratio", 0.0), 4),
+                    "coverage": round(entry.get("coverage", 0.0), 4),
+                    "weight": round(entry["weight"], 4),
+                    "evidence": dict(view_measurement.evidence),
+                    "measured": {
+                        name: getattr(view_measurement.measurements, name)
+                        for name in (
+                            "frame_width", "lens_width", "lens_height",
+                            "bridge_width", "temple_length", "rim_thickness",
+                        )
+                    },
+                }
+            )
+        return measurement, observations, per_view
 
     # ── segmentation model guard ────────────────────────────────────────────
     def _model_guard_note(self) -> str:
@@ -411,7 +697,6 @@ class VideoDeformationPipeline(DeformationPipeline):
                 continue
 
             combined = self._combine_quality(item.quality, visibility)
-            view = self.view_classifier.classify_orbit_view(image, mask)
             coverage = visibility.metrics["subject_coverage"]
             analysed.append(
                 {
@@ -423,9 +708,11 @@ class VideoDeformationPipeline(DeformationPipeline):
                     "visibility": visibility,
                     "segmentation_model": masks["model_type"],
                     "segmentation_fallback": bool(masks.get("fallback", False)),
-                    "view": view.label,
-                    "view_confidence": view.confidence,
-                    "view_metrics": view.metrics,
+                    # The view label is assigned later, for the whole sequence:
+                    # pose is only measurable relative to the orbit.
+                    "view": "unknown",
+                    "view_confidence": 0.0,
+                    "view_metrics": {},
                     "quality": combined,
                     "weight": self._view_weight(combined.score, coverage),
                     "lens_contour": None,
@@ -466,74 +753,6 @@ class VideoDeformationPipeline(DeformationPipeline):
         pool = frontal or analysed
         return max(pool, key=lambda item: item["weight"] * (1.0 + item["coverage"]))
 
-    def _measure_views(
-        self, analysed: list[dict], style, color: str
-    ) -> tuple[list[ViewObservation], list[dict]]:
-        """Measure each view, routing dimensions to the view that can see them.
-
-        The weighted-median fuser already zeroes out the combinations a view
-        cannot supply, so a profile's meaningless frame width is ignored there.
-        What this method must get right is feeding the extractor the argument
-        that makes it measure the right thing: a profile measures its temple
-        through the extractor's ``side`` input, and a plan view measures rim
-        thickness through its ``top`` input.
-        """
-        observations: list[ViewObservation] = []
-        per_view: list[dict] = []
-
-        for item in analysed:
-            image, mask, view = item["image"], item["mask"], item["view"]
-            if view == "side":
-                measurements, contour = self.measurer.extract_from_images(
-                    image, side=image, mask=mask, shape=style.shape,
-                    material=style.material, nose_pads=style.nose_pads, color=color,
-                )
-            elif view == "top":
-                measurements, contour = self.measurer.extract_from_images(
-                    image, side=None, mask=mask, shape=style.shape,
-                    material=style.material, nose_pads=style.nose_pads, color=color,
-                    top=image,
-                )
-            else:
-                measurements, contour = self.measurer.extract_from_images(
-                    image, side=None, mask=mask, shape=style.shape,
-                    material=style.material, nose_pads=style.nose_pads, color=color,
-                )
-
-            if item["view"] in FRONTAL_LABELS and item["lens_contour"] is None:
-                item["lens_contour"] = contour
-
-            item["measurements"] = measurements
-            observations.append(
-                ViewObservation(
-                    view=view,
-                    measurements=measurements,
-                    weight=item["weight"],
-                    label=f"frame {item['index']}@{item['frame'].timestamp:.2f}s",
-                )
-            )
-            per_view.append(
-                {
-                    "frame_index": item["index"],
-                    "timestamp": round(item["frame"].timestamp, 3),
-                    "view": view,
-                    "view_confidence": round(item["view_confidence"], 4),
-                    "quality_score": round(item["quality"].score, 4),
-                    "sharpness": round(item["quality"].metrics.get("laplacian_variance", 0.0), 2),
-                    "glare_ratio": round(item["quality"].metrics.get("glare_ratio", 0.0), 4),
-                    "weight": round(item["weight"], 4),
-                    "coverage": round(item["coverage"], 4),
-                    "measured": {
-                        name: getattr(measurements, name)
-                        for name in (
-                            "frame_width", "lens_width", "lens_height",
-                            "bridge_width", "temple_length", "rim_thickness",
-                        )
-                    },
-                }
-            )
-        return observations, per_view
-
     # ── shared tail: template selection -> deformation -> export ────────────
     def _finish_from_measurements(
         self,
@@ -545,7 +764,7 @@ class VideoDeformationPipeline(DeformationPipeline):
         report: PipelineReport,
         video_section: dict,
         preview_dir: Path | str | None = None,
-        selection: SelectionResult | None = None,
+        selected_views: list[dict] | None = None,
         total_started: float | None = None,
     ) -> dict:
         """Template scoring, deformation, materials, export and validation."""
@@ -612,8 +831,23 @@ class VideoDeformationPipeline(DeformationPipeline):
         meta_path = out.with_suffix(".metadata.json")
         stage.finish(started, output=str(out), size_kb=round(out.stat().st_size / 1024, 1))
 
-        if preview_dir is not None and selection is not None:
-            video_section["previews"] = self._write_previews(selection, Path(preview_dir))
+        if preview_dir is not None and selected_views:
+            video_section["previews"] = self._write_previews(selected_views, Path(preview_dir))
+
+        # ── validation: completing is not the same as being trustworthy ─────
+        stage = report.add("Geometry Validation")
+        started = stage.start()
+        production_mode = os.getenv("DEFIRM_PRODUCTION_MODE", "").lower() in {"1", "true", "yes"}
+        validation = build_validation_report(
+            acceptance, quality.to_dict(), production_mode=production_mode
+        )
+        video_section["validation"] = validation
+        stage.finish(
+            started,
+            overall=validation["overall"],
+            self_intersections=validation["self_intersections"],
+            production_mode=production_mode,
+        )
 
         total_seconds = None
         if total_started is not None:
@@ -715,6 +949,9 @@ class VideoDeformationPipeline(DeformationPipeline):
                 "warnings": selection.get("warnings", []),
             },
             "views": video_section.get("per_view", []),
+            "per_view_classification": video_section.get("per_view_classification", []),
+            "per_dimension_provenance": video_section.get("per_dimension_provenance", {}),
+            "orbit_geometry": video_section.get("orbit_geometry", {}),
             "rejected_frames": video_section.get("unusable_frames", []),
             "view_distribution": video_section.get("view_distribution", {}),
             "rear_available": video_section.get("rear_available"),
@@ -722,6 +959,8 @@ class VideoDeformationPipeline(DeformationPipeline):
             "fusion": video_section.get("fusion", {}),
             "confidence": video_section.get("confidence", {}),
             "scale": video_section.get("scale", {}),
+            "validation": video_section.get("validation", {}),
+            "warnings": video_section.get("warnings", []),
             "measurement_source": video_section.get("measurement_source"),
             "template": template_name,
             "quality": quality.to_dict(),
@@ -739,7 +978,7 @@ class VideoDeformationPipeline(DeformationPipeline):
 
     # ── previews ────────────────────────────────────────────────────────────
     @classmethod
-    def _write_previews(cls, selection: SelectionResult, preview_dir: Path) -> dict:
+    def _write_previews(cls, selected_views: list[dict], preview_dir: Path) -> dict:
         """Write the chosen frames plus a contact sheet for the viewer.
 
         Encoding goes through ``imencode`` rather than ``imwrite`` on purpose:
@@ -750,12 +989,15 @@ class VideoDeformationPipeline(DeformationPipeline):
         written: list[str] = []
         tiles: list[np.ndarray] = []
 
-        for item in selection.selected:
-            name = f"frame_{item.frame.index:03d}.jpg"
-            thumb = cls._thumbnail(item.frame.image)
+        for entry in selected_views:
+            frame = entry["frame"]
+            name = f"frame_{frame.index:03d}.jpg"
+            thumb = cls._thumbnail(frame.image)
             if cls._write_jpeg(preview_dir / name, thumb):
                 written.append(name)
-            tiles.append(cls._labelled(thumb, f"{item.frame.index} {item.frame.timestamp:.1f}s"))
+            tiles.append(
+                cls._labelled(thumb, f"{frame.index} {frame.timestamp:.1f}s {entry['view'][:6]}")
+            )
 
         grid_ok = False
         if tiles:

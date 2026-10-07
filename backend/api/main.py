@@ -177,6 +177,95 @@ async def suggest_from_images(
         raise HTTPException(500, "Size suggestion failed. Retry or enter measurements manually.") from exc
 
 
+@app.post("/api/measurements/suggest/video")
+async def suggest_from_orbit_video(
+    video: UploadFile = File(..., description="360-degree orbit video to measure"),
+    min_views: int = Form(5),
+    target_views: int = Form(8),
+    max_views: int = Form(10),
+    target_fps: float = Form(6.0),
+    reference_width_mm: float | None = Form(None),
+):
+    """Measure an orbit video *without* deforming it.
+
+    Runs the same decode -> gate -> select -> segment -> measure -> fuse half of
+    the video pipeline that the deform endpoint uses, so the viewer can show the
+    auto-measured sizes and the template that would be chosen before the user
+    commits to a deformation. No GLB is produced and nothing is exported.
+    """
+    job_id = uuid.uuid4().hex
+    work_dir = OUTPUT_DIR / f"_upload_suggest_{job_id}"
+    work_dir.mkdir(parents=True, exist_ok=True)
+
+    try:
+        if not 1 <= min_views <= target_views <= max_views <= 48:
+            raise HTTPException(
+                400, "View counts must satisfy 1 <= min_views <= target_views <= max_views <= 48"
+            )
+        if reference_width_mm is not None and not 20.0 <= float(reference_width_mm) <= 250.0:
+            raise HTTPException(400, "reference_width_mm must be between 20 and 250 mm")
+
+        suffix = video_suffix(video.filename)
+        contents = await read_video(video)
+        video_path = work_dir / f"orbit{suffix}"
+        video_path.write_bytes(contents)
+
+        estimate = await run_job(
+            video_pipeline.estimate_from_video,
+            video_path,
+            min_views=min_views,
+            max_views=max_views,
+            target_views=target_views,
+            target_fps=target_fps,
+            reference_width_mm=reference_width_mm,
+        )
+        measurements = estimate["measurements"]
+        # Score the template here so the viewer can show it, using the same
+        # matcher the deformation path will use -- not a second selection rule.
+        features = video_pipeline.feature_extractor.from_measurements(
+            measurements, estimate["style"]
+        )
+        match = video_pipeline.matcher.match(features, None, measurements=measurements)
+        template_name = match.best.template.name
+        confidence = estimate["confidence"]
+        scale_source = str(estimate["scale"]["source"]).replace("_", " ")
+        return {
+            "job_id": job_id,
+            "measurements": measurements.model_dump(),
+            "template": template_name,
+            "ranges": input_ranges(measurements, template_name),
+            "confidence": confidence,
+            "scale": estimate["scale"],
+            "selection": estimate["selection_summary"],
+            "view_distribution": estimate["view_distribution"],
+            "rear_available": video_pipeline.view_classifier.REAR_AVAILABLE,
+            "model": {
+                "type": video_pipeline.segmenter.model_type,
+                "classes": video_pipeline.segmenter.class_count,
+                "guard": estimate["model_guard"],
+            },
+            "timings": video_pipeline._timings(estimate["report"], None),
+            "pipeline": estimate["report"].to_dict(),
+            "note": (
+                f"Measured from {estimate['selection_summary']['selected_count']} orbit views "
+                f"({confidence['level']} confidence). Sizes are anchored to the {scale_source} "
+                f"of {estimate['scale']['reference_width_mm']} mm unless you supply a reference width."
+            ),
+            "adjustments": list(confidence.get("notes", [])),
+        }
+    except HTTPException:
+        raise
+    except ValueError as exc:
+        logger.info("Rejected orbit estimate job %s: %s", job_id, exc)
+        raise HTTPException(422, str(exc)) from exc
+    except Exception as exc:
+        logger.exception("Orbit estimate job %s failed", job_id)
+        raise HTTPException(500, "Video measurement failed. Check server logs with job ID " + job_id) from exc
+    finally:
+        import shutil as _shutil
+        _shutil.rmtree(work_dir, ignore_errors=True)
+
+
 @app.post("/api/deform")
 async def deform_from_images(
     front: UploadFile = File(..., description="Front product image"),
