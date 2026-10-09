@@ -801,6 +801,7 @@ function renderPipelineStages(stages) {
     'Template Deformation': '🔧',
     'Texture Mapping':      '🎨',
     'GLB Export':           '📦',
+    'Geometry Validation':  '✅',
     'Multi-View Classification and Extraction': '🖼️',
     'Template Scoring': '📋',
     'Mesh Quality Optimization': '🧼',
@@ -921,7 +922,8 @@ document.getElementById('generate-btn').addEventListener('click', async () => {
     statusBox.textContent =
       `${data.quality?.passed === false ? 'Generated — dimensional review required' : '✓ Done'}  ·  Template: ${data.template}\n` +
       `Frame ${m.frame_width}mm  ·  Lens ${m.lens_width}×${m.lens_height}mm\n` +
-      `Bridge ${m.bridge_width}mm  ·  Temple ${m.temple_length}mm  ·  Rim ${m.rim_thickness}mm`;
+      `Bridge ${m.bridge_width}mm  ·  Temple ${m.temple_length}mm  ·  Rim ${m.rim_thickness}mm\n` +
+      `Measurement source: ${data.video?.measurement_source || 'unknown'}${data.video?.confidence?.level ? ` · Confidence: ${data.video.confidence.level}` : ''}`;
 
     renderPipelineStages(data.pipeline);
     if (data.quality?.warnings?.length) statusBox.textContent += '\n' + data.quality.warnings.join('\n');

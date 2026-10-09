@@ -20,9 +20,16 @@ upload video
   -> weighted median + MAD fusion       backend/fusion/robust_fuser.py
   -> template selection
   -> existing deformation engine        backend/pipeline/deformation_pipeline.py
-  -> GLB + independent GLB validation
+  -> GLB Export -> Geometry Validation
   -> manifest + selected frames + contact sheet
 ```
+
+The pipeline report uses stable stage names. `GLB Export` records the artifact
+write; the final `Geometry Validation` stage records post-export acceptance and
+production-mode checks. Video measurements report `fused` when sourced from
+automatic multi-view fusion and `manual_override` only when the caller explicitly
+supplies override measurements. The same source label is included in the API
+response and video manifest.
 
 Orchestration lives in `backend/pipeline/video_pipeline.py`, which subclasses
 `DeformationPipeline` and reuses the matcher, deformers, material pass and

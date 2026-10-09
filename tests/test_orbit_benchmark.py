@@ -18,6 +18,8 @@ import itertools
 import json
 import math
 import shutil
+import subprocess
+import sys
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -1016,13 +1018,23 @@ class DependencyGuardTests(unittest.TestCase):
     """
 
     def test_annotation_and_metric_paths_do_not_import_the_model_stack(self) -> None:
-        import sys
-
-        # ``backend.pipeline`` and ``backend.segmentation`` pull in YOLO/torch
-        # machinery. The harness imports them lazily, so nothing above should
-        # have dragged them in.
-        self.assertNotIn("backend.pipeline.video_pipeline", sys.modules)
-        self.assertNotIn("backend.segmentation.segmenter", sys.modules)
+        # Test in a fresh interpreter: the full pytest collection imports the
+        # API (and therefore the canonical video pipeline) before this test
+        # runs. The benchmark's import contract is independent of that order.
+        probe = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                "import scripts.benchmark_orbit_videos, sys; "
+                "assert 'backend.pipeline.video_pipeline' not in sys.modules; "
+                "assert 'backend.segmentation.segmenter' not in sys.modules",
+            ],
+            cwd=Path(__file__).resolve().parents[1],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(probe.returncode, 0, probe.stderr)
 
 
 if __name__ == "__main__":  # pragma: no cover

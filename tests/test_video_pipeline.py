@@ -632,7 +632,7 @@ class TestOrbitVideoEndToEnd(unittest.TestCase):
         self.assertIn("View Selection", names)
         self.assertIn("Weighted Median + MAD Fusion", names)
         self.assertIn("Template Deformation", names)
-        self.assertEqual(names[-1], "GLB Export")
+        self.assertEqual(names[-2:], ["GLB Export", "Geometry Validation"])
         self.assertTrue(all(stage["status"] == "done" for stage in result["pipeline"]))
 
     def test_reference_width_calibrates_the_scale_assumption(self) -> None:
@@ -686,6 +686,7 @@ class TestOrbitVideoEndToEnd(unittest.TestCase):
         self.assertIn("Weighted Median + MAD Fusion", names)
         self.assertNotIn("Template Deformation", names)
         self.assertNotIn("GLB Export", names)
+        self.assertNotIn("Geometry Validation", names)
 
     def test_the_previewed_estimate_matches_the_deformed_result(self) -> None:
         """What the viewer previews must be what the build actually fuses."""
@@ -728,10 +729,12 @@ class TestOrbitVideoEndToEnd(unittest.TestCase):
         result = VideoDeformationPipeline().run_from_video(
             self.video, output, manual_measurements=manual
         )
-        self.assertEqual(result["video"]["measurement_source"], "manual")
+        self.assertEqual(result["video"]["measurement_source"], "manual_override")
         self.assertAlmostEqual(result["measurements"]["frame_width"], 132.0, delta=0.01)
         # The fusion audit is still present so the estimate stays inspectable.
         self.assertIn("frame_width", result["video"]["fusion"]["dimensions"])
+        manifest = json.loads(Path(result["video_manifest_json"]).read_text(encoding="utf-8"))
+        self.assertEqual(manifest["measurement_source"], "manual_override")
 
     def test_degraded_clip_still_reports_which_frames_were_dropped(self) -> None:
         from backend.video.selection import FrameSelector
