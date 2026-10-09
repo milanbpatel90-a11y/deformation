@@ -3,6 +3,8 @@
   "template_name": "rectangle_plastic",
   "template": "rectangle_plastic",
   "style": "plastic_rectangle",
+  "deformation_available": false,
+  "unavailable_reason": "The GLB scene contains generic meshes and transform/part assignments that do not support a validated one-to-one mapping for all required deformable components.",
   "parts": {
     "frame": "Frame",
     "bridge": "Bridge",

@@ -38,6 +38,7 @@ class TemplateMatcher:
     ) -> TemplateMatchResult:
         if override:
             template = self.library.load(override)
+            validate_template(self.library, template)
             issues = incompatibilities(template, measurements) if measurements is not None else []
             if issues:
                 raise MeasurementCompatibilityError(f"{template.name}: " + "; ".join(issues))

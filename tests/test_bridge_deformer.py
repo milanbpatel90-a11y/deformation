@@ -41,13 +41,21 @@ class BridgeDeformerTests(unittest.TestCase):
         left_rim_before = ctx.mesh("LeftRim").vertices.copy()
         right_rim_before = ctx.mesh("RightRim").vertices.copy()
         left_temple_before = ctx.mesh("LeftTemple").vertices.copy()
+        right_temple_before = ctx.mesh("RightTemple").vertices.copy()
+        left_lens_before = ctx.mesh("LeftLens").vertices.copy()
+        right_lens_before = ctx.mesh("RightLens").vertices.copy()
+        bridge_vertices_before = ctx.mesh("Bridge").vertices.copy()
         bridge_before = ctx.mesh("Bridge").bounds.copy()
         ctx = BridgeDeformer().apply(ctx)
         bridge_after = ctx.mesh("Bridge").bounds.copy()
         self.assertGreater(float(bridge_after[1, 0] - bridge_after[0, 0]), float(bridge_before[1, 0] - bridge_before[0, 0]))
+        self.assertGreater(float(np.linalg.norm(ctx.mesh("Bridge").vertices - bridge_vertices_before, axis=1).max()), 0.0)
         self.assertAlmostEqual(float(np.linalg.norm(ctx.mesh("LeftRim").vertices - left_rim_before, axis=1).max()), 0.0, places=6)
         self.assertAlmostEqual(float(np.linalg.norm(ctx.mesh("RightRim").vertices - right_rim_before, axis=1).max()), 0.0, places=6)
         self.assertAlmostEqual(float(np.linalg.norm(ctx.mesh("LeftTemple").vertices - left_temple_before, axis=1).max()), 0.0, places=6)
+        self.assertAlmostEqual(float(np.linalg.norm(ctx.mesh("RightTemple").vertices - right_temple_before, axis=1).max()), 0.0, places=6)
+        self.assertAlmostEqual(float(np.linalg.norm(ctx.mesh("LeftLens").vertices - left_lens_before, axis=1).max()), 0.0, places=6)
+        self.assertAlmostEqual(float(np.linalg.norm(ctx.mesh("RightLens").vertices - right_lens_before, axis=1).max()), 0.0, places=6)
 
 
 if __name__ == "__main__":

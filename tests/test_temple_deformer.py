@@ -35,8 +35,14 @@ class TempleDeformerTests(unittest.TestCase):
     def test_temple_deformation_keeps_frame_fixed_and_extends_temples(self) -> None:
         ctx = self._context()
         frame_before = ctx.mesh("Frame").vertices.copy()
+        unrelated_before = {
+            name: ctx.mesh(name).vertices.copy()
+            for name in ("Bridge", "LeftRim", "RightRim", "LeftLens", "RightLens")
+        }
         left_before = ctx.mesh("LeftTemple").bounds.copy()
         right_before = ctx.mesh("RightTemple").bounds.copy()
+        left_vertices_before = ctx.mesh("LeftTemple").vertices.copy()
+        right_vertices_before = ctx.mesh("RightTemple").vertices.copy()
         ctx = TempleDeformer().apply(ctx)
         frame_after = ctx.mesh("Frame").vertices.copy()
         left_after = ctx.mesh("LeftTemple").bounds.copy()
@@ -44,6 +50,10 @@ class TempleDeformerTests(unittest.TestCase):
         self.assertAlmostEqual(float(np.linalg.norm(frame_after - frame_before, axis=1).max()), 0.0, places=6)
         self.assertGreater(abs(float(left_after[0, 0])), abs(float(left_before[0, 0])))
         self.assertGreater(abs(float(right_after[1, 0])), abs(float(right_before[1, 0])))
+        self.assertGreater(float(np.linalg.norm(ctx.mesh("LeftTemple").vertices-left_vertices_before, axis=1).max()), 0.0)
+        self.assertGreater(float(np.linalg.norm(ctx.mesh("RightTemple").vertices-right_vertices_before, axis=1).max()), 0.0)
+        for name, before in unrelated_before.items():
+            np.testing.assert_array_equal(ctx.mesh(name).vertices, before)
         self.assertTrue(ctx.metadata["temple_deformation"]["applied"])
 
 

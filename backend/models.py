@@ -105,6 +105,8 @@ class TemplateProfile(BaseModel):
 
 class TemplateInfo(BaseModel):
     deformation_mode: str = "parts"
+    deformation_available: bool = True
+    unavailable_reason: str | None = None
     name: str
     shape: FrameShape
     material: FrameMaterial

@@ -37,7 +37,17 @@ class RimDeformerTests(unittest.TestCase):
             left=[[0.04, 0.18], [0.10, 0.06], [0.38, 0.04], [0.46, 0.20], [0.46, 0.76], [0.36, 0.92], [0.10, 0.90], [0.03, 0.70]],
             right=[[0.54, 0.20], [0.62, 0.04], [0.90, 0.06], [0.96, 0.18], [0.97, 0.70], [0.90, 0.90], [0.64, 0.92], [0.54, 0.76]],
         )
+        left_before = ctx.mesh("LeftRim").vertices.copy()
+        right_before = ctx.mesh("RightRim").vertices.copy()
+        bridge_before = ctx.mesh("Bridge").vertices.copy()
+        lenses_before = {name: ctx.mesh(name).vertices.copy() for name in ("LeftLens", "RightLens")}
+        temples_before = {name: ctx.mesh(name).vertices.copy() for name in ("LeftTemple", "RightTemple")}
         ctx = RimDeformer(contour_strength=0.8).apply(ctx, contour)
+        for name, before in (("LeftRim", left_before), ("RightRim", right_before)):
+            self.assertGreater(float(np.linalg.norm(ctx.mesh(name).vertices - before, axis=1).max()), 0.0)
+        np.testing.assert_array_equal(ctx.mesh("Bridge").vertices, bridge_before)
+        for name, before in {**lenses_before, **temples_before}.items():
+            np.testing.assert_array_equal(ctx.mesh(name).vertices, before)
         left = ctx.mesh("LeftRim").bounds
         right = ctx.mesh("RightRim").bounds
         self.assertAlmostEqual(abs(left[0, 0]), abs(right[1, 0]), places=3)

@@ -104,6 +104,8 @@ class TemplateLibrary:
             dimensions=dims,
             parts=data["parts"],
             profile=profile,
+            deformation_available=bool(data.get("deformation_available", True)),
+            unavailable_reason=data.get("unavailable_reason"),
         )
         self._cache[name] = info
         return info

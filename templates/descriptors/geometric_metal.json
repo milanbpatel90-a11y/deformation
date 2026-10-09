@@ -1,17 +1,8 @@
 {
   "version": "1.0",
   "template_name": "geometric_metal",
-
-  "mesh_aliases": {
-    "Frame":        "Plane_glasses_mat_0",
-    "Bridge":       "Plane_glasses_mat_0",
-    "LeftRim":      "Plane_glasses_mat_0",
-    "RightRim":     "Plane_glasses_mat_0",
-    "LeftLens":     "Cube.002_glass_mat_0",
-    "RightLens":    "Cube.002_glass_mat_0",
-    "LeftTemple":   "Plane.001_glasses_mat_0",
-    "RightTemple":  "Plane.002_glasses_mat_0"
-  },
+  "deformation_available": false,
+  "unavailable_reason": "The front-frame mesh is connected across both rims and the bridge. A safe, watertight component split has not been validated.",
 
   "hinges": {
     "left":  { "part": "LeftTemple",  "confidence": 1.0 },

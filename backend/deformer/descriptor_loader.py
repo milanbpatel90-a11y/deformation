@@ -121,6 +121,10 @@ class DescriptorLoader:
 
         payload = json.loads(resolved_descriptor.read_text(encoding="utf-8"))
         self._validate_payload(payload, resolved_descriptor)
+        if payload.get("deformation_available") is False:
+            reason = payload.get("unavailable_reason")
+            detail = f": {reason}" if reason else ""
+            raise ValueError(f"Template '{template_name}' is unavailable for component deformation{detail}")
 
         scene = trimesh.load(resolved_template, force="scene")
         raw_geometry = {
@@ -129,10 +133,8 @@ class DescriptorLoader:
         if not raw_geometry:
             raise ValueError(f"No mesh geometry found in template scene: {resolved_template}")
 
-        # Apply mesh aliases: remap actual GLB mesh names → logical part names.
-        # Supports two sources:
-        #   1. "mesh_aliases" key in descriptor JSON  (explicit mapping)
-        #   2. Auto-inference when GLB has no structured names (fallback heuristic)
+        # Apply explicit, one-to-one aliases only. Connected-component
+        # heuristics cannot safely infer independently deformable eyewear parts.
         geometry = self._resolve_geometry_aliases(raw_geometry, payload)
 
         empty_anchors = self._load_empty_anchors(payload, scene)
@@ -447,13 +449,20 @@ class DescriptorLoader:
         aliases = payload.get("mesh_aliases", {})
         resolved = dict(raw_geometry)
         claimed = {}
+        claimed_objects = {}
         for logical in sorted(required):
             actual = logical if logical in raw_geometry else aliases.get(logical)
             if actual not in raw_geometry:
                 raise ValueError(f"Template requires a separate named mesh for {logical}; prepare the asset before deformation")
             if actual in claimed:
                 raise ValueError(f"Template aliases {claimed[actual]} and {logical} share mesh {actual}; split the asset into independent parts")
+            if id(raw_geometry[actual]) in claimed_objects:
+                raise ValueError(
+                    f"Template aliases {claimed_objects[id(raw_geometry[actual])]} and {logical} "
+                    "to the same mesh object; split the asset into independent parts"
+                )
             claimed[actual] = logical
+            claimed_objects[id(raw_geometry[actual])] = logical
             resolved[logical] = raw_geometry[actual]
         return resolved
 

@@ -27,5 +27,7 @@
     "LeftRim",
     "RightRim"
   ],
-  "rim_pull_strength": 0.45
+  "rim_pull_strength": 0.45,
+  "deformation_available": false,
+  "unavailable_reason": "The packaged GLB has generic mesh geometry whose transformed parts do not map reliably to the declared frame, bridge, rims, lenses and temples."
 }

@@ -13,6 +13,7 @@ from backend.api import main, rim_detection_routes, safety
 from backend.deformer.descriptor_loader import DescriptorLoader
 from backend.materials.pbr import apply_materials
 from backend.models import Measurements
+from tests.template_fixture import enable_procedural_template
 from backend.pipeline.deformation_pipeline import DeformationPipeline
 from backend.template_library.loader import TemplateLibrary
 from backend.template_library.readiness import template_readiness
@@ -147,12 +148,24 @@ def test_aliases_cannot_share_physical_mesh():
         DescriptorLoader._resolve_geometry_aliases({"combined": mesh}, {"mesh_aliases": aliases})
 
 
+def test_different_geometry_names_cannot_reference_same_mesh_object():
+    mesh = trimesh.creation.box()
+    raw = {"frame_mesh": mesh, "bridge_mesh": mesh}
+    aliases = {name: actual for name, actual in zip(
+        ("Frame", "Bridge", "LeftLens", "RightLens", "LeftTemple", "RightTemple", "LeftRim", "RightRim"),
+        ("frame_mesh", "bridge_mesh", "LeftLens", "RightLens", "LeftTemple", "RightTemple", "LeftRim", "RightRim"),
+    )}
+    with pytest.raises(ValueError, match="same mesh object"):
+        DescriptorLoader._resolve_geometry_aliases(raw, {"mesh_aliases": aliases})
+
+
 @pytest.fixture
 def prepared_pipeline(tmp_path):
     source = main.library.templates_dir
     (tmp_path / "descriptors").mkdir()
     shutil.copy(source / "geometric_metal.json", tmp_path)
     shutil.copy(source / "descriptors/geometric_metal.json", tmp_path / "descriptors")
+    enable_procedural_template(tmp_path)
     build_geometric_metal_scene().export(tmp_path / "geometric_metal.glb")
     return DeformationPipeline(tmp_path)
 
@@ -167,6 +180,12 @@ def test_manual_pipeline_exports_prepared_geometry(tmp_path, prepared_pipeline):
     scene = trimesh.load(output, force="scene")
     assert len(scene.geometry) >= 8
     assert all(np.isfinite(mesh.vertices).all() for mesh in scene.geometry.values())
+    assert {"Frame", "Bridge", "LeftRim", "RightRim", "LeftLens", "RightLens",
+            "LeftTemple", "RightTemple"}.issubset(scene.geometry)
+    assert all(len(mesh.faces) > 0 and np.isfinite(mesh.vertex_normals).all()
+               for mesh in scene.geometry.values())
+    assert all(getattr(mesh.visual, "material", None) is not None for mesh in scene.geometry.values())
+    assert result["quality"]["passed"] is True
     readiness = template_readiness(TemplateLibrary(tmp_path))
     assert not readiness["ready"]
     assert readiness["required_template"] == "GT_001"

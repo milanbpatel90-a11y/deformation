@@ -4,6 +4,9 @@ from pathlib import Path
 
 
 def validate_template(library, info):
+    if not info.deformation_available:
+        detail = f": {info.unavailable_reason}" if info.unavailable_reason else ""
+        raise ValueError(f"Template '{info.name}' is unavailable for deformation{detail}")
     from backend.deformer.basis_deformer import BasisDeformer
     from backend.deformer.descriptor_loader import DescriptorLoader
     if info.deformation_mode == "basis":
