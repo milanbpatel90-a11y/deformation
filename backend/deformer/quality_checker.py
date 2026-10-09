@@ -56,6 +56,11 @@ class QualityChecker:
         weights = {"geometry": 0.3, "constraints": 0.4, "symmetry": 0.3}
         total = sum(score * weights[k] for k, score in report.breakdown.items())
         report.score = total
+
+        geometry_warnings = context.metadata.get("quality_warnings", [])
+        if geometry_warnings:
+            report.passed = False
+            report.warnings.extend(geometry_warnings)
         
         if total < 80.0:
             report.passed = False
@@ -71,12 +76,36 @@ class QualityChecker:
         score = 100.0
         try:
             frame = context.mesh("Frame")
-            bounds = frame.bounds
-            extents = bounds[1] - bounds[0]
+            extents = frame.extents
             if extents[0] > 200 or extents[0] < 50:
                 score -= 30.0
         except KeyError:
             score -= 50.0
+
+        # Part-level deformers require independent mesh objects. Shared objects
+        # let one stage silently deform several logical parts at once.
+        required_parts = ("Frame", "Bridge", "LeftRim", "RightRim")
+        present = [(name, context.meshes[name]) for name in required_parts if name in context.meshes]
+        shared = set()
+        for index, (name, mesh) in enumerate(present):
+            for other_name, other_mesh in present[index + 1:]:
+                if mesh is other_mesh:
+                    shared.update((name, other_name))
+        if shared:
+            score = 0.0
+            context.metadata.setdefault("quality_warnings", []).append(
+                "Logical frame parts share mesh objects: " + ", ".join(sorted(shared))
+            )
+
+        try:
+            bridge_width = float(context.mesh("Bridge").extents[0])
+            if bridge_width > 40.0:
+                score = 0.0
+                context.metadata.setdefault("quality_warnings", []).append(
+                    f"Bridge X extent is implausibly wide: {bridge_width:.1f} mm (limit 40 mm)"
+                )
+        except KeyError:
+            score -= 25.0
         return max(0.0, score)
 
     def _score_constraints(self, context: DeformationContext) -> float:

@@ -31,6 +31,11 @@ class BridgeDeformerTests(unittest.TestCase):
         scene = trimesh.load(info.glb_path, force="scene")
         return DeformationContext(template_info=info, template_scene=scene, descriptor=descriptor, measurements=measurements)
 
+    def test_frame_parts_are_distinct_mesh_objects(self) -> None:
+        ctx = self._context()
+        parts = [ctx.mesh(name) for name in ("Frame", "Bridge", "LeftRim", "RightRim")]
+        self.assertEqual(len({id(mesh) for mesh in parts}), len(parts))
+
     def test_bridge_deformation_changes_bridge_only(self) -> None:
         ctx = self._context()
         left_rim_before = ctx.mesh("LeftRim").vertices.copy()
