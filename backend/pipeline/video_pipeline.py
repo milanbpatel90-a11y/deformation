@@ -145,7 +145,7 @@ class VideoDeformationPipeline(DeformationPipeline):
             "gate": estimate["gate_detail"],
             "pool": {
                 "requested": estimate["pool_size"],
-                "selected": estimate["pool"].selected,
+                "selected": len(estimate["pool"].selected),
                 "dropped_redundant": estimate["pool"].dropped_redundant,
             },
             "selection": estimate["selection_summary"],
