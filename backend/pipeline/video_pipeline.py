@@ -334,7 +334,7 @@ class VideoDeformationPipeline(DeformationPipeline):
                 f"{min_views} are required."
             )
         analysed = selection
-        selection_summary = self._selection_summary(analysed, pool, gate_detail, orbit)
+        selection_summary = self._selection_summary(analysed, pool, gate_detail, orbit, min_views, target_views, max_views)
         view_distribution = Counter(entry["view"] for entry in analysed)
         stage.finish(
             started,
@@ -416,7 +416,7 @@ class VideoDeformationPipeline(DeformationPipeline):
             # Manual sizes win, exactly as in the still-image endpoints; the
             # fusion report is still returned so the estimate stays auditable.
             fused = manual_measurements.model_copy(deep=True)
-            measurement_source = "manual"
+            measurement_source = "manual_override"
         elif not automatic_appearance:
             fused = fused.model_copy(update={"color": color})
 
@@ -532,6 +532,9 @@ class VideoDeformationPipeline(DeformationPipeline):
         pool: SelectionResult,
         gate_detail: dict,
         orbit,
+        min_views: int,
+        target_views: int,
+        max_views: int,
     ) -> dict:
         indices = [entry["index"] for entry in chosen]
         sectors = FrameSelector._sectors(len(pool.selected) + max(indices or [0]))
@@ -542,7 +545,9 @@ class VideoDeformationPipeline(DeformationPipeline):
             "pool_candidates": len(pool.selected),
             "gated_out": gate_detail["rejected"],
             "dropped_redundant": pool.dropped_redundant,
-            "target_views": None,
+            "target_views": target_views,
+            "min_selected": min_views,
+            "max_selected": max_views,
             "occupied_sectors": len({FrameSelector._sector_for(i, 8, 8) for i in indices}),
             "total_sectors": 8,
             "span_ratio": (
