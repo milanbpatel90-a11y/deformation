@@ -36,3 +36,31 @@ def test_smoother_preserves_vertex_count():
     context = smoother.apply(context)
 
     assert len(context.mesh("Frame").vertices) == initial_count
+
+
+def test_smoother_does_not_infer_regions_without_descriptor_authorization():
+    mesh = trimesh.creation.box()
+    before = mesh.vertices.copy()
+    context = DeformationContext(
+        template_info=None,
+        template_scene=trimesh.Scene({"Bridge": mesh}),
+        descriptor=TemplateDescriptor(
+            template_name="test",
+            template_path=None,
+            descriptor_path=None,
+            metadata_path=None,
+            hinges={},
+            rim_loops={},
+            bridge_center=np.array([0, 0, 0]),
+            temple_axis={},
+            lens_planes={},
+            vertex_groups={},
+            constraints={},
+        ),
+        measurements=None,
+    )
+
+    context = MeshSmoother(iterations=5).apply(context)
+
+    np.testing.assert_array_equal(context.mesh("Bridge").vertices, before)
+    assert context.metadata["mesh_smoother"]["regions"] == []

@@ -19,6 +19,9 @@ class MeasurementExtractor:
     # Typical product photo: frame occupies ~70% of image width
     DEFAULT_FRAME_WIDTH_MM = 135.0
     PIXEL_TO_MM_RATIO = None  # computed per image
+    #: Head-room reserved so that rounding each dimension to a tenth of a
+    #: millimetre cannot push the horizontal budget back over the frame width.
+    ROUNDING_MARGIN_MM = 0.3
 
     def extract_from_images(
         self,
@@ -38,11 +41,25 @@ class MeasurementExtractor:
 
         x, y, w, h = cv2.boundingRect(contour)
         mm_per_px = self.DEFAULT_FRAME_WIDTH_MM / max(w, 1)
+        frame_width = w * mm_per_px
+
+        # Rim thickness is resolved before the lens widths, because a frame's
+        # horizontal budget is
+        #     frame_width = 2*lens_width + bridge_width + 2*rim_thickness
+        # and the deformation constraint enforces exactly that inequality.
+        # Sizing lens and bridge from the whole frame width consumed the entire
+        # budget and left nothing for the rims, which made every automatic
+        # (non-manual) measurement infeasible before it reached the deformer.
+        rim_thickness = max(0.8, frame_width * 0.008)
+        if top is not None:
+            rim_thickness = self._measure_rim_thickness(top)
+        rim_px = rim_thickness / max(mm_per_px, 1e-9)
 
         # Detect lens regions via horizontal valley in upper half
-        lens_w_px, lens_h_px, bridge_w_px = self._detect_lens_regions(front_mask, x, y, w, h)
+        lens_w_px, lens_h_px, bridge_w_px = self._detect_lens_regions(
+            front_mask, x, y, w, h, rim_px
+        )
 
-        frame_width = w * mm_per_px
         lens_width = lens_w_px * mm_per_px
         lens_height = lens_h_px * mm_per_px
         bridge_width = bridge_w_px * mm_per_px
@@ -52,10 +69,6 @@ class MeasurementExtractor:
         if side is not None:
             temple_length, temple_curve_angle = self._measure_temple(side)
 
-        rim_thickness = max(0.8, frame_width * 0.008)
-        if top is not None:
-            rim_thickness = self._measure_rim_thickness(top)
-
         # ── Sanity clamp: all values must be physically plausible ─────────────
         frame_width     = self._clamp(frame_width,   110.0, 160.0, "frame_width")
         lens_width      = self._clamp(lens_width,     28.0,  62.0, "lens_width")
@@ -63,6 +76,18 @@ class MeasurementExtractor:
         bridge_width    = self._clamp(bridge_width,   10.0,  28.0, "bridge_width")
         temple_length   = self._clamp(temple_length, 120.0, 160.0, "temple_length")
         rim_thickness   = self._clamp(rim_thickness,   0.8,   6.0, "rim_thickness")
+
+        # ── Feasibility repair ───────────────────────────────────────────────
+        # Clamping each dimension independently can push the sum back over the
+        # frame width even though the pixel budget was correct. Absorb that here
+        # by scaling the lens widths and bridge into the space the rims leave, so
+        # the result always satisfies validate_combination.
+        budget = frame_width - 2.0 * rim_thickness - self.ROUNDING_MARGIN_MM
+        consumed = 2.0 * lens_width + bridge_width
+        if consumed > budget > 0.0:
+            scale = budget / consumed
+            lens_width *= scale
+            bridge_width *= scale
 
         measurements = Measurements(
             frame_width=round(frame_width, 1),
@@ -124,13 +149,20 @@ class MeasurementExtractor:
         return max(contours, key=cv2.contourArea)
 
     def _detect_lens_regions(
-        self, mask: np.ndarray, x: int, y: int, w: int, h: int
+        self, mask: np.ndarray, x: int, y: int, w: int, h: int, rim_px: float = 0.0
     ) -> tuple[float, float, float]:
+        """Split the frame's width into two lenses and a bridge.
+
+        ``rim_px`` is the rim thickness in pixels; the two rims are subtracted
+        from the available width first, because their share of the frame is not
+        available to the lenses or the bridge.
+        """
         roi = mask[y : y + h, x : x + w]
         col_sum = roi.sum(axis=0).astype(np.float32)
         mid = w // 2
-        bridge_w_px = max(8.0, w * 0.12)
-        lens_w_px = (w - bridge_w_px) / 2.0
+        usable_w = max(1.0, w - 2.0 * max(rim_px, 0.0))
+        bridge_w_px = max(8.0, usable_w * 0.12)
+        lens_w_px = max(1.0, (usable_w - bridge_w_px) / 2.0)
         lens_h_px = h * 0.75
 
         # Refine bridge from column minimum near center
@@ -139,9 +171,8 @@ class MeasurementExtractor:
         if search_end > search_start:
             center_slice = col_sum[search_start:search_end]
             if len(center_slice) > 0:
-                bridge_center = search_start + int(np.argmin(center_slice))
-                bridge_w_px = max(bridge_w_px, w * 0.1)
-                lens_w_px = (w - bridge_w_px) / 2.0
+                bridge_w_px = max(bridge_w_px, usable_w * 0.1)
+                lens_w_px = max(1.0, (usable_w - bridge_w_px) / 2.0)
 
         return lens_w_px, lens_h_px, bridge_w_px
 

@@ -1,0 +1,111 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "dataset/orbit_benchmark/annotations/EXAMPLE.schema.json",
+  "title": "Orbit video annotation - TEMPLATE ONLY (no real data)",
+  "description": "TEMPLATE / EXAMPLE ONLY. This file is illustrative documentation of the annotation format consumed by scripts/benchmark_orbit_videos.py. It contains PLACEHOLDER values with an obviously fake product id and is NOT a measurement of any real frame: do not cite it, aggregate it, or treat it as a benchmark input. The harness ignores any *.schema.json file, but real annotations must be named <video-name>.json and sit next to their video in the dataset root (or in an annotations/ subdirectory), never here.",
+  "placeholder_notice": "Every number below is a rounded placeholder chosen for readability (e.g. a 140 mm frame). It is NOT a measured product and MUST NOT be used as ground truth.",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["front_frame", "measurements"],
+  "properties": {
+    "product_id": {
+      "type": "string",
+      "description": "OPTIONAL. Stable identifier for the physical product. Used for reporting only."
+    },
+    "frame_count": {
+      "type": ["integer", "null"],
+      "minimum": 0,
+      "description": "OPTIONAL. Total frames in the source clip, as reported by the recorder."
+    },
+    "fps": {
+      "type": ["number", "null"],
+      "exclusiveMinimum": 0,
+      "description": "OPTIONAL. Capture frame rate of the source clip."
+    },
+    "front_frame": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "REQUIRED for a scored comparison. Zero-based index of the square-on front frame. The harness decodes this frame and feeds it to the still-image pipeline to produce the single-front-image baseline."
+    },
+    "side_frame": {
+      "type": ["integer", "null"],
+      "minimum": 0,
+      "description": "OPTIONAL. Zero-based index of a clean profile frame. Recorded for reference; the video pipeline selects its own views."
+    },
+    "top_frame": {
+      "type": ["integer", "null"],
+      "minimum": 0,
+      "description": "OPTIONAL. Zero-based index of a plan (top) view frame. Recorded for reference."
+    },
+    "usable_frames": {
+      "type": ["array", "null"],
+      "items": {"type": "integer", "minimum": 0},
+      "description": "OPTIONAL. Zero-based indices of frames a human considers usable (eyewear fully inside the picture, no occlusion, no motion blur). Used for review, and to compare against the pipeline's own quality gate."
+    },
+    "expected_selected_views": {
+      "type": ["integer", "null"],
+      "description": "OPTIONAL. How many views a competent annotator would expect the selector to keep (normally 5-10). Advisory, not enforced."
+    },
+    "category": {
+      "type": "string",
+      "enum": [
+        "metal",
+        "acetate",
+        "rimless",
+        "thick",
+        "thin",
+        "rectangular",
+        "round",
+        "cat_eye",
+        "wayfarer",
+        "aviator"
+      ],
+      "description": "OPTIONAL, but the ONLY field that makes template accuracy scorable: it is compared against the template the pipeline selected. Annotations without a category are excluded from template accuracy rather than counted as matches."
+    },
+    "lighting": {
+      "type": "string",
+      "description": "OPTIONAL free text, e.g. 'diffuse indoor', 'hard key + fill', 'mixed daylight'. Used to slice the report by capture condition."
+    },
+    "background": {
+      "type": "string",
+      "description": "OPTIONAL free text, e.g. 'plain white sweep', 'wooden table', 'cluttered retail shelf'. Used to slice the report by capture condition."
+    },
+    "measurements": {
+      "type": "object",
+      "description": "REQUIRED, and the only ground truth the harness scores. Supply ONLY dimensions you actually measured with calipers or from a spec sheet; omit (or set null) the rest. An omitted dimension is excluded from MAE/RMSE/max error - it is never scored as zero error. At least one dimension must be present.",
+      "additionalProperties": false,
+      "properties": {
+        "frame_width": {"type": ["number", "null"], "exclusiveMinimum": 0, "description": "Total frame width (temple hinge to temple hinge), mm."},
+        "lens_width": {"type": ["number", "null"], "exclusiveMinimum": 0, "description": "Single lens width, mm."},
+        "lens_height": {"type": ["number", "null"], "exclusiveMinimum": 0, "description": "Single lens height, mm."},
+        "bridge_width": {"type": ["number", "null"], "exclusiveMinimum": 0, "description": "Bridge width, mm."},
+        "temple_length": {"type": ["number", "null"], "exclusiveMinimum": 0, "description": "Temple arm length, mm."},
+        "rim_thickness": {"type": ["number", "null"], "exclusiveMinimum": 0, "description": "Rim/groove thickness at its thinnest visible point, mm."}
+      }
+    }
+  },
+  "examples": [
+    {
+      "_comment": "PLACEHOLDER TEMPLATE ONLY - there is no real product here. Every field is null or an angle-bracket placeholder precisely so this file cannot be mistaken for, or accidentally aggregated as, measured ground truth. Copy this structure, fill in your own measured values, and save it as <video-name>.json next to the clip.",
+      "product_id": "<your product id, required by the format's conventions but not by the loader>",
+      "frame_count": null,
+      "fps": null,
+      "front_frame": null,
+      "side_frame": null,
+      "top_frame": null,
+      "usable_frames": null,
+      "expected_selected_views": null,
+      "category": "<one of the enum values above>",
+      "lighting": "<e.g. diffuse indoor>",
+      "background": "<e.g. plain white sweep>",
+      "measurements": {
+        "frame_width": null,
+        "lens_width": null,
+        "lens_height": null,
+        "bridge_width": null,
+        "temple_length": null,
+        "rim_thickness": null
+      }
+    }
+  ]
+}

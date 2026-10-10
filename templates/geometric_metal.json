@@ -27,5 +27,7 @@
     "NosePads",
     "TempleTips"
   ],
-  "rim_pull_strength": 0.1
+  "rim_pull_strength": 0.1,
+  "deformation_available": false,
+  "unavailable_reason": "The packaged GLB has one connected front-frame mesh spanning both rims and the bridge; no validated independent split is available."
 }

@@ -52,11 +52,6 @@ class MeshSmoother(BaseDeformer):
         report = SmootherReport(iterations=self.iterations)
         
         target_regions = context.descriptor.deformation_regions.get("smooth", [])
-        
-        if not target_regions:
-            # Try to infer some sensible default regions if none specified
-            target_regions = ["Bridge", "LeftRim", "RightRim", "LeftTemple", "RightTemple"]
-        
         report.regions = list(target_regions)
 
         for region in target_regions:

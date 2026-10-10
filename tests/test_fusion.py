@@ -1,4 +1,5 @@
 import unittest
+import cv2
 import numpy as np
 from backend.models import Measurements, FrameMaterial, FrameShape, LensContour
 from backend.fusion.view_classifier import ViewClassifier
@@ -22,6 +23,19 @@ class TestFusionModules(unittest.TestCase):
         side_mask[45:55, 10:90] = 255  # aspect ratio = 80 / 10 = 8.0
         view_type = classifier.classify_view(dummy_img, side_mask)
         self.assertEqual(view_type, "side")
+
+    def test_view_classifier_uses_disconnected_full_frame_components(self) -> None:
+        classifier = ViewClassifier()
+        image = np.zeros((160, 320, 3), dtype=np.uint8)
+        mask = np.zeros((160, 320), dtype=np.uint8)
+        # Separate eye rims are common in thresholded product photos. Each
+        # component alone is near-square, while their combined extent is a
+        # symmetric front view.
+        cv2.rectangle(mask, (30, 45), (135, 115), 255, thickness=5)
+        cv2.rectangle(mask, (185, 45), (290, 115), 255, thickness=5)
+        cv2.line(mask, (135, 70), (185, 70), 255, thickness=5)
+
+        self.assertEqual(classifier.classify_view(image, mask), "front")
 
     def test_measurement_fuser(self) -> None:
         fuser = MeasurementFuser()

@@ -1,0 +1,45 @@
+{
+  "source_file": "source/nerd_glasses.3dm",
+  "objects": [
+    {
+      "source_object": "Object_0",
+      "source_name": "Object_0",
+      "geometry_type": "Mesh",
+      "renamed_regions": [
+        "Frame",
+        "LeftTemple",
+        "RightTemple"
+      ]
+    },
+    {
+      "source_object": "Object_1",
+      "source_name": "Object_1",
+      "geometry_type": "Mesh",
+      "renamed_regions": [
+        "Frame",
+        "LeftTemple",
+        "RightTemple"
+      ]
+    },
+    {
+      "source_object": "Object_2",
+      "source_name": "Object_2",
+      "geometry_type": "Mesh",
+      "renamed_regions": [
+        "Frame",
+        "LeftTemple",
+        "RightTemple"
+      ]
+    },
+    {
+      "source_object": "Object_3",
+      "source_name": "Object_3",
+      "geometry_type": "Mesh",
+      "renamed_regions": [
+        "Frame"
+      ]
+    }
+  ],
+  "classification": "Connected components classified from projected bounds; see lens_geometry_method and scale_config.",
+  "notes": "Source has no standard LM_* point/empty objects. Landmark JSON records inferred points; generated optical surfaces are explicitly identified when used."
+}

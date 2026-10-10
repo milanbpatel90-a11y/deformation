@@ -1,0 +1,30 @@
+{
+  "coordinate_system": {
+    "x": "left_right",
+    "y": "front_back",
+    "z": "up_down",
+    "units": "mm"
+  },
+  "parts": {
+    "Frame": {
+      "vertices": 76923,
+      "triangles": 121965
+    },
+    "LeftLens": {
+      "vertices": 67850,
+      "triangles": 107701
+    },
+    "RightLens": {
+      "vertices": 63748,
+      "triangles": 101586
+    },
+    "LeftTemple": {
+      "vertices": 5507,
+      "triangles": 8074
+    },
+    "RightTemple": {
+      "vertices": 5507,
+      "triangles": 8074
+    }
+  }
+}

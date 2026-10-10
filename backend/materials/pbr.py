@@ -60,6 +60,8 @@ def lens_material(measurements: Measurements) -> PBRMaterial:
     
     return PBRMaterial(
         name="Lens",
+        alphaMode="BLEND",
+        doubleSided=True,
         baseColorFactor=rgba,
         metallicFactor=metallic,
         roughnessFactor=0.05,
@@ -75,8 +77,13 @@ def apply_materials(scene: trimesh.Scene, measurements: Measurements) -> trimesh
 
     for name, geom in scene.geometry.items():
         if name in lens_parts:
-            geom.visual.material = lens_mat
+            material = lens_mat
         else:
-            geom.visual.material = frame_mat
+            material = frame_mat
+
+        if isinstance(geom.visual, trimesh.visual.TextureVisuals):
+            geom.visual.material = material
+        else:
+            geom.visual = trimesh.visual.TextureVisuals(material=material)
 
     return scene

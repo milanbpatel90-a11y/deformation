@@ -9,7 +9,7 @@ from fastapi.responses import JSONResponse
 import cv2
 import numpy as np
 import logging
-import tempfile
+from backend.api.safety import read_image, run_job
 from pathlib import Path
 from typing import Optional, List, Dict
 import json
@@ -35,6 +35,7 @@ class RimDetectionEngine:
             yolo_model_path: Path to trained YOLOv8 model (optional)
                            If None, uses OpenCV threshold fallback
         """
+        self.model_path = yolo_model_path
         self.yolo_model = None
         self.use_yolo = False
         
@@ -177,12 +178,13 @@ class RimDetectionEngine:
     def _resample_polygon(self, points: np.ndarray, n: int) -> np.ndarray:
         """Resample polygon to exactly n points"""
         
+        points = np.vstack([points, points[0]])
         diffs = np.diff(points, axis=0)
         distances = np.sqrt((diffs ** 2).sum(axis=1))
         cumulative = np.concatenate([[0], np.cumsum(distances)])
         total_length = cumulative[-1]
         
-        new_distances = np.linspace(0, total_length, n)
+        new_distances = np.linspace(0, total_length, n, endpoint=False)
         
         resampled = np.array([
             np.interp(new_distances, cumulative, points[:, 0]),
@@ -244,6 +246,7 @@ def get_rim_engine() -> RimDetectionEngine:
         
         yolo_path = None
         for candidate in candidate_paths:
+            candidate = Path(__file__).resolve().parents[2] / candidate
             if candidate.exists():
                 yolo_path = candidate
                 logger.info(f"Found YOLO weights at: {yolo_path}")
@@ -283,9 +286,7 @@ async def detect_rim_from_image(
     
     try:
         # Read image
-        contents = await file.read()
-        nparr = np.frombuffer(contents, np.uint8)
-        image = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+        _, image = await read_image(file)
         
         if image is None:
             raise HTTPException(status_code=400, detail="Invalid image")
@@ -293,10 +294,10 @@ async def detect_rim_from_image(
         h, w = image.shape[:2]
         
         # Get rim detection engine
-        engine = get_rim_engine()
+        engine = await run_job(get_rim_engine)
         
         # Get segmentation mask
-        mask = engine.get_glasses_mask(image)
+        mask = await run_job(engine.get_glasses_mask, image)
         
         # Detect rim contour
         result = engine.detect_rim_contour(mask, n_vertices=8)
@@ -319,9 +320,11 @@ async def detect_rim_from_image(
             "image_size": [w, h],
         })
     
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Rim detection failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Rim detection failed; see server logs") from e
 
 
 @router.post("/apply-to-template")
@@ -342,22 +345,10 @@ async def apply_rim_detection_to_template(
     """
     
     try:
-        # Run rim detection first
-        contents = await file.read()
-        
-        # Create temporary file
-        with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as tmp:
-            tmp.write(contents)
-            tmp_path = tmp.name
-        
-        # Reopen as UploadFile-like
-        from fastapi import File as FastAPIFile
-        
-        nparr = np.frombuffer(contents, np.uint8)
-        image = cv2.imdecode(nparr, cv2.COLOR_BGR2BGR)
-        
-        engine = get_rim_engine()
-        mask = engine.get_glasses_mask(image)
+        _, image = await read_image(file)
+
+        engine = await run_job(get_rim_engine)
+        mask = await run_job(engine.get_glasses_mask, image)
         result = engine.detect_rim_contour(mask)
         
         if not result.get("success"):
@@ -378,21 +369,23 @@ async def apply_rim_detection_to_template(
             },
         })
     
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Template calibration failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Rim detection failed; see server logs") from e
 
 
 @router.get("/status")
 async def get_rim_detection_status() -> JSONResponse:
     """Check status of rim detection engine"""
     
-    engine = get_rim_engine()
+    engine = await run_job(get_rim_engine)
     
     return JSONResponse({
         "engine_ready": True,
         "using_yolo": engine.use_yolo,
-        "yolo_model_path": "runs/detect/eyewear_seg/weights/best.pt",
+        "yolo_model_path": Path(engine.model_path).name if engine.model_path else None,
         "yolo_available": engine.yolo_model is not None,
         "fallback": "OpenCV threshold" if not engine.use_yolo else None,
     })

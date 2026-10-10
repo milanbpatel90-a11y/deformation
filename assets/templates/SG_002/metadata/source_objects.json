@@ -1,0 +1,25 @@
+{
+  "source_file": "source/sun_glasses (1).3dm",
+  "objects": [
+    {
+      "source_object": "Object_0",
+      "source_name": "cerceve.001_Material.001_0",
+      "geometry_type": "Mesh",
+      "renamed_regions": [
+        "Frame"
+      ]
+    },
+    {
+      "source_object": "Object_1",
+      "source_name": "cerceve.001_Material.002_0",
+      "geometry_type": "Mesh",
+      "renamed_regions": [
+        "Frame",
+        "LeftTemple",
+        "RightTemple"
+      ]
+    }
+  ],
+  "classification": "Connected components classified from projected bounds; see lens_geometry_method and scale_config.",
+  "notes": "Source has no standard LM_* point/empty objects. Landmark JSON records inferred points; generated optical surfaces are explicitly identified when used."
+}

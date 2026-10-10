@@ -18,14 +18,14 @@ def main():
     img_parser = sub.add_parser("deform", help="Deform from product images")
     img_parser.add_argument("--front", required=True, help="Front image path")
     img_parser.add_argument("--side", help="Side image path")
-    img_parser.add_argument("--output", "-o", default="output/deformed.glb")
+    img_parser.add_argument("--output", "-o", default="output/development/deformed.glb")
     img_parser.add_argument("--color", default="#d9a7a2")
     img_parser.add_argument("--template", help="Force template name")
 
     # deform from measurements JSON
     meas_parser = sub.add_parser("measurements", help="Deform from measurements JSON")
     meas_parser.add_argument("--input", "-i", required=True, help="Measurements JSON file")
-    meas_parser.add_argument("--output", "-o", default="output/deformed.glb")
+    meas_parser.add_argument("--output", "-o", default="output/development/deformed.glb")
     meas_parser.add_argument("--template", default="geometric_metal")
 
     # generate template
