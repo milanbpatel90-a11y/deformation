@@ -49,6 +49,7 @@ ORBIT_LABELS = (
     "right_front_perspective",
     "side",
     "top",
+    "uncertain",
 )
 
 
@@ -143,6 +144,11 @@ class ViewClassifier:
         foreshortening information, so it falls back to lateral skew alone.
         """
         orbit = analyse_orbit(masks)
+        # A single silhouette cannot establish its own frontal reference. Treating
+        # it as yaw=0 would suppress the available left/right perspective cue.
+        if sum(mask is not None for mask in masks) <= 1:
+            for view in orbit.views:
+                view.yaw_source = "unavailable"
         results: list[OrbitView] = []
         for view in orbit.views:
             results.append(self._classify_one(view, orbit))
@@ -159,9 +165,11 @@ class ViewClassifier:
     def _classify_one(self, view: OrbitViewGeometry, orbit: OrbitGeometry) -> OrbitView:
         geometry = view.mask_geometry
         if geometry is None:
-            # An empty mask carries no angle information; callers reject these
-            # frames on visibility, so the label only has to be safe.
-            return OrbitView(label="front", confidence=0.0, metrics={"empty_mask": 1.0})
+            return OrbitView(label="uncertain", confidence=0.0, metrics={"empty_mask": 1.0})
+        if view.mask_inconsistent:
+            metrics = self._evidence(view, orbit, geometry)
+            metrics["mask_inconsistent"] = 1.0
+            return OrbitView(label="uncertain", confidence=0.0, metrics=metrics)
 
         metrics = self._evidence(view, orbit, geometry)
         aspect = geometry.aspect
@@ -222,7 +230,9 @@ class ViewClassifier:
             if skew <= -self.PERSPECTIVE_SKEW:
                 return self._orbit("left_front_perspective", confidence, metrics)
             square_on = geometry.symmetry >= self.FRONTAL_SYMMETRY
-            return self._orbit("front", 0.75 if square_on else 0.5, metrics)
+            if square_on:
+                return self._orbit("front", 0.75, metrics)
+            return self._orbit("uncertain", 0.0, metrics)
 
         metrics["lateral_sign_ambiguous"] = 1.0 if abs(skew) < self.PERSPECTIVE_SKEW else 0.0
         if abs(skew) < self.PERSPECTIVE_SKEW:

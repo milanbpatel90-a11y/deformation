@@ -234,6 +234,13 @@ class FusionResult:
                 + ", ".join(sorted(report.name for report in unevidenced))
             )
 
+        inferred_dimensions = sorted(
+            report.name for report in measured if report.evidence_mix.get("inferred", 0)
+        )
+        if inferred_dimensions:
+            notes.append("inferred dimensions: " + ", ".join(inferred_dimensions))
+            cap("lens-opening widths include an estimated rim correction")
+
         # Geometric diversity: an orbit that only ever saw the front cannot have
         # measured anything a front view cannot see, however good those frames are.
         frontal_views = {"front"}

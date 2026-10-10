@@ -297,7 +297,7 @@ class TestRobustFuser(unittest.TestCase):
             ViewObservation("side", measurements(frame_width=52.0), weight=1.0),
         ]
         result = self.fuser.fuse(side_only)
-        self.assertEqual(result.dimensions["frame_width"].source, "derived")
+        self.assertEqual(result.dimensions["frame_width"].source, "insufficient_evidence")
         # ...but they own temple length.
         self.assertEqual(result.dimensions["temple_length"].contributors, 2)
         self.assertEqual(result.dimensions["temple_length"].source, "fused")
@@ -1004,8 +1004,8 @@ class TestConfidenceIsEvidenceBased(unittest.TestCase):
     def test_high_grade_needs_the_preferred_view_count(self) -> None:
         five = self.fuser.fuse(self._views(5)).confidence(preferred_views=8)
         eight = self.fuser.fuse(self._views(8)).confidence(preferred_views=8)
-        self.assertEqual(five["level"], "medium")
-        self.assertEqual(eight["level"], "high")
+        self.assertEqual(five["level"], "low")
+        self.assertEqual(eight["level"], "medium")
         self.assertEqual(eight["selected_views"], 8)
 
     def test_a_strong_score_is_still_capped_below_the_preferred_count(self) -> None:
@@ -1047,7 +1047,7 @@ class TestConfidenceIsEvidenceBased(unittest.TestCase):
         ]
         result = self.fuser.fuse(side_only)
         confidence = result.confidence()
-        self.assertEqual(result.dimensions["frame_width"].source, "derived")
+        self.assertEqual(result.dimensions["frame_width"].source, "insufficient_evidence")
         self.assertIn("frame_width", " ".join(confidence["notes"]))
         self.assertLess(confidence["measurement_consistency"], 1.0)
 

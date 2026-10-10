@@ -56,6 +56,7 @@ EVIDENCE_WEIGHT = {
     PERSPECTIVE_NORMALIZED: 0.75,
     SIDE_EVIDENCE: 0.9,
     TOP_EVIDENCE: 0.8,
+    INFERRED: 0.55,
 }
 
 #: Yaw bands that decide what a view may contribute.
@@ -179,6 +180,12 @@ def measure_orbit(
             "The orbit produced no measurable frame width, so nothing can be scaled."
         )
     mm_per_px = float(reference_width_mm) / frontal_px
+    # The one-class silhouette includes the rim in each lens run. Model input
+    # lens_width is the clear lens opening, so remove two rim bands per lens.
+    # The rim itself is not visible in a filled silhouette; use the same explicit
+    # 0.8%-of-frame estimate the fuser reports for an unobserved rim dimension.
+    estimated_rim_mm = float(reference_width_mm) * 0.008
+    estimated_rim_band_px = estimated_rim_mm / mm_per_px
 
     scale = {
         "mode": "reference_width",
@@ -193,6 +200,10 @@ def measure_orbit(
             "absolute_scale: uncalibrated -- dimensions are anchored to a "
             f"{reference_width_mm:g} mm reference width, not measured in millimetres"
         )
+    notes.append(
+        "lens_width: inferred clear opening; the filled one-class mask includes the rim, "
+        f"so {estimated_rim_mm:.2f} mm estimated rim bands are removed from each side"
+    )
 
     views: list[ViewMeasurement] = []
     for index, view in enumerate(orbit.views):
@@ -203,7 +214,10 @@ def measure_orbit(
         confidence = confidences[index] if index < len(confidences) else 0.0
         quality = quality_scores[index] if index < len(quality_scores) else 0.5
         views.append(
-            _measure_view(view, geometry, label, confidence, quality, mm_per_px)
+            _measure_view(
+                view, geometry, label, confidence, quality, mm_per_px,
+                estimated_rim_band_px,
+            )
         )
 
     if not views:
@@ -232,8 +246,24 @@ def _measure_view(
     confidence: float,
     quality: float,
     mm_per_px: float,
+    estimated_rim_band_px: float,
 ) -> ViewMeasurement:
     """Derive every dimension this view is entitled to contribute."""
+    if view.mask_inconsistent or label == "uncertain":
+        evidence = {name: INSUFFICIENT for name in DIMENSIONS}
+        measurements = _assemble(view, geometry, [], mm_per_px)
+        return ViewMeasurement(
+            frame_index=view.index,
+            view=label,
+            confidence=0.0,
+            yaw_deg=view.yaw_deg,
+            cos_yaw=view.cos_yaw,
+            quality_score=float(quality),
+            geometry=geometry,
+            measurements=measurements,
+            evidence=evidence,
+        )
+
     yaw = view.yaw_deg
     cos_yaw = max(view.cos_yaw, 0.0)
     is_side = label == "side" or yaw >= SIDE_MIN_YAW
@@ -287,16 +317,22 @@ def _measure_view(
         lens_width_px = (geometry.lens_cluster_width - geometry.bridge_span) / 2.0
     elif geometry.lens_runs:
         lens_width_px = float(min(run[1] - run[0] + 1 for run in geometry.lens_runs))
+    if lens_width_px is not None:
+        lens_width_px -= 2.0 * estimated_rim_band_px
+    lens_detail = (
+        "clear opening estimated from the segmented outer lens span after removing "
+        f"two {estimated_rim_band_px:.1f}px estimated rim bands"
+    )
     if is_side or is_top:
         evidence["lens_width"] = INSUFFICIENT
     elif yaw <= DIRECT_FRONTAL_MAX_YAW and geometry.lens_count >= 2:
-        add("lens_width", lens_width_px, DIRECT_FRONTAL)
+        add("lens_width", lens_width_px, INFERRED, lens_detail)
     elif yaw <= LENS_PERSPECTIVE_MAX_YAW and cos_yaw >= MIN_USABLE_COS_YAW:
         add(
             "lens_width",
             None if lens_width_px is None else lens_width_px / cos_yaw,
-            PERSPECTIVE_NORMALIZED,
-            f"divided by cos({yaw:.0f} deg)",
+            INFERRED,
+            f"{lens_detail}; perspective-normalized by cos({yaw:.0f} deg)",
         )
     else:
         evidence["lens_width"] = INSUFFICIENT

@@ -299,6 +299,20 @@ class VideoDeformationPipeline(DeformationPipeline):
             entry["view_confidence"] = view.confidence
             entry["view_metrics"] = view.metrics
             entry["yaw_deg"] = view.metrics.get("yaw_deg", 0.0)
+            entry["mask_inconsistent"] = bool(view.metrics.get("mask_inconsistent", False))
+        rejected_geometry = sum(
+            entry["mask_inconsistent"] or entry["view"] == "uncertain" for entry in analysed
+        )
+        analysed = [
+            entry for entry in analysed
+            if not entry["mask_inconsistent"] and entry["view"] != "uncertain"
+        ]
+        if len(analysed) < min_views:
+            raise ValueError(
+                f"Only {len(analysed)} frame(s) had a reliable orbit orientation; "
+                f"at least {min_views} are required. {rejected_geometry} frame(s) had "
+                "inconsistent masks or uncertain orientation."
+            )
         classification_distribution = Counter(entry["view"] for entry in analysed)
         stage.finish(
             started,

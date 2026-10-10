@@ -138,10 +138,22 @@ class OrbitViewGeometry:
     cos_yaw: float = 1.0
     yaw_source: str = "unavailable"
     foreshortening: float = 1.0
+    mask_inconsistent: bool = False
 
     @property
     def usable(self) -> bool:
-        return self.mask_geometry is not None
+        return self.mask_geometry is not None and not self.mask_inconsistent
+
+    def to_dict(self) -> dict:
+        return {
+            "index": self.index,
+            "yaw_deg": round(self.yaw_deg, 1),
+            "cos_yaw": round(self.cos_yaw, 4),
+            "yaw_source": self.yaw_source,
+            "foreshortening": round(self.foreshortening, 4),
+            "mask_inconsistent": self.mask_inconsistent,
+            "geometry": self.mask_geometry.to_dict() if self.mask_geometry else None,
+        }
 
 
 @dataclass(slots=True)
@@ -164,6 +176,7 @@ class OrbitGeometry:
             "reference_frame": self.reference_frame,
             "yaw_source": "foreshortening" if self.frontal_reference_width else "unavailable",
             "notes": list(self.notes),
+            "views": [view.to_dict() for view in self.views],
         }
 
 
@@ -188,8 +201,11 @@ def analyse_orbit(masks: list[np.ndarray | None]) -> OrbitGeometry:
 
     The frontal reference therefore has to come from a frame that is *plausibly*
     square-on. An edge-on profile is also wide (473 px in the render), so the
-    reference is chosen as the widest cluster among frames whose cluster height
-    has not collapsed and whose silhouette is not mostly thin temple columns.
+    reference is chosen from the upper tail of cluster widths whose height has
+    not collapsed and whose silhouette is not mostly thin temple columns. The
+    robust upper envelope ignores a single over-wide segmentation mask while
+    retaining the widest supported square-on frame. A dense but narrow mask is
+    not a scale reference.
     """
     geometries = [analyse_mask(mask) if mask is not None else None for mask in masks]
     present = [g for g in geometries if g is not None]
@@ -230,20 +246,24 @@ def analyse_orbit(masks: list[np.ndarray | None]) -> OrbitGeometry:
                 "uncollapsed silhouette and yaw is correspondingly uncertain"
             )
     if eligible:
-        # The frontal reference is the *densest* silhouette, not the widest one.
-        # A yaw rotation compresses the frame head, so width can only ever be
-        # less than square-on -- but a segmentation that swallowed background can
-        # be wider, and picking the widest frame then poisons every angle and the
-        # whole scale. Density (mask area over bounding-box area) peaks square-on:
-        # measured on a rendered orbit it reads 0.729 at 0 degrees against 0.671
-        # for a corrupted frame that was nearly twice as wide.
-        reference_index, reference = max(
-            eligible, key=lambda item: (item[1].bbox_fill, -item[1].lens_cluster_width)
-        )
+        # Width carries the yaw signal (it contracts with cos(yaw)); density does
+        # not. A very narrow but dense segmentation mask used to become the
+        # reference, inflating the mm/px scale and producing physically impossible
+        # frame widths. Use a median/MAD upper fence so one over-wide mask cannot
+        # set the scale, including on short clips where a nearest 90th percentile
+        # is simply the maximum observation.
+        widths = np.asarray([geometry.lens_cluster_width for _, geometry in eligible], dtype=float)
+        median_width = float(np.median(widths))
+        mad_width = float(np.median(np.abs(widths - median_width)))
+        upper_width = median_width + max(3.0 * mad_width, 0.10 * median_width)
+        plausible = [item for item in eligible if item[1].lens_cluster_width <= upper_width]
+        if not plausible:
+            plausible = eligible
+        reference_index, reference = max(plausible, key=lambda item: item[1].lens_cluster_width)
         orbit.frontal_reference_width = int(reference.lens_cluster_width)
         orbit.reference_frame = int(reference_index)
         orbit.notes.append(
-            "frontal reference taken from the densest silhouette "
+            "frontal reference taken from the robust upper-envelope silhouette width "
             f"(frame {reference_index}, fill {reference.bbox_fill:.3f}, "
             f"width {reference.lens_cluster_width}px)"
         )
