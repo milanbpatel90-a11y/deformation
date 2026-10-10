@@ -374,12 +374,19 @@ def _measure_view(
     # ── temple length and bend: side evidence only ──────────────────────────
     if is_side and geometry.temple_span > 0:
         sin_yaw = max(math.sin(math.radians(min(yaw, 90.0))), 1e-3)
-        add(
-            "temple_length",
-            float(geometry.temple_span) / sin_yaw,
-            SIDE_EVIDENCE,
-            f"projected span divided by sin({min(yaw, 90.0):.0f} deg)",
-        )
+        temple_length_px = float(geometry.temple_span) / sin_yaw
+        temple_length_mm = temple_length_px * mm_per_px
+        # A short blob in a profile mask is not a temple arm. Refuse it as
+        # evidence instead of flooring it to an eyewear-sized number.
+        if 100.0 <= temple_length_mm <= 200.0:
+            add(
+                "temple_length",
+                temple_length_px,
+                SIDE_EVIDENCE,
+                f"projected span divided by sin({min(yaw, 90.0):.0f} deg)",
+            )
+        else:
+            evidence["temple_length"] = INSUFFICIENT
     else:
         evidence["temple_length"] = INSUFFICIENT
 
