@@ -1,8 +1,11 @@
-# 🟢 SYSTEM LIVE STATUS
+# Historical local development status snapshot
 
-**Time:** 2026-08-26  
-**Status:** RUNNING  
-**Port:** 8000
+This is a record captured on 2026-08-26, not a live health check or deployment
+status. The process, port, and URLs below are historical and must not be used as
+evidence that a server is currently running. Check `/readyz` on the intended
+deployment for current readiness.
+
+**Captured:** 2026-08-26; **status at capture:** RUNNING; **port:** 8000.
 
 ---
 
@@ -286,7 +289,5 @@ Check process output in terminal
 
 ---
 
-**STATUS:** 🟢 OPERATIONAL  
-**UPTIME:** Since last start  
-**READY FOR:** Development, Testing, Integration  
-**ACCESS:** http://localhost:8000
+**Status at capture:** OPERATIONAL; **uptime at capture:** Since last start.
+**Access at capture:** http://localhost:8000

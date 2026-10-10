@@ -30,7 +30,7 @@ is the required default bundle; the exporter remains unchanged.
 - The real-product benchmark runner reports template accuracy, measurement MAE,
   RMSE, maximum error, failures, and per-model output acceptance.
 - Orbit video (`POST /api/deform/video`) decodes a clip, gates frames on blur,
-  glare and exposure, selects 18-24 well-spread views, classifies them, measures
+  glare and exposure, selects 5-10 well-spread views, classifies them, measures
   each view, and fuses with a weighted median plus MAD screening that rejects
   outlier views. It reports the per-dimension median, spread, agreement and every
   rejected value. See `docs/ORBIT_VIDEO_PIPELINE.md`; note that the automatic

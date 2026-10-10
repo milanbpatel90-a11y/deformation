@@ -8,7 +8,7 @@ import os
 import re
 import json
 from pydantic import ValidationError
-from backend.api.safety import read_image, read_video, run_job, video_suffix
+from backend.api.safety import read_image, run_job, save_video_upload, video_suffix
 
 logger = logging.getLogger(__name__)
 from pathlib import Path
@@ -206,9 +206,8 @@ async def suggest_from_orbit_video(
             raise HTTPException(400, "reference_width_mm must be between 20 and 250 mm")
 
         suffix = video_suffix(video.filename)
-        contents = await read_video(video)
         video_path = work_dir / f"orbit{suffix}"
-        video_path.write_bytes(contents)
+        await save_video_upload(video, video_path)
 
         estimate = await run_job(
             video_pipeline.estimate_from_video,
@@ -448,9 +447,8 @@ async def deform_from_orbit_video(
             check_combination(manual, template)
 
         suffix = video_suffix(video.filename)
-        contents = await read_video(video)
         video_path = work_dir / f"orbit{suffix}"
-        video_path.write_bytes(contents)
+        await save_video_upload(video, video_path)
 
         out_path = OUTPUT_DIR / f"{job_id}.glb"
         result = await run_job(
