@@ -46,6 +46,29 @@ class DeformationContext:
             raise KeyError(f"Mesh '{name}' not found in deformation context.")
         return mesh
 
+    def distinct_part_problems(self) -> list[str]:
+        """Describe any logical parts that are the *same* mesh object (aliasing).
+
+        Part-level deformers assume Frame, Bridge, LeftRim... are separate meshes. When
+        several logical names share one object, each stage re-deforms the whole frame.
+        """
+        names = sorted({part for parts in self.descriptor.vertex_groups.values() for part in parts})
+        by_id: dict[int, list[str]] = {}
+        for name in names:
+            mesh = self.meshes.get(name)
+            if mesh is not None:
+                by_id.setdefault(id(mesh), []).append(name)
+        return [
+            "parts share one mesh object: " + ", ".join(group)
+            for group in by_id.values()
+            if len(group) > 1
+        ]
+
+    def assert_distinct_parts(self) -> None:
+        problems = self.distinct_part_problems()
+        if problems:
+            raise ValueError("; ".join(problems))
+
     def vertex_group_meshes(self, group_name: str) -> list[trimesh.Trimesh]:
         parts = self.descriptor.vertex_groups.get(group_name, [])
         return [self.mesh(part) for part in parts]

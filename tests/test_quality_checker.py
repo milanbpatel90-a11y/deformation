@@ -22,6 +22,7 @@ def test_quality_checker_high_score():
             hinges={},
             rim_loops={},
             bridge_center=np.array([0, 0, 0]),
+            empty_anchors={},
             temple_axis={},
             lens_planes={},
             vertex_groups={},
