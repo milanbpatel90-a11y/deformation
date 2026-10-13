@@ -137,9 +137,31 @@ class QualityChecker:
                     report.critical.append(f"{name} spans {ratio:.0%} of the frame width.")
                     score = min(score, 40.0)
 
-        # 6. A lens must sit inside its own rim. Warning only (score unchanged): the lens
-        #    deformer is known to overshoot on curved lens meshes, and that must be visible
-        #    in the report rather than silent.
+        # 6. Surface lens-aperture and requested-size problems explicitly. Fitting a lens
+        #    inside an incorrectly sized template must not hide the dimensional mismatch.
+        lens_deformation = context.metadata.get("lens_deformation", {})
+        for side_result in lens_deformation.get("sides", []):
+            warning = side_result.get("dimension_warning")
+            if warning:
+                if warning not in report.warnings:
+                    report.warnings.append(warning)
+                # A geometrically contained lens that misses the requested physical size
+                # is not an acceptable production result. Keep the detail in warnings, but
+                # fail the quality gate so the caller cannot treat it as a successful fit.
+                report.passed = False
+
+        # 6b. The rim stage clamps the opening when the template's outer outline has no more room
+        #     for the requested lens. That is the root cause of a lens-size miss, so it is surfaced
+        #     even when the miss stays inside the 12% tolerance above (warning only; the lens-size
+        #     check above is what decides pass/fail).
+        for side_result in context.metadata.get("rim_deformation", {}).get("sides", []):
+            warning = side_result.get("warning")
+            if warning and warning not in report.warnings:
+                report.warnings.append(warning)
+
+        # 7. A lens must sit inside its own rim. Warning only (score unchanged): the lens
+        #    deformer has historically overshot on curved lens meshes, and the condition
+        #    must be visible in the report rather than silent.
         for side in ("Left", "Right"):
             lens, rim = context.meshes.get(f"{side}Lens"), context.meshes.get(f"{side}Rim")
             if lens is None or rim is None:
