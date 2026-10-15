@@ -19,7 +19,7 @@ class BridgeDeformerTests(unittest.TestCase):
             frame_width=135.0,
             lens_width=50.0,
             lens_height=46.0,
-            bridge_width=22.0,
+            bridge_width=18.0,
             temple_length=135.0,
             rim_thickness=1.2,
             material=FrameMaterial.METAL,
@@ -32,13 +32,19 @@ class BridgeDeformerTests(unittest.TestCase):
 
     def test_bridge_deformation_changes_bridge_only(self) -> None:
         ctx = self._context()
+        ctx.assert_distinct_parts()
         left_rim_before = ctx.mesh("LeftRim").vertices.copy()
         right_rim_before = ctx.mesh("RightRim").vertices.copy()
         left_temple_before = ctx.mesh("LeftTemple").vertices.copy()
         bridge_before = ctx.mesh("Bridge").bounds.copy()
         ctx = BridgeDeformer().apply(ctx)
         bridge_after = ctx.mesh("Bridge").bounds.copy()
-        self.assertGreater(float(bridge_after[1, 0] - bridge_after[0, 0]), float(bridge_before[1, 0] - bridge_before[0, 0]))
+        requested = 18.0
+        width_before = float(bridge_before[1, 0] - bridge_before[0, 0])
+        width_after = float(bridge_after[1, 0] - bridge_after[0, 0])
+        # Bridge must move toward the request (and stay bridge-sized, not frame-sized).
+        self.assertLess(abs(width_after - requested), abs(width_before - requested))
+        self.assertLess(width_after, 40.0)
         self.assertAlmostEqual(float(np.linalg.norm(ctx.mesh("LeftRim").vertices - left_rim_before, axis=1).max()), 0.0, places=6)
         self.assertAlmostEqual(float(np.linalg.norm(ctx.mesh("RightRim").vertices - right_rim_before, axis=1).max()), 0.0, places=6)
         self.assertAlmostEqual(float(np.linalg.norm(ctx.mesh("LeftTemple").vertices - left_temple_before, axis=1).max()), 0.0, places=6)

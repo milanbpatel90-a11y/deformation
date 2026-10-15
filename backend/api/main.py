@@ -12,6 +12,7 @@ from fastapi.staticfiles import StaticFiles
 
 from backend.models import FrameMaterial, FrameShape, Measurements
 from backend.pipeline import DeformationPipeline
+from backend.pipeline.deformation_pipeline import DeformationQualityError, TemplateNotPreparedError
 from backend.template_library.loader import TemplateLibrary
 from backend.api import rim_detection_routes
 
@@ -118,6 +119,10 @@ async def deform_from_images(
         result["job_id"] = job_id
         result["download_url"] = f"/api/output/{job_id}.glb"
         return result
+    except TemplateNotPreparedError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except DeformationQualityError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     except Exception as exc:
         import traceback
         tb = traceback.format_exc()
@@ -164,6 +169,10 @@ async def deform_from_multiple_images(
         result["job_id"] = job_id
         result["download_url"] = f"/api/output/{job_id}.glb"
         return result
+    except TemplateNotPreparedError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except DeformationQualityError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     except Exception as exc:
         import traceback
         tb = traceback.format_exc()
@@ -214,6 +223,10 @@ async def deform_from_measurements(
         result["job_id"] = job_id
         result["download_url"] = f"/api/output/{job_id}.glb"
         return result
+    except TemplateNotPreparedError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except DeformationQualityError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 

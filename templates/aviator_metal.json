@@ -1,0 +1,33 @@
+{
+  "name": "aviator_metal",
+  "shape": "aviator",
+  "material": "metal",
+  "style": "metal_aviator",
+  "glb_file": "aviator_metal.glb",
+  "fallback_glb": "aviator_metal.glb",
+  "dimensions": {
+    "frame_width": 142.0,
+    "lens_width": 58.4,
+    "lens_height": 46.7,
+    "bridge_width": 19.1,
+    "temple_length": 140.0,
+    "rim_thickness": 3.0,
+    "temple_curve_angle": 32.0,
+    "nose_pad_distance": 19.0,
+    "nose_pad_angle": 15.0,
+    "nose_pad_height": 3.0
+  },
+  "parts": [
+    "Frame",
+    "Bridge",
+    "LeftTemple",
+    "RightTemple",
+    "LeftLens",
+    "RightLens",
+    "LeftRim",
+    "RightRim"
+  ],
+  "rim_pull_strength": 0.4,
+  "source_asset": "glasses_12.glb",
+  "notes": "Wire-rim aviator, source was ~3.1x real size and is rescaled to eyewear size."
+}

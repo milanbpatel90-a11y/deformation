@@ -1,0 +1,33 @@
+{
+  "name": "round_metal",
+  "shape": "round",
+  "material": "metal",
+  "style": "metal_round",
+  "glb_file": "round_metal.glb",
+  "fallback_glb": "round_metal.glb",
+  "dimensions": {
+    "frame_width": 138.0,
+    "lens_width": 53.9,
+    "lens_height": 53.9,
+    "bridge_width": 21.6,
+    "temple_length": 140.0,
+    "rim_thickness": 3.0,
+    "temple_curve_angle": 30.0,
+    "nose_pad_distance": 17.0,
+    "nose_pad_angle": 15.0,
+    "nose_pad_height": 3.0
+  },
+  "parts": [
+    "Frame",
+    "Bridge",
+    "LeftTemple",
+    "RightTemple",
+    "LeftLens",
+    "RightLens",
+    "LeftRim",
+    "RightRim"
+  ],
+  "rim_pull_strength": 0.4,
+  "source_asset": "glasses_3.glb",
+  "notes": "Thin-wire round frame with pad arms; source was ~10x too small and on its side."
+}

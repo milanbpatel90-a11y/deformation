@@ -1,0 +1,33 @@
+{
+  "name": "browline_semirimless",
+  "shape": "browline",
+  "material": "metal",
+  "style": "metal_semirimless",
+  "glb_file": "browline_semirimless.glb",
+  "fallback_glb": "browline_semirimless.glb",
+  "dimensions": {
+    "frame_width": 136.0,
+    "lens_width": 52.9,
+    "lens_height": 31.1,
+    "bridge_width": 16.3,
+    "temple_length": 140.0,
+    "rim_thickness": 3.0,
+    "temple_curve_angle": 26.0,
+    "nose_pad_distance": 18.0,
+    "nose_pad_angle": 15.0,
+    "nose_pad_height": 3.0
+  },
+  "parts": [
+    "Frame",
+    "Bridge",
+    "LeftTemple",
+    "RightTemple",
+    "LeftLens",
+    "RightLens",
+    "LeftRim",
+    "RightRim"
+  ],
+  "rim_pull_strength": 0.4,
+  "source_asset": "glasses (1).glb",
+  "notes": "Semi-rimless: brow wire from the asset plus a generated closure wire along the open lower edge."
+}

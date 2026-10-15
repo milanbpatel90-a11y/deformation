@@ -1,0 +1,33 @@
+{
+  "name": "cat_eye_acetate",
+  "shape": "cat_eye",
+  "material": "acetate",
+  "style": "acetate_cat_eye",
+  "glb_file": "cat_eye_acetate.glb",
+  "fallback_glb": "cat_eye_acetate.glb",
+  "dimensions": {
+    "frame_width": 146.0,
+    "lens_width": 52.0,
+    "lens_height": 32.9,
+    "bridge_width": 16.2,
+    "temple_length": 140.0,
+    "rim_thickness": 3.0,
+    "temple_curve_angle": 24.0,
+    "nose_pad_distance": 17.0,
+    "nose_pad_angle": 15.0,
+    "nose_pad_height": 3.0
+  },
+  "parts": [
+    "Frame",
+    "Bridge",
+    "LeftTemple",
+    "RightTemple",
+    "LeftLens",
+    "RightLens",
+    "LeftRim",
+    "RightRim"
+  ],
+  "rim_pull_strength": 0.45,
+  "source_asset": "cat_eye_glasses.glb",
+  "notes": "Upswept cat-eye acetate front; logo fragments from the source asset were dropped."
+}
