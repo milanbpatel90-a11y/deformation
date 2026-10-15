@@ -1,0 +1,33 @@
+{
+  "name": "rectangle_acetate",
+  "shape": "rectangle",
+  "material": "acetate",
+  "style": "acetate_rectangle",
+  "glb_file": "rectangle_acetate.glb",
+  "fallback_glb": "rectangle_acetate.glb",
+  "dimensions": {
+    "frame_width": 138.0,
+    "lens_width": 49.9,
+    "lens_height": 30.4,
+    "bridge_width": 18.9,
+    "temple_length": 140.0,
+    "rim_thickness": 3.0,
+    "temple_curve_angle": 22.0,
+    "nose_pad_distance": 18.0,
+    "nose_pad_angle": 15.0,
+    "nose_pad_height": 3.0
+  },
+  "parts": [
+    "Frame",
+    "Bridge",
+    "LeftTemple",
+    "RightTemple",
+    "LeftLens",
+    "RightLens",
+    "LeftRim",
+    "RightRim"
+  ],
+  "rim_pull_strength": 0.45,
+  "source_asset": "glasses_5.glb",
+  "notes": "Thick rectangular acetate; decimated from 276k faces, lenses generated from the rim openings."
+}

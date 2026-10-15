@@ -15,10 +15,10 @@ class ShapeClassifier:
         FrameShape.ROUND: "round_metal",
         FrameShape.SQUARE: "square_metal",
         FrameShape.GEOMETRIC: "geometric_metal",
-        FrameShape.AVIATOR: "aviator",
-        FrameShape.CAT_EYE: "cat_eye",
+        FrameShape.AVIATOR: "aviator_metal",
+        FrameShape.CAT_EYE: "cat_eye_acetate",
         FrameShape.RECTANGLE: "rectangle_acetate",
-        FrameShape.BROWLINE: "browline",
+        FrameShape.BROWLINE: "browline_semirimless",
         FrameShape.RIMLESS: "rimless",
     }
 
@@ -126,6 +126,8 @@ class ShapeClassifier:
         )
 
     def template_name_for(self, shape: FrameShape, material: FrameMaterial) -> str:
+        if shape == FrameShape.RECTANGLE and material == FrameMaterial.PLASTIC:
+            return "rectangle_plastic"
         if shape == FrameShape.RECTANGLE and material == FrameMaterial.ACETATE:
             return "rectangle_acetate"
         if shape in self.TEMPLATE_MAP:

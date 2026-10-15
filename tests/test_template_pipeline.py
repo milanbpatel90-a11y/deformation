@@ -69,7 +69,14 @@ def test_template_is_split_into_distinct_named_parts(name: str, pipeline: Deform
 def test_end_to_end_deformation_passes_quality_and_hits_targets(
     name: str, pipeline: DeformationPipeline, tmp_path: Path
 ) -> None:
-    m = _measurements(frame_width=140.0, bridge_width=18.0, temple_length=140.0)
+    # A realistic request FOR THIS TEMPLATE: 52x42 mm lens, but never bigger than the template's own
+    # lens (a cat-eye front cannot honestly be asked for a 42 mm tall lens; the engine rightly refuses).
+    scene = trimesh.load(TEMPLATES / f"{name}.glb", force="scene")
+    lens_ext = scene.geometry["LeftLens"].extents
+    m = _measurements(
+        frame_width=140.0, lens_width=min(52.0, float(lens_ext[0])), lens_height=min(42.0, float(lens_ext[1])),
+        bridge_width=18.0, temple_length=140.0,
+    )
     out = tmp_path / f"{name}.glb"
     result = pipeline.run_from_measurements(m, out, template_name=name)
     quality = result["quality"]
@@ -82,7 +89,7 @@ def test_end_to_end_deformation_passes_quality_and_hits_targets(
     assert 8.0 <= bridge_w <= 40.0
     front = [meshes[p] for p in ("Frame", "LeftRim", "RightRim", "Bridge")]
     front_w = max(f.bounds[1][0] for f in front) - min(f.bounds[0][0] for f in front)
-    assert abs(front_w - 140.0) / 140.0 < 0.15
+    assert abs(front_w - m.frame_width) / m.frame_width < 0.15
 
 
 def test_pipeline_quality_error_blocks_export(pipeline: DeformationPipeline) -> None:
