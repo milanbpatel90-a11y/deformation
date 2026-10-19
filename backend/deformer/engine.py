@@ -12,7 +12,6 @@ import trimesh
 
 from backend.models import LensContour, Measurements, TemplateDimensions
 
-# We load deformers individually in the main orchestration class.
 from backend.deformer.bridge_deformer import BridgeDeformer
 from backend.deformer.constraints import ConstraintSolver
 from backend.deformer.lens_deformer import LensDeformer
@@ -25,11 +24,7 @@ from backend.deformer.deformation_context import DeformationContext
 
 
 class MeshDeformer:
-    """
-    Deform a professional template GLB using a modular stage pipeline.
-
-    The engine orchestrates specialized deformers, acting on the DeformationContext.
-    """
+    """Deform a professional template GLB using a modular stage pipeline."""
 
     def __init__(
         self,
@@ -40,8 +35,7 @@ class MeshDeformer:
         self.template_scene = template_scene
         self.template_dims = template_dims
         self.rim_pull_strength = float(np.clip(rim_pull_strength, 0.0, 1.0))
-        
-        # Instantiate stages
+
         self.stages = [
             RimDeformer(contour_strength=self.rim_pull_strength),
             BridgeDeformer(),
@@ -49,7 +43,7 @@ class MeshDeformer:
             LensDeformer(),
             ConstraintSolver(),
             SymmetrySolver(),
-            MeshSmoother(),
+            MeshSmoother(lam=0.5, mu=-0.53, iterations=12),
         ]
         self.quality_checker = QualityChecker()
 
@@ -58,25 +52,18 @@ class MeshDeformer:
         context: DeformationContext,
         lens_contour: LensContour | None = None,
     ) -> tuple[DeformationContext, QualityReport]:
-        """Apply all deformation stages to the context and return quality report."""
-        
         for stage in self.stages:
             if hasattr(stage, "apply"):
-                # Handle special argument requirements (e.g., lens_contour)
                 if isinstance(stage, RimDeformer):
                     context = stage.apply(context, lens_contour)
                 else:
                     context = stage.apply(context)
 
-        # Refresh normals at the very end
         self._refresh_normals(context)
-
         quality = self.quality_checker.evaluate(context)
-
         return context, quality
 
     def _refresh_normals(self, context: DeformationContext) -> None:
-        """Fix normals after all mesh edits."""
         for geom in context.meshes.values():
             if hasattr(geom, "fix_normals"):
                 geom.fix_normals()
