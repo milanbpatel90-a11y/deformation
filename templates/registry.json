@@ -1,51 +1,79 @@
-{
-  "rectangle_plastic": {
+[
+  {
+    "name": "geometric_metal",
+    "shape": "geometric",
+    "material": "metal",
+    "family": "geometric",
+    "priority": 10,
+    "description": "Default geometric metal full-rim template",
+    "glb_file": "geometric_metal.glb",
+    "rim_pull_strength": 0.1,
+    "has_descriptor": true
+  },
+  {
     "name": "rectangle_plastic",
-    "style": "plastic_rectangle",
-    "glb_path": "C:\\Users\\Petpooja-607\\Desktop\\defirmation\\templates\\rectangle_plastic.glb",
-    "bridge_width_mm": 17.2,
-    "temple_length_mm": 145.0,
-    "nose_bridge_landmark": 6,
-    "left_hinge_landmark": 234,
-    "right_hinge_landmark": 454,
-    "ffd_grid_dims": [
-      4,
-      4,
-      4
-    ],
-    "lens_edge_vertices": [
-      8,
-      9,
-      10,
-      11,
-      12,
-      13,
-      14,
-      15,
-      16,
-      17,
-      18,
-      19,
-      20,
-      21,
-      22,
-      23,
-      24,
-      25,
-      26,
-      27,
-      28,
-      29,
-      30,
-      31,
-      32,
-      33,
-      34,
-      35
-    ],
+    "shape": "rectangle",
+    "material": "plastic",
+    "family": "rectangle",
+    "priority": 20,
+    "description": "Plastic rectangular full-rim (production calibrated)",
+    "glb_file": "rectangle_plastic.glb",
     "rim_pull_strength": 0.45,
-    "fallback_glb": "rectangle_plastic.glb",
-    "created_at": "2026-07-21T00:00:00",
-    "last_calibrated": null
+    "has_descriptor": true
+  },
+  {
+    "name": "cat_eye_gold",
+    "shape": "cat_eye",
+    "material": "metal",
+    "family": "cat_eye",
+    "priority": 30,
+    "description": "Wide cat-eye metal frame",
+    "glb_file": "cat_eye_gold.glb",
+    "rim_pull_strength": 0.55,
+    "has_descriptor": true
+  },
+  {
+    "name": "oversized_clear",
+    "shape": "round",
+    "material": "acetate",
+    "family": "oversized",
+    "priority": 30,
+    "description": "Oversized round acetate",
+    "glb_file": "oversized_clear.glb",
+    "rim_pull_strength": 0.5,
+    "has_descriptor": true
+  },
+  {
+    "name": "rectangle_metal",
+    "shape": "rectangle",
+    "material": "metal",
+    "family": "rectangle",
+    "priority": 30,
+    "description": "Narrow rectangular metal with large nose pads",
+    "glb_file": "rectangle_metal.glb",
+    "rim_pull_strength": 0.2,
+    "has_descriptor": true
+  },
+  {
+    "name": "round_wire_metal",
+    "shape": "round",
+    "material": "metal",
+    "family": "round",
+    "priority": 30,
+    "description": "Thin wire round metal with nose pads",
+    "glb_file": "round_wire_metal.glb",
+    "rim_pull_strength": 0.08,
+    "has_descriptor": true
+  },
+  {
+    "name": "slim_rectangle_steel",
+    "shape": "rectangle",
+    "material": "metal",
+    "family": "rectangle",
+    "priority": 30,
+    "description": "Slim narrow rectangular steel frame",
+    "glb_file": "slim_rectangle_steel.glb",
+    "rim_pull_strength": 0.45,
+    "has_descriptor": true
   }
-}
+]
