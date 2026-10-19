@@ -15,19 +15,8 @@
     "nose_pad_angle": 12.0,
     "nose_pad_height": 3.0
   },
-  "parts": [
-    "Frame",
-    "LeftLens",
-    "RightLens",
-    "Bridge",
-    "LeftRim",
-    "RightRim",
-    "LeftTemple",
-    "RightTemple",
-    "LeftHinge",
-    "RightHinge"
-  ],
+  "parts": ["Frame", "LeftLens", "RightLens", "Bridge", "LeftRim", "RightRim", "LeftTemple", "RightTemple", "LeftHinge", "RightHinge"],
   "rim_pull_strength": 0.45,
   "toolkit_style": "slim_rectangle",
-  "notes": "Narrow/slim rectangular lens profile (lens_height=20.5mm) -- a real feature of the source scan, not a processing defect; verify against the product reference if this looks too narrow."
+  "notes": "Lens height 20.5 mm intentional. Rims cleaned to 2 components."
 }

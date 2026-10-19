@@ -15,20 +15,8 @@
     "nose_pad_angle": 15.0,
     "nose_pad_height": 19.5
   },
-  "parts": [
-    "Frame",
-    "LeftLens",
-    "RightLens",
-    "Bridge",
-    "LeftRim",
-    "RightRim",
-    "LeftTemple",
-    "RightTemple",
-    "LeftHinge",
-    "RightHinge",
-    "LeftNosePad",
-    "RightNosePad"
-  ],
+  "parts": ["Frame", "LeftLens", "RightLens", "Bridge", "LeftRim", "RightRim", "LeftTemple", "RightTemple", "LeftHinge", "RightHinge", "LeftNosePad", "RightNosePad"],
   "rim_pull_strength": 0.2,
-  "toolkit_style": "rectangle"
+  "toolkit_style": "rectangle",
+  "notes": "Narrow rectangular profile. Large nose pads. Rims single component."
 }

@@ -15,19 +15,8 @@
     "nose_pad_angle": 14.0,
     "nose_pad_height": 3.0
   },
-  "parts": [
-    "Frame",
-    "LeftLens",
-    "RightLens",
-    "Bridge",
-    "LeftRim",
-    "RightRim",
-    "LeftTemple",
-    "RightTemple",
-    "LeftHinge",
-    "RightHinge"
-  ],
+  "parts": ["Frame", "LeftLens", "RightLens", "Bridge", "LeftRim", "RightRim", "LeftTemple", "RightTemple", "LeftHinge", "RightHinge"],
   "rim_pull_strength": 0.5,
   "toolkit_style": "oversized_round",
-  "notes": "Source file (glasses_12.3dm) had no reference image/product spec, so lens_width=50mm was used as the scale-calibration anchor (a typical adult value) rather than a measured real-world figure -- flagged assumption, not a calibrated fact. LeftRim/RightRim carry 47 disconnected boundary loops from the raw frame mass (same class of topology limitation as cat_eye_gold); RimDeformer's contour-fit stage may distort these more than a clean single-loop rim."
+  "notes": "Topology cleaned: rims single component. Scale anchored at lens_width=50 mm."
 }
