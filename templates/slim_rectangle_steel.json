@@ -1,0 +1,33 @@
+{
+  "name": "slim_rectangle_steel",
+  "shape": "rectangle",
+  "material": "metal",
+  "glb_file": "slim_rectangle_steel.glb",
+  "dimensions": {
+    "frame_width": 133.1,
+    "lens_width": 52.5,
+    "lens_height": 20.5,
+    "bridge_width": 16.0,
+    "temple_length": 150.5,
+    "rim_thickness": 1.0,
+    "temple_curve_angle": 20.0,
+    "nose_pad_distance": 14.0,
+    "nose_pad_angle": 12.0,
+    "nose_pad_height": 3.0
+  },
+  "parts": [
+    "Frame",
+    "LeftLens",
+    "RightLens",
+    "Bridge",
+    "LeftRim",
+    "RightRim",
+    "LeftTemple",
+    "RightTemple",
+    "LeftHinge",
+    "RightHinge"
+  ],
+  "rim_pull_strength": 0.45,
+  "toolkit_style": "slim_rectangle",
+  "notes": "Narrow/slim rectangular lens profile (lens_height=20.5mm) -- a real feature of the source scan, not a processing defect; verify against the product reference if this looks too narrow."
+}

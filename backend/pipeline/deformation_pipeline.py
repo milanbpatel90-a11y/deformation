@@ -90,10 +90,73 @@ class DeformationPipeline:
                     if actual and actual in scene.geometry:
                         alias_map[logical_name] = actual
 
-        # Inject: add logical-named references into scene.geometry
+        # Inject: add logical-named copies into scene.geometry, baked into WORLD
+        # space first.
+        #
+        # This MUST be an independent copy, not a shared reference. A degenerate/
+        # un-split template (confirmed on geometric_metal.glb, the repo's only
+        # pre-existing built-in template: its descriptor maps Frame, Bridge,
+        # LeftRim and RightRim all onto the single un-split mesh
+        # "Plane_glasses_mat_0") aliases several logical names to the same actual
+        # GLB mesh. `scene.geometry[logical] = scene.geometry[actual]` made every
+        # one of those logical names point at the literal same Trimesh instance,
+        # so BridgeDeformer mutating "Bridge".vertices silently mutated
+        # "LeftRim"/"RightRim"/"Frame" too (confirmed: running BridgeDeformer()
+        # alone moved LeftRim vertices by ~150mm even though it never touches
+        # LeftRim by name). deepcopy makes each logical part independently
+        # deformable, matching what every per-part deformer assumes.
+        #
+        # Baking the node transform in before the copy matters just as much as
+        # the independent-copy fix above: scene.geometry holds each mesh's LOCAL,
+        # untransformed vertex data, and on geometric_metal.glb the lens node's
+        # transform isn't just a translation -- it's a ~90 degree rotation that
+        # swaps the local Y and Z axes. Copying scene.geometry["Cube.002_glass_
+        # mat_0"] straight into "LeftLens"/"RightLens" (the previous behaviour)
+        # silently handed LensDeformer a mesh whose local Z axis was actually the
+        # lens's HEIGHT, not its depth -- LensDeformer._surface_indices splits
+        # front/back on Z, so it was splitting top-half vs bottom-half instead,
+        # which produced an undersized, badly-placed lens fit and tripped
+        # LensDeformer's own "valid" check (fit_error/inside_rim) regardless of
+        # measurements. Baking here, once, keeps every downstream consumer of
+        # the logical name correct without each deformer having to know about
+        # per-GLB node quirks.
+        geom_transforms: dict[str, np.ndarray] = {}
+        for node_name in scene.graph.nodes_geometry:
+            transform, geom_name = scene.graph[node_name]
+            if geom_name not in geom_transforms:
+                geom_transforms[geom_name] = transform
         for logical_name, actual_name in alias_map.items():
             if logical_name not in scene.geometry:
-                scene.geometry[logical_name] = scene.geometry[actual_name]
+                copy = deepcopy(scene.geometry[actual_name])
+                transform = geom_transforms.get(actual_name)
+                if transform is not None and not np.allclose(transform, np.eye(4)):
+                    copy.apply_transform(transform)
+                scene.geometry[logical_name] = copy
+
+    @staticmethod
+    def _uniform_scale_fallback(scene: trimesh.Scene, template_info, measurements: Measurements) -> trimesh.Scene:
+        """Descriptor-free fallback: uniformly rescale every mesh in the scene so
+        the template's frame_width matches the requested measurements.frame_width.
+        Coarser than the descriptor-driven pipeline (no per-part reshaping), but
+        it is a real, working deformation rather than a crash -- used only when a
+        template is missing its descriptor.json or fails descriptor validation."""
+        from copy import deepcopy
+
+        out = deepcopy(scene)
+        template_width = float(getattr(template_info.dimensions, "frame_width", 0.0) or 0.0)
+        if template_width <= 0:
+            return out
+
+        scale = float(measurements.frame_width) / template_width
+        scale = float(np.clip(scale, 0.5, 2.0))
+
+        for node_name in out.graph.nodes_geometry:
+            transform, geom_name = out.graph[node_name]
+            new_transform = transform.copy()
+            new_transform[:3, :3] *= scale
+            new_transform[:3, 3] *= scale
+            out.graph.update(frame_to=node_name, matrix=new_transform)
+        return out
 
     @staticmethod
     def _optimize_scene(scene: trimesh.Scene) -> trimesh.Scene:
@@ -169,13 +232,16 @@ class DeformationPipeline:
             deformed_ctx, quality = deformer.deform(ctx)
             deformed = deformed_ctx.template_scene
         except (ValueError, KeyError) as e:
-            # Fallback to old simple deformation without descriptors
+            # Fallback when the template has no usable descriptor. There is no
+            # separate "simple" deformer left in this codebase -- MeshDeformer
+            # is the only deformer, and its .deform() requires a
+            # DeformationContext, not a raw Measurements object, so calling it
+            # here would always raise AttributeError. Instead, do a uniform
+            # scale of the whole template toward the requested frame_width,
+            # which needs no descriptor at all.
             import warnings
-            warnings.warn(f"Template {template_name} not properly prepared (descriptor error: {e}). Using simple deformation fallback.")
-            from backend.deformer.engine import MeshDeformer as OldDeformer
-            rim_pull = self.library.rim_pull_strength(template_name)
-            deformer = OldDeformer(scene, template_info.dimensions, rim_pull_strength=rim_pull)
-            deformed = deformer.deform(measurements)
+            warnings.warn(f"Template {template_name} not properly prepared (descriptor error: {e}). Using uniform-scale fallback.")
+            deformed = self._uniform_scale_fallback(scene, template_info, measurements)
         
         deformed = apply_materials(deformed, measurements)
 

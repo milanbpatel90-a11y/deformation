@@ -6,6 +6,7 @@ from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import Any
 
+import numpy as np
 import trimesh
 
 from backend.deformer.descriptor_loader import TemplateDescriptor
@@ -27,11 +28,7 @@ class DeformationContext:
 
     def __post_init__(self) -> None:
         self.template_scene = deepcopy(self.template_scene)
-        self.meshes = {
-            name: mesh
-            for name, mesh in self.template_scene.geometry.items()
-            if isinstance(mesh, trimesh.Trimesh)
-        }
+        self.meshes = self._world_space_geometry(self.template_scene)
         if not self.materials:
             self.materials = {
                 name: getattr(mesh.visual, "material", None)
@@ -39,6 +36,48 @@ class DeformationContext:
             }
 
     meshes: dict[str, trimesh.Trimesh] = field(init=False, default_factory=dict)
+
+    @staticmethod
+    def _world_space_geometry(scene: trimesh.Scene) -> dict[str, trimesh.Trimesh]:
+        """{geometry_name: mesh} with each node's transform baked into its
+        vertices.
+
+        trimesh.Scene.geometry holds untransformed LOCAL mesh data. Building
+        the context straight from it (the previous behaviour) silently
+        operates on the wrong local frame for any part whose scene-graph node
+        carries a non-identity transform -- confirmed on geometric_metal.glb,
+        whose Blender-exported lens node is a ~90 degree rotation that swaps
+        the mesh's local Y and Z axes. LensDeformer splits a lens into
+        front/back surfaces by Z, so without this bake its "Z" was actually
+        the lens's height, not its depth, and every rim-fit/validity check
+        failed (see the matching fix and full root-cause note in
+        DeformationPipeline._inject_aliases_into_scene, which bakes the same
+        way for alias-copied logical names before this method ever sees the
+        scene). Keyed by GEOMETRY name (not node name) so existing lookups by
+        mesh/part name keep working. A geometry with no scene-graph node of
+        its own (an alias-injected logical name such as "LeftLens", added
+        directly into scene.geometry) is carried through unchanged here --
+        it was already baked at injection time, using its source geometry's
+        transform, so re-baking it against a (nonexistent) node of its own
+        would be a no-op at best and wrong if it coincidentally matched some
+        other node's name.
+        """
+        baked: dict[str, trimesh.Trimesh] = {}
+        for node_name in scene.graph.nodes_geometry:
+            transform, geom_name = scene.graph[node_name]
+            if geom_name in baked:
+                continue
+            src = scene.geometry.get(geom_name)
+            if not isinstance(src, trimesh.Trimesh):
+                continue
+            mesh = src.copy()
+            if not np.allclose(transform, np.eye(4)):
+                mesh.apply_transform(transform)
+            baked[geom_name] = mesh
+        for name, mesh in scene.geometry.items():
+            if name not in baked and isinstance(mesh, trimesh.Trimesh):
+                baked[name] = mesh
+        return baked
 
     def mesh(self, name: str) -> trimesh.Trimesh:
         mesh = self.meshes.get(name)

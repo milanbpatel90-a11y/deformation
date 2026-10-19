@@ -1,0 +1,32 @@
+{
+  "name": "round_wire_metal",
+  "shape": "round",
+  "material": "metal",
+  "glb_file": "round_wire_metal.glb",
+  "dimensions": {
+    "frame_width": 113.3,
+    "lens_width": 48.0,
+    "lens_height": 38.6,
+    "bridge_width": 15.1,
+    "temple_length": 143.0,
+    "rim_thickness": 0.9,
+    "temple_curve_angle": 15.0,
+    "nose_pad_distance": 10.6,
+    "nose_pad_angle": 15.0,
+    "nose_pad_height": 4.0
+  },
+  "parts": [
+    "Frame",
+    "LeftLens",
+    "RightLens",
+    "Bridge",
+    "LeftRim",
+    "RightRim",
+    "LeftTemple",
+    "RightTemple",
+    "LeftNosePad",
+    "RightNosePad"
+  ],
+  "rim_pull_strength": 0.08,
+  "toolkit_style": "round"
+}

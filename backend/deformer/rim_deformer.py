@@ -107,6 +107,15 @@ class RimDeformer(BaseDeformer):
         front_radial = np.linalg.norm(template_front - front_centroid, axis=1)
         target_radial = np.linalg.norm(blended_target - target_centroid, axis=1)
         radial_ratio = np.divide(target_radial, np.maximum(front_radial, 1e-6))
+        # Clamp: a front-ring vertex that happens to sit near its own centroid (a few mm
+        # out -- common on a rim built from concatenated/fused scan fragments, where loop
+        # vertices aren't evenly spaced around the centroid) divides into a normal-sized
+        # target radius and produces a large outlier ratio (confirmed on cat_eye_gold: a
+        # 2.2mm front_radial against an 18-40mm target_radial gave an 11.7x ratio). That
+        # ratio is then applied to the BACK ring's own, independently-scaled radii, so one
+        # outlier blows the entire back ring up to hundreds of mm. No legitimate single-point
+        # rim reshape needs more than a few times local radial growth/shrink, so clip it.
+        radial_ratio = np.clip(radial_ratio, 0.3, 3.0)
 
         vertices[ordered_front_idx, 0:2] = blended_target
         thickness = self._target_depth(vertices, ordered_front_idx, ordered_back_idx, target_thickness)
@@ -114,8 +123,46 @@ class RimDeformer(BaseDeformer):
         back_template = vertices[ordered_back_idx][:, :2]
         back_centroid = back_template.mean(axis=0)
         centered_back = back_template - back_centroid
-        scaled_back = centered_back * radial_ratio[:, None]
-        vertices[ordered_back_idx, 0:2] = target_centroid + scaled_back
+
+        # radial_ratio is parameterized over the front ring's own vertex count, which does
+        # not generally equal the back ring's count (true for any non-box-extruded rim).
+        # It must be resampled onto the back ring some other way. Loop-fraction (index/N)
+        # interpolation assumes index 0 on both rings sits at the same physical azimuth and
+        # that vertex density is otherwise comparable between them -- true for a clean
+        # symmetric box extrusion, false for a rim assembled from concatenated/fused scan
+        # fragments where the two loops can have very different vertex distributions.
+        # Confirmed on cat_eye_gold: loop-fraction interpolation put ratios on the wrong
+        # back-ring vertices, so a back vertex 48.9mm from its own centroid picked up a
+        # ratio meant for an unrelated front vertex and the back ring blew out to ~170mm.
+        # Matching by actual ANGLE around each ring's own centroid is density- and
+        # rotation-invariant and keeps a ratio on the azimuth it was actually computed for.
+        if len(radial_ratio) == len(centered_back):
+            radial_ratio_back = radial_ratio
+        else:
+            front_centered = template_front - front_centroid
+            front_angles = np.arctan2(front_centered[:, 1], front_centered[:, 0])
+            back_angles = np.arctan2(centered_back[:, 1], centered_back[:, 0])
+            order = np.argsort(front_angles)
+            sorted_angles = front_angles[order]
+            sorted_ratio = radial_ratio[order]
+            # Extend periodically by one wrap on each side so np.interp handles wraparound.
+            ext_angles = np.concatenate([sorted_angles[-1:] - 2 * np.pi, sorted_angles, sorted_angles[:1] + 2 * np.pi])
+            ext_ratio = np.concatenate([sorted_ratio[-1:], sorted_ratio, sorted_ratio[:1]])
+            radial_ratio_back = np.interp(back_angles, ext_angles, ext_ratio)
+
+        scaled_back = centered_back * radial_ratio_back[:, None]
+        # Recenter on (back's own native centroid + the net 2D shift the front ring
+        # underwent), not on target_centroid directly. Forcing the back ring onto the
+        # front ring's target centroid silently assumes the two rings were already
+        # coaxial (front_centroid == back_centroid) -- true for a clean box-extruded
+        # rim, but false for any rim assembled from concatenated/fused source fragments
+        # (confirmed on cat_eye_gold, built from a real scan: front/back centroids sit
+        # ~tens of mm apart because the front and back loops don't correspond to a
+        # simple vertical extrusion). The old code discarded that native offset entirely,
+        # snapping the back ring on top of the front ring's position and producing a
+        # multi-hundred-mm frame_width blow-up on deformation.
+        net_shift = target_centroid - front_centroid
+        vertices[ordered_back_idx, 0:2] = (back_centroid + net_shift) + scaled_back
 
         front_z = float(np.max(vertices[ordered_front_idx, 2]))
         vertices[ordered_front_idx, 2] = front_z
@@ -202,10 +249,23 @@ class RimDeformer(BaseDeformer):
     @staticmethod
     def _split_surface_indices(vertices: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
         z_values = vertices[:, 2]
-        front_z = float(np.max(z_values))
-        back_z = float(np.min(z_values))
-        front_indices = np.where(np.isclose(z_values, front_z))[0]
-        back_indices = np.where(np.isclose(z_values, back_z))[0]
+        z_min, z_max = float(np.min(z_values)), float(np.max(z_values))
+        if np.isclose(z_min, z_max):
+            # Degenerate: the whole rim sits at a single depth. Treat it as one ring used
+            # for both front and back so downstream code still has something to work with.
+            idx = np.arange(len(z_values))
+            return idx, idx
+
+        # Box-extruded rims (many vertices coplanar at the exact front/back faces) and
+        # organic/curved rims (e.g. a thin round wire frame, where only a couple of
+        # vertices sit at the exact Z extreme and the rest vary continuously) both need a
+        # front/back split. Using an exact isclose-to-extreme match only works for the
+        # former and silently starves the split down to 1-2 vertices for the latter,
+        # which then breaks the radial-ratio broadcast in _deform_rim_mesh. A midpoint
+        # threshold instead always yields two full rings, regardless of topology.
+        midpoint = (z_min + z_max) / 2.0
+        front_indices = np.where(z_values >= midpoint)[0]
+        back_indices = np.where(z_values < midpoint)[0]
         return front_indices, back_indices
 
     @staticmethod
@@ -286,8 +346,14 @@ class RimDeformer(BaseDeformer):
         back_indices: np.ndarray,
         target_thickness: float,
     ) -> float:
-        existing = float(np.mean(vertices[front_indices, 2] - vertices[back_indices, 2]))
-        return float(np.clip(target_thickness, 0.8, 6.0)) if np.isfinite(target_thickness) else existing
+        if np.isfinite(target_thickness):
+            return float(np.clip(target_thickness, 0.8, 6.0))
+        # Fallback only: estimate existing thickness from the two rings' mean Z,
+        # not an elementwise difference -- front/back rings are not guaranteed to
+        # have equal vertex counts (true for any non-box-extruded rim mesh), so
+        # vertices[front_indices, 2] - vertices[back_indices, 2] can raise a
+        # broadcast ValueError.
+        return float(np.mean(vertices[front_indices, 2]) - np.mean(vertices[back_indices, 2]))
 
     @staticmethod
     def _propagate_to_frame(frame_mesh, original_rim_vertices: np.ndarray, deformed_rim_vertices: np.ndarray) -> None:
@@ -318,13 +384,26 @@ class RimDeformer(BaseDeformer):
         # Query neighbours within 12 mm
         neighbours = tree.query_ball_point(soft_rim, r=12.0)
         weighted = np.zeros_like(frame_vertices)
+        weight_sum = np.zeros(len(frame_vertices))
         for r_idx, f_indices in enumerate(neighbours):
             if not f_indices:
                 continue
             f_idx = np.array(f_indices, dtype=np.int32)
             dist = np.linalg.norm(frame_vertices[f_idx] - soft_rim[r_idx], axis=1)
             influence = BaseDeformer.apply_falloff(np.clip(1.0 - dist / 12.0, 0.0, 1.0))
-            weighted[f_idx] += soft_deltas[r_idx] * influence[:, None] * 0.2
+            # Accumulate as a weighted SUM here, then normalize by total weight below.
+            # A frame vertex near many rim vertices (true for any densely tessellated
+            # frame mesh -- confirmed on oversized_clear, where soft-path rim vertices
+            # average ~97 frame neighbours each within 12mm) must get a weighted
+            # AVERAGE of those nearby deltas, not their raw sum: summing let every
+            # extra nearby rim vertex add another full-strength contribution, inflating
+            # frame_width from 118mm to 330mm on a template fed its own native
+            # measurements (which should reproduce ~identity scale factors).
+            weighted[f_idx] += soft_deltas[r_idx] * influence[:, None]
+            weight_sum[f_idx] += influence
 
-        frame_vertices += weighted
+        has_weight = weight_sum > 1e-9
+        averaged = np.zeros_like(weighted)
+        averaged[has_weight] = weighted[has_weight] / weight_sum[has_weight, None]
+        frame_vertices += averaged * 0.2
         frame_mesh.vertices = frame_vertices

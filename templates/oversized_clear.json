@@ -1,19 +1,19 @@
 {
   "name": "oversized_clear",
-  "shape": "geometric",
-  "material": "metal",
-  "glb_file": "geometric_metal.glb",
+  "shape": "round",
+  "material": "acetate",
+  "glb_file": "oversized_clear.glb",
   "dimensions": {
-    "frame_width": 135,
-    "lens_width": 50,
-    "lens_height": 46,
-    "bridge_width": 16.51,
-    "temple_length": 135.0,
-    "rim_thickness": 1.0,
-    "temple_curve_angle": 28,
-    "nose_pad_distance": 16,
-    "nose_pad_angle": 15,
-    "nose_pad_height": 3
+    "frame_width": 118.0,
+    "lens_width": 50.0,
+    "lens_height": 40.2,
+    "bridge_width": 14.7,
+    "temple_length": 126.3,
+    "rim_thickness": 1.5,
+    "temple_curve_angle": 25.0,
+    "nose_pad_distance": 15.0,
+    "nose_pad_angle": 14.0,
+    "nose_pad_height": 3.0
   },
   "parts": [
     "Frame",
@@ -24,9 +24,10 @@
     "RightRim",
     "LeftTemple",
     "RightTemple",
-    "NosePads",
-    "TempleTips"
+    "LeftHinge",
+    "RightHinge"
   ],
-  "rim_pull_strength": 0.65,
-  "toolkit_style": "geometric"
+  "rim_pull_strength": 0.5,
+  "toolkit_style": "oversized_round",
+  "notes": "Source file (glasses_12.3dm) had no reference image/product spec, so lens_width=50mm was used as the scale-calibration anchor (a typical adult value) rather than a measured real-world figure -- flagged assumption, not a calibrated fact. LeftRim/RightRim carry 47 disconnected boundary loops from the raw frame mass (same class of topology limitation as cat_eye_gold); RimDeformer's contour-fit stage may distort these more than a clean single-loop rim."
 }

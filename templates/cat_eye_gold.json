@@ -2,18 +2,18 @@
   "name": "cat_eye_gold",
   "shape": "cat_eye",
   "material": "metal",
-  "glb_file": "geometric_metal.glb",
+  "glb_file": "cat_eye_gold.glb",
   "dimensions": {
-    "frame_width": 135,
-    "lens_width": 50,
-    "lens_height": 46,
-    "bridge_width": 15.98,
-    "temple_length": 135.0,
-    "rim_thickness": 1.0,
-    "temple_curve_angle": 28,
-    "nose_pad_distance": 16,
-    "nose_pad_angle": 15,
-    "nose_pad_height": 3
+    "frame_width": 169.8,
+    "lens_width": 56.0,
+    "lens_height": 36.5,
+    "bridge_width": 21.4,
+    "temple_length": 143.9,
+    "rim_thickness": 1.3,
+    "temple_curve_angle": 22.0,
+    "nose_pad_distance": 16.0,
+    "nose_pad_angle": 15.0,
+    "nose_pad_height": 3.0
   },
   "parts": [
     "Frame",
@@ -24,9 +24,9 @@
     "RightRim",
     "LeftTemple",
     "RightTemple",
-    "NosePads",
-    "TempleTips"
+    "LeftHinge",
+    "RightHinge"
   ],
-  "rim_pull_strength": 0.65,
+  "rim_pull_strength": 0.55,
   "toolkit_style": "cat_eye"
 }

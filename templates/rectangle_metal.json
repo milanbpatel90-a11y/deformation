@@ -1,0 +1,34 @@
+{
+  "name": "rectangle_metal",
+  "shape": "rectangle",
+  "material": "metal",
+  "glb_file": "rectangle_metal.glb",
+  "dimensions": {
+    "frame_width": 118.7,
+    "lens_width": 52.5,
+    "lens_height": 20.5,
+    "bridge_width": 16.0,
+    "temple_length": 152.4,
+    "rim_thickness": 1.0,
+    "temple_curve_angle": 20.0,
+    "nose_pad_distance": 20.3,
+    "nose_pad_angle": 15.0,
+    "nose_pad_height": 19.5
+  },
+  "parts": [
+    "Frame",
+    "LeftLens",
+    "RightLens",
+    "Bridge",
+    "LeftRim",
+    "RightRim",
+    "LeftTemple",
+    "RightTemple",
+    "LeftHinge",
+    "RightHinge",
+    "LeftNosePad",
+    "RightNosePad"
+  ],
+  "rim_pull_strength": 0.2,
+  "toolkit_style": "rectangle"
+}

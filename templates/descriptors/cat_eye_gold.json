@@ -1,0 +1,128 @@
+{
+  "version": "1.0",
+  "template_name": "cat_eye_gold",
+  "hinges": {
+    "left": {
+      "part": "LeftTemple",
+      "confidence": 0.85
+    },
+    "right": {
+      "part": "RightTemple",
+      "confidence": 0.85
+    }
+  },
+  "bridge": {
+    "part": "Bridge",
+    "type": "saddle"
+  },
+  "rim_loops": {
+    "frame": {
+      "part": "Frame",
+      "confidence": 1.0
+    },
+    "left_rim": {
+      "part": "LeftRim",
+      "confidence": 1.0
+    },
+    "right_rim": {
+      "part": "RightRim",
+      "confidence": 1.0
+    }
+  },
+  "temple_pivots": {
+    "left": {
+      "part": "LeftTemple"
+    },
+    "right": {
+      "part": "RightTemple"
+    }
+  },
+  "lens_planes": {
+    "left": {
+      "part": "LeftLens"
+    },
+    "right": {
+      "part": "RightLens"
+    }
+  },
+  "symmetry_plane": {
+    "axis": "X",
+    "point": [
+      0,
+      0,
+      0
+    ],
+    "normal": [
+      1,
+      0,
+      0
+    ]
+  },
+  "deformation_regions": {
+    "bridge_region": {
+      "part": "Bridge",
+      "type": "saddle"
+    },
+    "left_rim_region": {
+      "part": "LeftRim"
+    },
+    "right_rim_region": {
+      "part": "RightRim"
+    },
+    "left_temple_region": {
+      "part": "LeftTemple"
+    },
+    "right_temple_region": {
+      "part": "RightTemple"
+    }
+  },
+  "vertex_groups": {
+    "frame": [
+      "Frame"
+    ],
+    "bridge": [
+      "Bridge"
+    ],
+    "left_temple": [
+      "LeftTemple"
+    ],
+    "right_temple": [
+      "RightTemple"
+    ],
+    "left_lens": [
+      "LeftLens"
+    ],
+    "right_lens": [
+      "RightLens"
+    ],
+    "left_rim": [
+      "LeftRim"
+    ],
+    "right_rim": [
+      "RightRim"
+    ]
+  },
+  "constraints": {
+    "bridge_width": {
+      "min": 16.0,
+      "max": 28.0
+    },
+    "temple_length": {
+      "min": 125.0,
+      "max": 155.0
+    },
+    "minimum_wall_thickness": 0.8
+  },
+  "template_dims": {
+    "frame_width": 169.8,
+    "lens_width": 56.0,
+    "lens_height": 36.5,
+    "bridge_width": 21.4,
+    "temple_length": 143.9,
+    "rim_thickness": 1.3,
+    "nose_pad_distance": 16.0,
+    "nose_pad_height": 3.0,
+    "nose_pad_angle": 15.0,
+    "temple_curve_angle": 22.0
+  }
+}

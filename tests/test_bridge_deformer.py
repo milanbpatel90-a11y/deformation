@@ -28,6 +28,14 @@ class BridgeDeformerTests(unittest.TestCase):
         )
         descriptor = DescriptorLoader(Path("templates")).load("geometric_metal", measurements=measurements, template_info=info)
         scene = trimesh.load(info.glb_path, force="scene")
+        # Mirror the real pipeline: DeformationPipeline.run_from_measurements() always
+        # resolves generic GLB mesh names (e.g. geometric_metal.glb's Blender-exported
+        # names) to the logical part names via _inject_aliases_into_scene() before
+        # building a DeformationContext. Skipping that step here (as this test
+        # previously did) leaves the scene's mesh names un-aliased, so ctx.mesh("Frame")
+        # etc. raise KeyError even though the production code path works fine.
+        from backend.pipeline.deformation_pipeline import DeformationPipeline
+        DeformationPipeline._inject_aliases_into_scene(scene, descriptor)
         return DeformationContext(template_info=info, template_scene=scene, descriptor=descriptor, measurements=measurements)
 
     def test_bridge_deformation_changes_bridge_only(self) -> None:
