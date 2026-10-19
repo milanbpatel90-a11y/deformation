@@ -40,6 +40,9 @@ class TemplateLibrary:
                 continue
             if not isinstance(data, dict) or "dimensions" not in data:
                 continue
+            # Skip placeholder metadata that only points at another template's GLB
+            if data.get("placeholder") is True:
+                continue
             names.append(path.stem)
         return sorted(names)
 
@@ -143,11 +146,12 @@ class TemplateLibrary:
             return FrameFamily.BROWLINE
         if "rimless" in style or shape == FrameShape.RIMLESS:
             return FrameFamily.RIMLESS
-        if "round" in style or shape == FrameShape.ROUND:
-            return FrameFamily.ROUND
+        # Check oversized before round so "oversized_round" maps correctly
         if "oversized" in style:
             return FrameFamily.OVERSIZED
-        if "rectangle" in style or shape == FrameShape.RECTANGLE:
+        if "round" in style or shape == FrameShape.ROUND:
+            return FrameFamily.ROUND
+        if "slim" in style or "rectangle" in style or shape == FrameShape.RECTANGLE:
             return FrameFamily.RECTANGLE
         if shape == FrameShape.SQUARE:
             return FrameFamily.SQUARE
