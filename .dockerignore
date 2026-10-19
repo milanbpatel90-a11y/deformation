@@ -1,0 +1,9 @@
+__pycache__/
+.pytest_cache/
+.git/
+.venv/
+venv/
+output/
+runtime/
+dashboard/node_modules/
+*.pyc
