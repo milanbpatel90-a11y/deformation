@@ -1,5 +1,5 @@
 {
-  "version": "1.0",
+  "version": "1.1",
   "template_name": "cat_eye_gold",
   "hinges": {
     "left": {
@@ -124,5 +124,10 @@
     "nose_pad_height": 3.0,
     "nose_pad_angle": 15.0,
     "temple_curve_angle": 22.0
+  },
+  "processing": {
+    "topology_cleaned": true,
+    "tiny_components_removed": true,
+    "date": "2026-10-20"
   }
 }
