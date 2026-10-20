@@ -13,12 +13,13 @@ from fastapi.staticfiles import StaticFiles
 from backend.models import FrameMaterial, FrameShape, Measurements
 from backend.pipeline import DeformationPipeline
 from backend.template_library.loader import TemplateLibrary
+from backend.video_pipeline import VideoTo3DPipeline
 from backend.api import rim_detection_routes
 
 app = FastAPI(
     title="Defirmation API",
     description="Template deformation pipeline for eyewear virtual try-on",
-    version="1.0.0",
+    version="1.1.0",
 )
 
 app.add_middleware(
@@ -32,6 +33,7 @@ OUTPUT_DIR = Path(__file__).resolve().parents[2] / "output"
 OUTPUT_DIR.mkdir(exist_ok=True)
 
 pipeline = DeformationPipeline()
+video_pipeline = VideoTo3DPipeline(pipeline=pipeline)
 library = TemplateLibrary()
 
 viewer_dir = Path(__file__).resolve().parents[2] / "viewer"
@@ -45,10 +47,11 @@ app.include_router(rim_detection_routes.router)
 def root():
     return {
         "service": "defirmation",
-        "version": "1.0.0",
+        "version": "1.1.0",
         "endpoints": {
             "deform_from_images": "POST /api/deform",
             "deform_from_multi_view": "POST /api/deform/multi-view",
+            "deform_from_video": "POST /api/deform/video",
             "deform_from_measurements": "POST /api/deform/measurements",
             "templates": "GET /api/templates",
             "download": "GET /api/output/{filename}",
@@ -63,11 +66,7 @@ def root():
 def list_templates():
     available = library.list_templates()
     active = "rectangle_plastic" if "rectangle_plastic" in available else (available[0] if available else None)
-    return {
-        "templates": available,
-        "planned": available,
-        "active": active,
-    }
+    return {"templates": available, "planned": available, "active": active}
 
 
 @app.post("/api/deform")
@@ -78,10 +77,8 @@ async def deform_from_images(
     color: str = Form("#d9a7a2"),
     template: str | None = Form(None),
 ):
-    """Upload up to 3 images (front, side, top), detect measurements, deform template, export GLB."""
+    """Upload product images, deform a template, and export GLB."""
     job_id = uuid.uuid4().hex[:12]
-    # Use OUTPUT_DIR (project-local, ASCII-safe path) instead of system temp
-    # to avoid Windows 8.3 tilde paths (PETPOO~1) that break cv2.imread.
     work_dir = OUTPUT_DIR / f"_upload_{job_id}"
     work_dir.mkdir(parents=True, exist_ok=True)
 
@@ -99,13 +96,6 @@ async def deform_from_images(
                 side_path = work_dir / "side.jpg"
                 side_path.write_bytes(side_bytes)
 
-        top_path = None
-        if top and top.filename:
-            top_bytes = await top.read()
-            if top_bytes:
-                top_path = work_dir / "top.jpg"
-                top_path.write_bytes(top_bytes)
-
         out_path = OUTPUT_DIR / f"{job_id}.glb"
         result = pipeline.run_from_images(
             front_path,
@@ -113,18 +103,16 @@ async def deform_from_images(
             out_path,
             color=color,
             template_override=template,
-            top_path=top_path,
         )
         result["job_id"] = job_id
         result["download_url"] = f"/api/output/{job_id}.glb"
         return result
     except Exception as exc:
         import traceback
-        tb = traceback.format_exc()
-        raise HTTPException(status_code=500, detail=f"{exc}\n\nTraceback:\n{tb}") from exc
+        raise HTTPException(status_code=500, detail=f"{exc}\n\nTraceback:\n{traceback.format_exc()}") from exc
     finally:
-        import shutil as _shutil
-        _shutil.rmtree(work_dir, ignore_errors=True)
+        import shutil
+        shutil.rmtree(work_dir, ignore_errors=True)
 
 
 @app.post("/api/deform/multi-view")
@@ -133,7 +121,7 @@ async def deform_from_multiple_images(
     color: str = Form("#d9a7a2"),
     template: str | None = Form(None),
 ):
-    """Upload multiple product images, classify views, fuse measurements, deform template, and export GLB."""
+    """Upload multiple product images, fuse measurements, deform template, and export GLB."""
     job_id = uuid.uuid4().hex[:12]
     work_dir = OUTPUT_DIR / f"_upload_multi_{job_id}"
     work_dir.mkdir(parents=True, exist_ok=True)
@@ -166,11 +154,61 @@ async def deform_from_multiple_images(
         return result
     except Exception as exc:
         import traceback
-        tb = traceback.format_exc()
-        raise HTTPException(status_code=500, detail=f"{exc}\n\nTraceback:\n{tb}") from exc
+        raise HTTPException(status_code=500, detail=f"{exc}\n\nTraceback:\n{traceback.format_exc()}") from exc
     finally:
-        import shutil as _shutil
-        _shutil.rmtree(work_dir, ignore_errors=True)
+        import shutil
+        shutil.rmtree(work_dir, ignore_errors=True)
+
+
+@app.post("/api/deform/video")
+async def deform_from_video(
+    video: UploadFile = File(..., description="Controlled 360-degree eyewear video"),
+    color: str = Form("#d9a7a2"),
+    template: str | None = Form(None),
+    reference_width_mm: float | None = Form(None),
+):
+    """Upload a glasses video and automatically create a template-deformed GLB.
+
+    The video is sampled into multiple views. The pipeline segments each usable
+    view, selects strong front-facing evidence, robustly fuses measurements,
+    deforms the best matching template, and exports a GLB plus video metadata.
+    """
+    job_id = uuid.uuid4().hex[:12]
+    work_dir = OUTPUT_DIR / f"_upload_video_{job_id}"
+    work_dir.mkdir(parents=True, exist_ok=True)
+
+    try:
+        if not video.filename:
+            raise ValueError("No video file supplied.")
+
+        suffix = Path(video.filename).suffix.lower()
+        if suffix not in {".mp4", ".mov", ".m4v", ".avi", ".webm"}:
+            raise ValueError("Unsupported video format. Use MP4, MOV, M4V, AVI, or WebM.")
+
+        video_bytes = await video.read()
+        if not video_bytes:
+            raise ValueError("Video upload is empty — please select the video again.")
+
+        video_path = work_dir / f"input{suffix}"
+        video_path.write_bytes(video_bytes)
+
+        out_path = OUTPUT_DIR / f"{job_id}.glb"
+        result = video_pipeline.process(
+            video_path=video_path,
+            output_path=out_path,
+            color=color,
+            template_override=template,
+            reference_width_mm=reference_width_mm,
+        )
+        result["job_id"] = job_id
+        result["download_url"] = f"/api/output/{job_id}.glb"
+        return result
+    except Exception as exc:
+        import traceback
+        raise HTTPException(status_code=500, detail=f"{exc}\n\nTraceback:\n{traceback.format_exc()}") from exc
+    finally:
+        import shutil
+        shutil.rmtree(work_dir, ignore_errors=True)
 
 
 @app.post("/api/deform/measurements")
