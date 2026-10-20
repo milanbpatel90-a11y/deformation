@@ -1,6 +1,10 @@
-path: C:\Users\Petpooja-607\Desktop\defirmation\dataset
+# Dataset-local YOLOv8-Seg configuration.
+# This file lives inside ./dataset, so path='.' is the portable dataset root.
+
+path: .
 train: images/train
 val: images/val
 
+nc: 1
 names:
   0: eyewear
