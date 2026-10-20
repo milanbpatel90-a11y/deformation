@@ -299,7 +299,12 @@ class DescriptorLoader:
 
     @staticmethod
     def _load_empty_anchors(payload: dict[str, Any], scene: trimesh.Scene) -> dict[str, np.ndarray]:
-        """Resolve descriptor-declared Blender empties to world-space control points."""
+        """Resolve descriptor-declared Blender empties to world-space control points.
+
+        Missing nodes are tolerated: some templates (e.g. procedurally generated
+        GLBs) ship without semantic empties. Downstream consumers fall back to
+        geometry-derived anchors when a role is absent here.
+        """
         declared = payload.get("empties", {})
         if not isinstance(declared, dict):
             return {}
@@ -310,7 +315,7 @@ class DescriptorLoader:
             if not isinstance(node_name, str):
                 raise ValueError(f"Empty '{role}' must name a scene node")
             if node_name not in nodes:
-                raise ValueError(f"Descriptor empty '{role}' references missing scene node '{node_name}'")
+                continue
             transform, _ = scene.graph.get(node_name)
             anchors[node_name] = np.asarray(transform[:3, 3], dtype=np.float64)
         return anchors
