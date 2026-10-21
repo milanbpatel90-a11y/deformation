@@ -1,15 +1,20 @@
 {
   "version": "1.1",
   "template_name": "geometric_metal",
+  "mesh_aliases": {
+    "Bridge": "Frame",
+    "LeftRim": "Frame",
+    "RightRim": "Frame"
+  },
   "hinges": {
-    "left": { "part": "LeftTemple", "confidence": 0.8 },
-    "right": { "part": "RightTemple", "confidence": 0.8 }
+    "left": { "part": "LeftTemple", "confidence": 0.85 },
+    "right": { "part": "RightTemple", "confidence": 0.85 }
   },
   "bridge": { "part": "Bridge", "type": "straight" },
   "rim_loops": {
     "frame": { "part": "Frame", "confidence": 1.0 },
-    "left_rim": { "part": "LeftRim", "confidence": 0.6 },
-    "right_rim": { "part": "RightRim", "confidence": 0.6 }
+    "left_rim": { "part": "LeftRim", "confidence": 0.7 },
+    "right_rim": { "part": "RightRim", "confidence": 0.7 }
   },
   "temple_pivots": {
     "left": { "part": "LeftTemple" },
@@ -43,23 +48,22 @@
     "minimum_wall_thickness": 0.8
   },
   "template_dims": {
-    "frame_width": 135.0,
-    "lens_width": 50.0,
-    "lens_height": 46.0,
-    "bridge_width": 16.0,
-    "temple_length": 135.0,
-    "rim_thickness": 1.0,
+    "frame_width": 135.9,
+    "lens_width": 51.4,
+    "lens_height": 40.4,
+    "bridge_width": 18.0,
+    "temple_length": 135.1,
+    "rim_thickness": 1.2,
     "nose_pad_distance": 16.0,
     "nose_pad_height": 3.0,
     "nose_pad_angle": 15.0,
     "temple_curve_angle": 28.0
   },
   "processing": {
-    "topology_cleaned": false,
-    "meshes_renamed": true,
+    "world_transforms_baked": true,
+    "units": "millimeters",
     "lenses_split": true,
-    "rims_bridge_share_frame_geometry": true,
-    "note": "LeftRim/RightRim/Bridge currently duplicate Frame geometry (source was single combined shell). Refine rims in Blender later for better deformation.",
+    "note": "Front shell is one mesh named Frame. Bridge/LeftRim/RightRim alias to Frame. Temples placed at the hinges. Do not stack extra rim copies.",
     "date": "2026-10-21"
   }
 }
