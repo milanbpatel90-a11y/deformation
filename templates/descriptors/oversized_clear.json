@@ -47,8 +47,16 @@
   },
   "symmetry_plane": {
     "axis": "X",
-    "point": [0, 0, 0],
-    "normal": [1, 0, 0]
+    "point": [
+      0,
+      0,
+      0
+    ],
+    "normal": [
+      1,
+      0,
+      0
+    ]
   },
   "deformation_regions": {
     "bridge_region": {
@@ -69,18 +77,40 @@
     }
   },
   "vertex_groups": {
-    "frame": ["Frame"],
-    "bridge": ["Bridge"],
-    "left_temple": ["LeftTemple"],
-    "right_temple": ["RightTemple"],
-    "left_lens": ["LeftLens"],
-    "right_lens": ["RightLens"],
-    "left_rim": ["LeftRim"],
-    "right_rim": ["RightRim"]
+    "frame": [
+      "Frame"
+    ],
+    "bridge": [
+      "Bridge"
+    ],
+    "left_temple": [
+      "LeftTemple"
+    ],
+    "right_temple": [
+      "RightTemple"
+    ],
+    "left_lens": [
+      "LeftLens"
+    ],
+    "right_lens": [
+      "RightLens"
+    ],
+    "left_rim": [
+      "LeftRim"
+    ],
+    "right_rim": [
+      "RightRim"
+    ]
   },
   "constraints": {
-    "bridge_width": {"min": 10.0, "max": 22.0},
-    "temple_length": {"min": 115.0, "max": 145.0},
+    "bridge_width": {
+      "min": 10.0,
+      "max": 22.0
+    },
+    "temple_length": {
+      "min": 115.0,
+      "max": 145.0
+    },
     "minimum_wall_thickness": 0.8
   },
   "template_dims": {

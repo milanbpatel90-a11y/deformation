@@ -15,8 +15,19 @@
     "nose_pad_angle": 14.0,
     "nose_pad_height": 3.0
   },
-  "parts": ["Frame", "LeftLens", "RightLens", "Bridge", "LeftRim", "RightRim", "LeftTemple", "RightTemple", "LeftHinge", "RightHinge"],
+  "parts": [
+    "Frame",
+    "LeftLens",
+    "RightLens",
+    "Bridge",
+    "LeftRim",
+    "RightRim",
+    "LeftTemple",
+    "RightTemple",
+    "LeftHinge",
+    "RightHinge"
+  ],
   "rim_pull_strength": 0.5,
   "toolkit_style": "oversized_round",
-  "notes": "Topology cleaned: rims single component. Scale anchored at lens_width=50 mm."
+  "notes": "Topology cleaned: LeftRim/RightRim are now single connected components. Scale note: source 3DM lacked product reference; lens_width=50 mm used as adult calibration anchor (typical range 48-54 mm). Absolute mm values are approximate but internally consistent."
 }

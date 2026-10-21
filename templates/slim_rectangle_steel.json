@@ -15,8 +15,19 @@
     "nose_pad_angle": 12.0,
     "nose_pad_height": 3.0
   },
-  "parts": ["Frame", "LeftLens", "RightLens", "Bridge", "LeftRim", "RightRim", "LeftTemple", "RightTemple", "LeftHinge", "RightHinge"],
+  "parts": [
+    "Frame",
+    "LeftLens",
+    "RightLens",
+    "Bridge",
+    "LeftRim",
+    "RightRim",
+    "LeftTemple",
+    "RightTemple",
+    "LeftHinge",
+    "RightHinge"
+  ],
   "rim_pull_strength": 0.45,
   "toolkit_style": "slim_rectangle",
-  "notes": "Lens height 20.5 mm intentional. Rims cleaned to 2 components."
+  "notes": "High-detail CAD. Lens height 20.5 mm is an intentional narrow/slim rectangular profile from the source scan (not a processing defect). Wider frame (133.1 mm) than rectangle_metal. No nose pads. Rims cleaned to 2 components; Frame/Bridge/Hinge multi-shell structure is typical metal CAD (front/back faces)."
 }

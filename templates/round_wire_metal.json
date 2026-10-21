@@ -15,8 +15,19 @@
     "nose_pad_angle": 15.0,
     "nose_pad_height": 4.0
   },
-  "parts": ["Frame", "LeftLens", "RightLens", "Bridge", "LeftRim", "RightRim", "LeftTemple", "RightTemple", "LeftNosePad", "RightNosePad"],
+  "parts": [
+    "Frame",
+    "LeftLens",
+    "RightLens",
+    "Bridge",
+    "LeftRim",
+    "RightRim",
+    "LeftTemple",
+    "RightTemple",
+    "LeftNosePad",
+    "RightNosePad"
+  ],
   "rim_pull_strength": 0.08,
   "toolkit_style": "round",
-  "notes": "Topology cleaned. Thin wire rim. Nose pads present."
+  "notes": "Topology cleaned: rims now single (Left) / near-single (Right) component. Thin wire rim (0.9 mm). No separate hinge meshes \u2014 temple pivots used for deformation. Nose pads present."
 }

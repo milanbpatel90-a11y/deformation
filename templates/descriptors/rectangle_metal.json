@@ -1,1 +1,143 @@
-{"version":"1.1","template_name":"rectangle_metal","hinges":{"left":{"part":"LeftTemple","confidence":0.9},"right":{"part":"RightTemple","confidence":0.9}},"bridge":{"part":"Bridge","type":"straight"},"rim_loops":{"frame":{"part":"Frame","confidence":1.0},"left_rim":{"part":"LeftRim","confidence":1.0},"right_rim":{"part":"RightRim","confidence":1.0}},"temple_pivots":{"left":{"part":"LeftTemple"},"right":{"part":"RightTemple"}},"lens_planes":{"left":{"part":"LeftLens"},"right":{"part":"RightLens"}},"symmetry_plane":{"axis":"X","point":[0,0,0],"normal":[1,0,0]},"deformation_regions":{"bridge_region":{"part":"Bridge","type":"straight"},"left_rim_region":{"part":"LeftRim"},"right_rim_region":{"part":"RightRim"},"left_temple_region":{"part":"LeftTemple"},"right_temple_region":{"part":"RightTemple"},"left_nosepad_region":{"part":"LeftNosePad"},"right_nosepad_region":{"part":"RightNosePad"}},"vertex_groups":{"frame":["Frame"],"bridge":["Bridge"],"left_temple":["LeftTemple"],"right_temple":["RightTemple"],"left_lens":["LeftLens"],"right_lens":["RightLens"],"left_rim":["LeftRim"],"right_rim":["RightRim"],"nose_pads":["LeftNosePad","RightNosePad"]},"constraints":{"bridge_width":{"min":12.0,"max":22.0},"temple_length":{"min":135.0,"max":160.0},"minimum_wall_thickness":0.8},"template_dims":{"frame_width":118.7,"lens_width":52.5,"lens_height":20.5,"bridge_width":16.0,"temple_length":152.4,"rim_thickness":1.0,"nose_pad_distance":20.3,"nose_pad_height":19.5,"nose_pad_angle":15.0,"temple_curve_angle":20.0},"processing":{"topology_cleaned":true,"tiny_components_removed":true,"date":"2026-10-20"}}
+{
+  "version": "1.1",
+  "template_name": "rectangle_metal",
+  "hinges": {
+    "left": {
+      "part": "LeftTemple",
+      "confidence": 0.9
+    },
+    "right": {
+      "part": "RightTemple",
+      "confidence": 0.9
+    }
+  },
+  "bridge": {
+    "part": "Bridge",
+    "type": "straight"
+  },
+  "rim_loops": {
+    "frame": {
+      "part": "Frame",
+      "confidence": 1.0
+    },
+    "left_rim": {
+      "part": "LeftRim",
+      "confidence": 1.0
+    },
+    "right_rim": {
+      "part": "RightRim",
+      "confidence": 1.0
+    }
+  },
+  "temple_pivots": {
+    "left": {
+      "part": "LeftTemple"
+    },
+    "right": {
+      "part": "RightTemple"
+    }
+  },
+  "lens_planes": {
+    "left": {
+      "part": "LeftLens"
+    },
+    "right": {
+      "part": "RightLens"
+    }
+  },
+  "symmetry_plane": {
+    "axis": "X",
+    "point": [
+      0,
+      0,
+      0
+    ],
+    "normal": [
+      1,
+      0,
+      0
+    ]
+  },
+  "deformation_regions": {
+    "bridge_region": {
+      "part": "Bridge",
+      "type": "straight"
+    },
+    "left_rim_region": {
+      "part": "LeftRim"
+    },
+    "right_rim_region": {
+      "part": "RightRim"
+    },
+    "left_temple_region": {
+      "part": "LeftTemple"
+    },
+    "right_temple_region": {
+      "part": "RightTemple"
+    },
+    "left_nosepad_region": {
+      "part": "LeftNosePad"
+    },
+    "right_nosepad_region": {
+      "part": "RightNosePad"
+    }
+  },
+  "vertex_groups": {
+    "frame": [
+      "Frame"
+    ],
+    "bridge": [
+      "Bridge"
+    ],
+    "left_temple": [
+      "LeftTemple"
+    ],
+    "right_temple": [
+      "RightTemple"
+    ],
+    "left_lens": [
+      "LeftLens"
+    ],
+    "right_lens": [
+      "RightLens"
+    ],
+    "left_rim": [
+      "LeftRim"
+    ],
+    "right_rim": [
+      "RightRim"
+    ],
+    "nose_pads": [
+      "LeftNosePad",
+      "RightNosePad"
+    ]
+  },
+  "constraints": {
+    "bridge_width": {
+      "min": 12.0,
+      "max": 22.0
+    },
+    "temple_length": {
+      "min": 135.0,
+      "max": 160.0
+    },
+    "minimum_wall_thickness": 0.8
+  },
+  "template_dims": {
+    "frame_width": 118.7,
+    "lens_width": 52.5,
+    "lens_height": 20.5,
+    "bridge_width": 16.0,
+    "temple_length": 152.4,
+    "rim_thickness": 1.0,
+    "nose_pad_distance": 20.3,
+    "nose_pad_height": 19.5,
+    "nose_pad_angle": 15.0,
+    "temple_curve_angle": 20.0
+  },
+  "processing": {
+    "topology_cleaned": true,
+    "tiny_components_removed": true,
+    "date": "2026-10-20"
+  }
+}
