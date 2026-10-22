@@ -17,8 +17,8 @@ from backend.api import rim_detection_routes
 
 app = FastAPI(
     title="Defirmation API",
-    description="Template deformation pipeline for eyewear virtual try-on",
-    version="1.0.0",
+    description="Template deformation pipeline for eyewear virtual try-on — product images → 3D GLB",
+    version="1.1.0",
 )
 
 app.add_middleware(
@@ -31,6 +31,16 @@ app.add_middleware(
 OUTPUT_DIR = Path(__file__).resolve().parents[2] / "output"
 OUTPUT_DIR.mkdir(exist_ok=True)
 
+# Prefer topology-cleaned production templates (see templates/FIXED_TEMPLATES_README.txt)
+PREFERRED_TEMPLATES = (
+    "rectangle_metal",
+    "cat_eye_gold",
+    "round_wire_metal",
+    "oversized_clear",
+    "slim_rectangle_steel",
+    "rectangle_plastic",
+)
+
 pipeline = DeformationPipeline()
 library = TemplateLibrary()
 
@@ -41,12 +51,20 @@ if viewer_dir.exists():
 app.include_router(rim_detection_routes.router)
 
 
+def _pick_active_template(available: list[str]) -> str | None:
+    for name in PREFERRED_TEMPLATES:
+        if name in available:
+            return name
+    return available[0] if available else None
+
+
 @app.get("/")
 def root():
     return {
         "service": "defirmation",
-        "version": "1.0.0",
+        "version": "1.1.0",
         "endpoints": {
+            "health": "GET /api/health",
             "deform_from_images": "POST /api/deform",
             "deform_from_multi_view": "POST /api/deform/multi-view",
             "deform_from_measurements": "POST /api/deform/measurements",
@@ -55,17 +73,33 @@ def root():
             "detect_rim": "POST /api/rim-detection/detect",
             "apply_rim_to_template": "POST /api/rim-detection/apply-to-template",
             "rim_status": "GET /api/rim-detection/status",
+            "viewer": "GET /viewer/",
         },
+    }
+
+
+@app.get("/api/health")
+def health():
+    """Liveness + basic readiness for production monitoring."""
+    available = library.list_templates()
+    active = _pick_active_template(available)
+    return {
+        "status": "ok",
+        "version": "1.1.0",
+        "templates_available": len(available),
+        "active_template": active,
+        "preferred_templates": [t for t in PREFERRED_TEMPLATES if t in available],
+        "output_dir": str(OUTPUT_DIR),
     }
 
 
 @app.get("/api/templates")
 def list_templates():
     available = library.list_templates()
-    active = "rectangle_plastic" if "rectangle_plastic" in available else (available[0] if available else None)
+    active = _pick_active_template(available)
     return {
         "templates": available,
-        "planned": available,
+        "preferred": [t for t in PREFERRED_TEMPLATES if t in available],
         "active": active,
     }
 
@@ -118,22 +152,29 @@ async def deform_from_images(
         result["job_id"] = job_id
         result["download_url"] = f"/api/output/{job_id}.glb"
         return result
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
         import traceback
+
         tb = traceback.format_exc()
         raise HTTPException(status_code=500, detail=f"{exc}\n\nTraceback:\n{tb}") from exc
     finally:
         import shutil as _shutil
+
         _shutil.rmtree(work_dir, ignore_errors=True)
 
 
 @app.post("/api/deform/multi-view")
 async def deform_from_multiple_images(
-    images: list[UploadFile] = File(..., description="List of 4-6 product images from multiple view angles"),
+    images: list[UploadFile] = File(..., description="List of 2–8 product images from multiple view angles"),
     color: str = Form("#d9a7a2"),
     template: str | None = Form(None),
 ):
-    """Upload multiple product images, classify views, fuse measurements, deform template, and export GLB."""
+    """Upload multiple product images, classify views, fuse measurements, deform template, and export GLB.
+
+    Recommended: 4–5 images (front, left, right, 3/4 angle, optional top).
+    """
     job_id = uuid.uuid4().hex[:12]
     work_dir = OUTPUT_DIR / f"_upload_multi_{job_id}"
     work_dir.mkdir(parents=True, exist_ok=True)
@@ -147,12 +188,22 @@ async def deform_from_multiple_images(
             if not file_bytes:
                 continue
             suffix = Path(file.filename).suffix or ".jpg"
+            # Normalize common image types
+            if suffix.lower() not in {".jpg", ".jpeg", ".png", ".webp", ".bmp"}:
+                suffix = ".jpg"
             file_path = work_dir / f"image_{i}{suffix}"
             file_path.write_bytes(file_bytes)
             image_paths.append(file_path)
 
         if not image_paths:
-            raise ValueError("No non-empty images uploaded")
+            raise ValueError("No non-empty images uploaded. Please select 4–5 product photos of the glasses.")
+        if len(image_paths) < 2:
+            raise ValueError(
+                f"Only {len(image_paths)} image received. Multi-view needs at least 2 images "
+                "(front + side or angle). For best results upload 4–5 views."
+            )
+        if len(image_paths) > 8:
+            raise ValueError("Maximum 8 images allowed per request.")
 
         out_path = OUTPUT_DIR / f"{job_id}.glb"
         result = pipeline.run_from_multiple_images(
@@ -163,13 +214,18 @@ async def deform_from_multiple_images(
         )
         result["job_id"] = job_id
         result["download_url"] = f"/api/output/{job_id}.glb"
+        result["images_used"] = len(image_paths)
         return result
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
         import traceback
+
         tb = traceback.format_exc()
         raise HTTPException(status_code=500, detail=f"{exc}\n\nTraceback:\n{tb}") from exc
     finally:
         import shutil as _shutil
+
         _shutil.rmtree(work_dir, ignore_errors=True)
 
 
@@ -182,13 +238,16 @@ async def deform_from_measurements(
     temple_length: float = Form(140),
     rim_thickness: float = Form(1.2),
     material: str = Form("metal"),
-    shape: str = Form("geometric"),
+    shape: str = Form("rectangle"),
     nose_pads: bool = Form(True),
     temple_curve_angle: float = Form(28),
     color: str = Form("#d9a7a2"),
-    template: str = Form("rectangle_plastic"),
+    template: str = Form("rectangle_metal"),
 ):
-    """Deform template directly from known measurements (no images required)."""
+    """Deform template directly from known measurements (no images required).
+
+    Preferred when manufacturer specs are known — most accurate size for try-on.
+    """
     try:
         measurements = Measurements(
             frame_width=frame_width,
@@ -220,7 +279,11 @@ async def deform_from_measurements(
 
 @app.get("/api/output/{filename}")
 def download_output(filename: str):
-    path = OUTPUT_DIR / filename
-    if not path.exists():
+    # Prevent path traversal
+    safe_name = Path(filename).name
+    if safe_name != filename or ".." in filename:
+        raise HTTPException(status_code=400, detail="Invalid filename")
+    path = OUTPUT_DIR / safe_name
+    if not path.exists() or not path.is_file():
         raise HTTPException(status_code=404, detail="File not found")
-    return FileResponse(path, media_type="model/gltf-binary", filename=filename)
+    return FileResponse(path, media_type="model/gltf-binary", filename=safe_name)
