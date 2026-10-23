@@ -1,11 +1,22 @@
 [
   {
+    "name": "gold_template",
+    "shape": "geometric",
+    "material": "metal",
+    "family": "geometric",
+    "priority": 0,
+    "description": "Gold Template runtime geometry for default glasses deformation",
+    "glb_file": "gold_template.glb",
+    "rim_pull_strength": 0.65,
+    "has_descriptor": true
+  },
+  {
     "name": "geometric_metal",
     "shape": "geometric",
     "material": "metal",
     "family": "geometric",
     "priority": 10,
-    "description": "Default geometric metal full-rim template",
+    "description": "Geometric metal full-rim template",
     "glb_file": "geometric_metal.glb",
     "rim_pull_strength": 0.1,
     "has_descriptor": true
