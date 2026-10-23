@@ -1,0 +1,17 @@
+{
+  "version":"1.0",
+  "template_id":"GT_002",
+  "units":"mm",
+  "measurements":{
+    "frame_width":null,
+    "lens_width_left":null,
+    "lens_width_right":null,
+    "lens_height_left":null,
+    "lens_height_right":null,
+    "bridge_width":null,
+    "temple_length_left":null,
+    "temple_length_right":null
+  },
+  "status":"pending_runtime_export",
+  "notes":"No dimensions are guessed from the screenshot. Populate from Rhino/model geometry."
+}

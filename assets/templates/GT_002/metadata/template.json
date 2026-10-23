@@ -1,0 +1,28 @@
+{
+  "template_id": "GT_002",
+  "template_version": "0.1.0-source",
+  "topology_version": "pending-runtime-export",
+  "basis_version": "pending",
+  "metadata_version": "1",
+  "name": "NewWayfarer Production",
+  "description": "NewWayfarer production eyeglass deformation-template authoring source imported from Rhino 8.",
+  "shape_category": "wayfarer_rectangular",
+  "runtime_ready": false,
+  "source_file": "source/NewWayfarer_production.3dm",
+  "reference_image": "reference/layer_tree.png",
+  "objects": {
+    "Frame": {"source_name":"Frame","vertex_count":null,"face_count":null},
+    "Rim_L": {"source_name":"LeftRim","vertex_count":null,"face_count":null},
+    "Rim_R": {"source_name":"RightRim","vertex_count":null,"face_count":null},
+    "Bridge": {"source_name":"Bridge","vertex_count":null,"face_count":null},
+    "Lens_L": {"source_name":"LeftLens","vertex_count":null,"face_count":null},
+    "Lens_R": {"source_name":"RightLens","vertex_count":null,"face_count":null},
+    "Temple_L": {"source_name":"LeftTemple","vertex_count":null,"face_count":null},
+    "Temple_R": {"source_name":"RightTemple","vertex_count":null,"face_count":null},
+    "Hinge_L": {"source_name":"LeftHinge","vertex_count":null,"face_count":null},
+    "Hinge_R": {"source_name":"RightHinge","vertex_count":null,"face_count":null}
+  },
+  "created_date": "2026-09-27",
+  "author": "Deformation Engine Team",
+  "notes": "Canonical runtime part names follow the GT_001 conventions where applicable; source_name preserves the Rhino object name. Runtime GLB, basis and unified arrays must be generated and validated before production use."
+}

@@ -1,0 +1,19 @@
+{
+  "version":"1.0",
+  "template_id":"GT_002",
+  "status":"pending_runtime_export",
+  "parts":{
+    "Frame":{"source_object":"Frame","vertex_count":null,"face_count":null,"mesh_hash":null},
+    "Rim_L":{"source_object":"LeftRim","vertex_count":null,"face_count":null,"mesh_hash":null},
+    "Rim_R":{"source_object":"RightRim","vertex_count":null,"face_count":null,"mesh_hash":null},
+    "Bridge":{"source_object":"Bridge","vertex_count":null,"face_count":null,"mesh_hash":null},
+    "Lens_L":{"source_object":"LeftLens","vertex_count":null,"face_count":null,"mesh_hash":null},
+    "Lens_R":{"source_object":"RightLens","vertex_count":null,"face_count":null,"mesh_hash":null},
+    "Temple_L":{"source_object":"LeftTemple","vertex_count":null,"face_count":null,"mesh_hash":null},
+    "Temple_R":{"source_object":"RightTemple","vertex_count":null,"face_count":null,"mesh_hash":null},
+    "Hinge_L":{"source_object":"LeftHinge","vertex_count":null,"face_count":null,"mesh_hash":null},
+    "Hinge_R":{"source_object":"RightHinge","vertex_count":null,"face_count":null,"mesh_hash":null}
+  },
+  "unified":{"vertex_count":null,"face_count":null,"mesh_hash":null},
+  "notes":"Filled from the exported runtime mesh."
+}

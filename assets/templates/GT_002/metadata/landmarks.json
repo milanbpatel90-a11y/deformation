@@ -1,0 +1,29 @@
+{
+  "version":"1.0",
+  "template_id":"GT_002",
+  "coordinate_source":"Rhino named landmark objects",
+  "landmarks":{
+    "LM_BridgeCenter":{"source_object":"LM_BridgeCenter","index":null,"position":null,"required":true},
+    "LM_BridgeLeftAttach":{"source_object":"LM_BridgeLeftAttach","index":null,"position":null,"required":true},
+    "LM_BridgeRightAttach":{"source_object":"LM_BridgeRightAttach","index":null,"position":null,"required":true},
+    "LM_LeftLensCenter":{"source_object":"LM_LeftLensCenter","index":null,"position":null,"required":true},
+    "LM_RightLensCenter":{"source_object":"LM_RightLensCenter","index":null,"position":null,"required":true},
+    "LM_LeftLensTop":{"source_object":"LM_LeftLensTop","index":null,"position":null,"required":true},
+    "LM_LeftLensBottom":{"source_object":"LM_LeftLensBottom","index":null,"position":null,"required":true},
+    "LM_LeftLensNasal":{"source_object":"LM_LeftLensNasal","index":null,"position":null,"required":true},
+    "LM_LeftLensTemporal":{"source_object":"LM_LeftLensTemporal","index":null,"position":null,"required":true},
+    "LM_RightLensTop":{"source_object":"LM_RightLensTop","index":null,"position":null,"required":true},
+    "LM_RightLensBottom":{"source_object":"LM_RightLensBottom","index":null,"position":null,"required":true},
+    "LM_RightLensNasal":{"source_object":"LM_RightLensNasal","index":null,"position":null,"required":true},
+    "LM_RightLensTemporal":{"source_object":"LM_RightLensTemporal","index":null,"position":null,"required":true},
+    "LM_LeftHinge":{"source_object":"LM_LeftHinge","index":null,"position":null,"required":true},
+    "LM_RightHinge":{"source_object":"LM_RightHinge","index":null,"position":null,"required":true},
+    "LM_LeftHingeAxis":{"source_object":"LM_LeftHingeAxis","index":null,"position":null,"required":true},
+    "LM_RightHingeAxis":{"source_object":"LM_RightHingeAxis","index":null,"position":null,"required":true},
+    "LM_LeftTempleRoot":{"source_object":"LM_LeftTempleRoot","index":null,"position":null,"required":true},
+    "LM_RightTempleRoot":{"source_object":"LM_RightTempleRoot","index":null,"position":null,"required":true},
+    "LM_LeftTempleTip":{"source_object":"LM_LeftTempleTip","index":null,"position":null,"required":true},
+    "LM_RightTempleTip":{"source_object":"LM_RightTempleTip","index":null,"position":null,"required":true}
+  },
+  "notes":"Positions and mesh indices stay null until exact Rhino export/topology mapping."
+}

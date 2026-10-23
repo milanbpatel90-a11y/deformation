@@ -1,0 +1,27 @@
+{
+  "version":"1.0",
+  "template_id":"GT_002",
+  "constraints":{
+    "symmetry":{"enabled":true,"pairs":[
+      {"left":"Rim_L","right":"Rim_R"},
+      {"left":"Lens_L","right":"Lens_R"},
+      {"left":"Temple_L","right":"Temple_R"},
+      {"left":"Hinge_L","right":"Hinge_R"}
+    ]},
+    "hinges":{
+      "left_axis_landmark":"LM_LeftHingeAxis",
+      "right_axis_landmark":"LM_RightHingeAxis",
+      "left_root_landmark":"LM_LeftTempleRoot",
+      "right_root_landmark":"LM_RightTempleRoot",
+      "preserve_hinge_attachment":true
+    },
+    "bridge":{
+      "center_landmark":"LM_BridgeCenter",
+      "left_attach_landmark":"LM_BridgeLeftAttach",
+      "right_attach_landmark":"LM_BridgeRightAttach",
+      "preserve_attachment":true
+    },
+    "topology":{"preserve_connectivity":true,"prevent_self_intersection":true},
+    "deformation":{"preserve_lens_planarity":true,"preserve_lens_pair_symmetry":true,"rigid_hinge_hardware":true}
+  }
+}

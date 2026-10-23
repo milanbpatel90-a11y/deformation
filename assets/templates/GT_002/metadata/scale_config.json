@@ -1,0 +1,9 @@
+{
+  "version":"1.0",
+  "template_id":"GT_002",
+  "source_units":"millimeters",
+  "runtime_units":"meters",
+  "source_to_runtime_scale":0.001,
+  "validate_against_measurements":true,
+  "notes":"Verify the actual Rhino document unit system before final export."
+}
