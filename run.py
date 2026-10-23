@@ -7,7 +7,7 @@ import json
 from pathlib import Path
 
 from backend.models import FrameMaterial, FrameShape, Measurements
-from backend.pipeline import DeformationPipeline
+from backend.pipeline import DEFAULT_TEMPLATE, DeformationPipeline
 
 
 def main():
@@ -26,7 +26,7 @@ def main():
     meas_parser = sub.add_parser("measurements", help="Deform from measurements JSON")
     meas_parser.add_argument("--input", "-i", required=True, help="Measurements JSON file")
     meas_parser.add_argument("--output", "-o", default="output/deformed.glb")
-    meas_parser.add_argument("--template", default="geometric_metal")
+    meas_parser.add_argument("--template", default=DEFAULT_TEMPLATE)
 
     # generate template
     sub.add_parser("generate-template", help="Generate geometric_metal.glb")

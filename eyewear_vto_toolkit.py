@@ -95,7 +95,7 @@ class TemplateManager:
     def __init__(self, templates_dir: str | Path | None = None):
         self.templates_dir = Path(templates_dir or DEFAULT_TEMPLATES_DIR)
         self.templates_dir.mkdir(parents=True, exist_ok=True)
-        self.metadata_file = self.templates_dir / "templates.json"
+        self.metadata_file = self.templates_dir / "toolkit_metadata.json"
         self.templates: dict[str, FrameMetadata] = self._load_metadata()
         self._ensure_base_template()
 
@@ -113,11 +113,39 @@ class TemplateManager:
             )
 
     def _load_metadata(self) -> dict[str, FrameMetadata]:
-        if not self.metadata_file.exists():
-            return {}
-        with open(self.metadata_file, encoding="utf-8") as f:
+        # The toolkit owns a separate cache. Older versions reused
+        # templates.json, which may be a list-shaped runtime registry.
+        source_path = self.metadata_file
+        if not source_path.exists():
+            legacy_path = self.templates_dir / "templates.json"
+            if not legacy_path.exists():
+                return {}
+            source_path = legacy_path
+
+        with open(source_path, encoding="utf-8") as f:
             data = json.load(f)
-        return {k: FrameMetadata.from_dict(v) for k, v in data.items()}
+
+        if not isinstance(data, dict):
+            logger.warning(
+                "Ignoring %s for toolkit metadata: expected an object keyed by "
+                "template name, got %s. Registry data is preserved; toolkit "
+                "metadata will be stored in %s.",
+                source_path.name,
+                type(data).__name__,
+                self.metadata_file.name,
+            )
+            return {}
+
+        templates: dict[str, FrameMetadata] = {}
+        for name, value in data.items():
+            if not isinstance(value, dict):
+                logger.warning("Skipping malformed toolkit metadata entry %r", name)
+                continue
+            try:
+                templates[name] = FrameMetadata.from_dict(value)
+            except (KeyError, TypeError, ValueError) as exc:
+                logger.warning("Skipping invalid toolkit metadata entry %r: %s", name, exc)
+        return templates
 
     def save_metadata(self) -> None:
         data = {k: asdict(v) for k, v in self.templates.items()}
@@ -234,7 +262,10 @@ class TemplateManager:
     def create_batch_stubs(self, base_template: str = "geometric_metal") -> int:
         created = 0
         for name, style, shape in STUB_DEFINITIONS:
-            if name not in self.templates:
+            # Do not overwrite a hand-authored backend template just because
+            # it is absent from this toolkit's private metadata cache.
+            metadata_path = self.templates_dir / f"{name}.json"
+            if name not in self.templates and not metadata_path.exists():
                 material = "acetate" if "acetate" in name else "metal"
                 if "rimless" in name:
                     material = "metal"
