@@ -1,11 +1,6 @@
 {
   "version": "1.1",
   "template_name": "geometric_metal",
-  "mesh_aliases": {
-    "Bridge": "Frame",
-    "LeftRim": "Frame",
-    "RightRim": "Frame"
-  },
   "hinges": {
     "left": { "part": "LeftTemple", "confidence": 0.85 },
     "right": { "part": "RightTemple", "confidence": 0.85 }
@@ -13,8 +8,8 @@
   "bridge": { "part": "Bridge", "type": "straight" },
   "rim_loops": {
     "frame": { "part": "Frame", "confidence": 1.0 },
-    "left_rim": { "part": "LeftRim", "confidence": 0.7 },
-    "right_rim": { "part": "RightRim", "confidence": 0.7 }
+    "left_rim": { "part": "LeftRim", "confidence": 0.75 },
+    "right_rim": { "part": "RightRim", "confidence": 0.75 }
   },
   "temple_pivots": {
     "left": { "part": "LeftTemple" },
@@ -51,7 +46,7 @@
     "frame_width": 135.9,
     "lens_width": 51.4,
     "lens_height": 40.4,
-    "bridge_width": 18.0,
+    "bridge_width": 21.5,
     "temple_length": 135.1,
     "rim_thickness": 1.2,
     "nose_pad_distance": 16.0,
@@ -63,7 +58,8 @@
     "world_transforms_baked": true,
     "units": "millimeters",
     "lenses_split": true,
-    "note": "Front shell is one mesh named Frame. Bridge/LeftRim/RightRim alias to Frame. Temples placed at the hinges. Do not stack extra rim copies.",
-    "date": "2026-10-21"
+    "named_parts": ["Frame", "Bridge", "LeftRim", "RightRim", "LeftLens", "RightLens", "LeftTemple", "RightTemple"],
+    "note": "Front shell split once into Frame (brow bar), Bridge (center), LeftRim and RightRim. No stacked copies. Temples are the original arms at the hinges.",
+    "date": "2026-10-24"
   }
 }
