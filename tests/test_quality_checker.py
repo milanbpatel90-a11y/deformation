@@ -18,6 +18,16 @@ def test_quality_checker_high_score():
         geom_name="Bridge", node_name="Bridge",
     )
     scene.add_geometry(
+        trimesh.creation.box(extents=(50.0, 42.0, 3.0)),
+        geom_name="LeftRim", node_name="LeftRim",
+        transform=trimesh.transformations.translation_matrix((-30.0, 0.0, 0.0)),
+    )
+    scene.add_geometry(
+        trimesh.creation.box(extents=(50.0, 42.0, 3.0)),
+        geom_name="RightRim", node_name="RightRim",
+        transform=trimesh.transformations.translation_matrix((30.0, 0.0, 0.0)),
+    )
+    scene.add_geometry(
         trimesh.creation.box(extents=(50.0, 45.0, 2.0)),
         geom_name="LeftLens", node_name="LeftLens",
         transform=trimesh.transformations.translation_matrix((-30.0, 0.0, 0.0)),

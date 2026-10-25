@@ -12,6 +12,50 @@ from backend.template_matching.feature_extractor import EyewearFeatureSet
 from backend.template_matching.scoring import ScoredTemplate, WeightedTemplateScorer
 
 
+REQUIRED_DEFORMATION_GROUPS = (
+    "frame", "bridge", "left_rim", "right_rim",
+    "left_lens", "right_lens", "left_temple", "right_temple",
+)
+
+
+def _has_required_part_groups(payload: object) -> bool:
+    """Reject descriptors that collapse required eyewear parts into one mesh."""
+    if not isinstance(payload, dict):
+        return False
+    groups = payload.get("vertex_groups")
+    if not isinstance(groups, dict):
+        return False
+
+    logical_to_group: dict[str, str] = {}
+    for group_name in REQUIRED_DEFORMATION_GROUPS:
+        names = groups.get(group_name)
+        if not isinstance(names, list) or not names:
+            return False
+        for part_name in names:
+            if not isinstance(part_name, str) or not part_name.strip():
+                return False
+            existing_group = logical_to_group.get(part_name)
+            if existing_group is not None and existing_group != group_name:
+                return False
+            logical_to_group[part_name] = group_name
+
+    aliases = payload.get("mesh_aliases", {})
+    if aliases is not None and not isinstance(aliases, dict):
+        return False
+    aliases = aliases or {}
+    resolved_sources: dict[str, str] = {}
+    for logical_name, group_name in logical_to_group.items():
+        source_name = aliases.get(logical_name, logical_name)
+        if not isinstance(source_name, str) or not source_name.strip():
+            return False
+        previous = resolved_sources.get(source_name)
+        if previous is not None and previous != logical_name:
+            # Multiple critical parts cannot all point at the same unsplit GLB mesh.
+            return False
+        resolved_sources[source_name] = logical_name
+    return True
+
+
 @dataclass(frozen=True)
 class TemplateMatchResult:
     """Best template plus ranked alternatives."""
@@ -88,6 +132,8 @@ class TemplateMatcher:
                 "lens_planes", "symmetry_plane", "deformation_regions",
             }
             if not isinstance(descriptor_payload, dict) or not required_descriptor_keys.issubset(descriptor_payload):
+                continue
+            if not _has_required_part_groups(descriptor_payload):
                 continue
 
             templates.append(info)

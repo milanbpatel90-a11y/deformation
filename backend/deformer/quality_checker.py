@@ -134,7 +134,12 @@ class QualityChecker:
 
     def _score_mesh_integrity(self, context: DeformationContext, report: QualityReport) -> float:
         score = 100.0
-        critical = ["Frame", "LeftLens", "RightLens", "LeftTemple", "RightTemple"]
+        # A production eyewear frame must retain the bridge, both rims, both
+        # lenses and both temples. Missing one of these parts is not cosmetic.
+        critical = [
+            "Frame", "Bridge", "LeftRim", "RightRim",
+            "LeftLens", "RightLens", "LeftTemple", "RightTemple",
+        ]
         missing = 0
         empty = 0
         for name in critical:

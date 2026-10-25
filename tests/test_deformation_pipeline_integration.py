@@ -32,9 +32,10 @@ def test_measurements_pipeline_exports_deformed_glb_with_physical_scale(tmp_path
 
     scene = trimesh.load(str(output_path), force="scene")
     assert isinstance(scene, trimesh.Scene)
-    assert {"Frame", "Bridge", "LeftLens", "RightLens", "LeftTemple", "RightTemple"}.issubset(
-        set(scene.geometry)
-    )
+    assert {
+        "Frame", "Bridge", "LeftRim", "RightRim",
+        "LeftLens", "RightLens", "LeftTemple", "RightTemple",
+    }.issubset(set(scene.geometry))
     bounds = scene.bounds
     width_m = float(bounds[1, 0] - bounds[0, 0])
     assert 0.08 <= width_m <= 0.30
