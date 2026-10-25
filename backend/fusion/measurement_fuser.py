@@ -33,30 +33,37 @@ class MeasurementFuser:
         base_ms = front_ms[0] if front_ms else any_ms[0]
 
         def weighted_avg(attr: str, preferred: list[str] | None = None) -> float | None:
+            # Physical dimensions are view-dependent. If a suitable view exists,
+            # measurements from that view are authoritative for this attribute;
+            # other viewpoints must not outvote it by chance or by count.
+            eligible_views = preferred if preferred and any(v in by_view for v in preferred) else list(by_view)
             pairs: list[tuple[float, float]] = []
-            for vtype, ms_list in by_view.items():
+            for vtype in eligible_views:
                 w = self.VIEW_WEIGHTS.get(vtype, 0.4)
-                if preferred and vtype not in preferred:
-                    w *= 0.35
-                for m in ms_list:
+                for m in by_view.get(vtype, []):
                     val = getattr(m, attr, None)
                     if val is None:
                         continue
                     try:
-                        pairs.append((float(val), w))
+                        numeric = float(val)
                     except (TypeError, ValueError):
                         continue
+                    if np.isfinite(numeric):
+                        pairs.append((numeric, w))
             if not pairs:
                 return None
             values = np.array([p[0] for p in pairs], dtype=float)
             weights = np.array([p[1] for p in pairs], dtype=float)
             if len(values) >= 3:
                 median = float(np.median(values))
-                mad = float(np.median(np.abs(values - median))) or 1.0
-                keep = np.abs(values - median) <= 3.0 * mad
-                values, weights = values[keep], weights[keep]
-            if len(values) == 0:
-                return None
+                deviations = np.abs(values - median)
+                mad = float(np.median(deviations))
+                if mad == 0.0:
+                    keep = np.isclose(values, median, atol=1e-6, rtol=0.0)
+                else:
+                    keep = deviations <= 3.0 * 1.4826 * mad
+                if np.any(keep):
+                    values, weights = values[keep], weights[keep]
             return float(np.average(values, weights=weights))
 
         frame_width = weighted_avg("frame_width", ["front"]) or base_ms.frame_width

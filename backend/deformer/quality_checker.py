@@ -55,6 +55,11 @@ class QualityChecker:
         if report.breakdown.get("constraints", 100) < 60.0:
             report.passed = False
             report.warnings.append("Critical constraint failures detected.")
+        # Missing required part meshes are a hard failure even if the weighted
+        # average happens to clear the general score threshold.
+        if report.breakdown.get("mesh_integrity", 100.0) < 100.0:
+            report.passed = False
+            report.warnings.append("Critical mesh integrity gate failed.")
         return report
 
     def _score_geometry(self, context: DeformationContext, report: QualityReport) -> float:
