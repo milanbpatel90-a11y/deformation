@@ -248,16 +248,16 @@ async def deform_from_multiple_images(
 
 @app.post("/api/deform/measurements")
 async def deform_from_measurements(
-    frame_width: float = Form(145),
-    lens_width: float = Form(54),
-    lens_height: float = Form(50),
-    bridge_width: float = Form(18),
-    temple_length: float = Form(140),
-    rim_thickness: float = Form(1.2),
+    frame_width: float = Form(145, ge=80, le=200),
+    lens_width: float = Form(54, ge=20, le=70),
+    lens_height: float = Form(50, ge=15, le=65),
+    bridge_width: float = Form(18, ge=8, le=35),
+    temple_length: float = Form(140, ge=100, le=180),
+    rim_thickness: float = Form(1.2, ge=0.3, le=8),
     material: str = Form("metal"),
     shape: str = Form("rectangle"),
     nose_pads: bool = Form(True),
-    temple_curve_angle: float = Form(28),
+    temple_curve_angle: float = Form(28, ge=0, le=60),
     color: str = Form("#d9a7a2"),
     template: str = Form("rectangle_metal"),
 ):
@@ -291,7 +291,11 @@ async def deform_from_measurements(
         result["download_url"] = f"/api/output/{job_id}.glb"
         return result
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+        logger.exception("Deformation from supplied measurements failed")
+        raise HTTPException(
+            status_code=500,
+            detail="Pipeline failed. Check server logs for diagnostic details.",
+        ) from exc
 
 
 @app.get("/api/output/{filename}")

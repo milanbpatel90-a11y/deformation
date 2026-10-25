@@ -408,7 +408,7 @@ class DeformationPipeline:
 
         self.exporter.export(deformed, out, measurements, template_name)
         meta_path = out.with_suffix(".metadata.json")
-        anchors = self.exporter._compute_anchors(deformed, measurements)
+        anchors = self.exporter._compute_anchors(deformed, measurements, coordinate_scale=0.001)
 
         metadata = ExportMetadata(
             shape=measurements.shape.value,
