@@ -62,25 +62,36 @@ class GLBExporter:
         coordinate_scale: float = 1.0,
     ) -> dict[str, list[float]]:
         """Compute VTO anchors, optionally converting their coordinate units."""
-        bridge = scene.geometry.get("Bridge")
-        if bridge is None:
-            bridge = scene.geometry.get("Frame")
-        left_temple = scene.geometry.get("LeftTemple")
-        right_temple = scene.geometry.get("RightTemple")
+        def world_vertices(name: str) -> np.ndarray | None:
+            mesh = scene.geometry.get(name)
+            if mesh is None or not isinstance(mesh, trimesh.Trimesh) or len(mesh.vertices) == 0:
+                return None
+            transformed = []
+            for node_name in scene.graph.nodes_geometry:
+                matrix, geometry_name = scene.graph[node_name]
+                if geometry_name != name:
+                    continue
+                vertices = np.asarray(mesh.vertices, dtype=np.float64)
+                transformed.append(vertices @ matrix[:3, :3].T + matrix[:3, 3])
+            # DeformationContext may inject independently copied logical meshes
+            # directly into scene.geometry; those are already baked into world space.
+            return np.concatenate(transformed, axis=0) if transformed else np.asarray(mesh.vertices)
 
-        if bridge is not None and len(bridge.vertices) > 0:
-            nose = np.asarray(bridge.vertices).mean(axis=0)
-        else:
-            nose = np.array([0.0, 0.0, 0.0])
+        bridge_vertices = world_vertices("Bridge")
+        if bridge_vertices is None:
+            bridge_vertices = world_vertices("Frame")
+        left_vertices = world_vertices("LeftTemple")
+        right_vertices = world_vertices("RightTemple")
 
+        nose = bridge_vertices.mean(axis=0) if bridge_vertices is not None else np.zeros(3)
         left_hinge = (
-            left_temple.vertices[left_temple.vertices[:, 0].argmin()]
-            if left_temple is not None and len(left_temple.vertices) > 0
+            left_vertices[np.argmin(left_vertices[:, 0])]
+            if left_vertices is not None
             else np.array([-measurements.frame_width / 2.0, 0.0, 0.0])
         )
         right_hinge = (
-            right_temple.vertices[right_temple.vertices[:, 0].argmax()]
-            if right_temple is not None and len(right_temple.vertices) > 0
+            right_vertices[np.argmax(right_vertices[:, 0])]
+            if right_vertices is not None
             else np.array([measurements.frame_width / 2.0, 0.0, 0.0])
         )
         anchors = {
@@ -110,12 +121,14 @@ class GLBExporter:
 
         self._validate_scene(scene, "pre-export")
         export_scene = deepcopy(scene)
+        # Compute world-space anchors from the internal mm scene, then convert
+        # them to metres. This also scales fallback anchors when a part is absent.
+        anchors = self._compute_anchors(export_scene, measurements, coordinate_scale=MM_TO_M)
 
         # The internal pipeline is in mm. glTF geometry is in metres.
         transform = np.eye(4, dtype=np.float64)
         transform[:3, :3] *= MM_TO_M
         export_scene.apply_transform(transform)
-        anchors = self._compute_anchors(export_scene, measurements)
 
         metadata = ExportMetadata(
             shape=measurements.shape.value,

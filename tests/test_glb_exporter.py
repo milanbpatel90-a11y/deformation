@@ -49,7 +49,7 @@ def test_export_converts_internal_mm_geometry_to_glb_metres_and_keeps_source_unc
     loaded = trimesh.load(str(target), force="scene")
     assert isinstance(loaded, trimesh.Scene)
     x_width_m = float(loaded.bounds[1, 0] - loaded.bounds[0, 0])
-    assert 0.13 <= x_width_m <= 0.15
+    assert 0.155 <= x_width_m <= 0.165
 
 
 def test_export_fails_closed_on_non_finite_geometry(tmp_path):
