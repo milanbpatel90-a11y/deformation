@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import uuid
 from pathlib import Path
+import logging
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
@@ -27,6 +28,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+logger = logging.getLogger(__name__)
 
 OUTPUT_DIR = Path(__file__).resolve().parents[2] / "output"
 OUTPUT_DIR.mkdir(exist_ok=True)
@@ -83,12 +86,17 @@ def health():
     """Liveness + basic readiness for production monitoring."""
     available = library.list_templates()
     active = _pick_active_template(available)
+    model_type = getattr(pipeline.segmenter, "model_type", "unknown")
+    ready = bool(active) and model_type != "opencv_fallback"
     return {
-        "status": "ok",
+        "status": "ok" if ready else "degraded",
         "version": "1.1.0",
+        "ready": ready,
         "templates_available": len(available),
         "active_template": active,
         "preferred_templates": [t for t in PREFERRED_TEMPLATES if t in available],
+        "segmentation_model": model_type,
+        "calibration_note": "Provide frame_width_mm from product specifications for calibrated physical dimensions.",
         "output_dir": str(OUTPUT_DIR),
     }
 
@@ -111,8 +119,13 @@ async def deform_from_images(
     top: UploadFile | None = File(None, description="Top product image"),
     color: str = Form("#d9a7a2"),
     template: str | None = Form(None),
+    frame_width_mm: float | None = Form(None, ge=100, le=180),
 ):
-    """Upload up to 3 images (front, side, top), detect measurements, deform template, export GLB."""
+    """Upload front/side/top images and generate a quality-gated GLB.
+
+    Supply frame_width_mm from the manufacturer's product specifications to
+    calibrate absolute dimensions instead of using the 135 mm default assumption.
+    """
     job_id = uuid.uuid4().hex[:12]
     # Use OUTPUT_DIR (project-local, ASCII-safe path) instead of system temp
     # to avoid Windows 8.3 tilde paths (PETPOO~1) that break cv2.imread.
@@ -148,6 +161,7 @@ async def deform_from_images(
             color=color,
             template_override=template,
             top_path=top_path,
+            reference_width_mm=frame_width_mm,
         )
         result["job_id"] = job_id
         result["download_url"] = f"/api/output/{job_id}.glb"
@@ -155,10 +169,11 @@ async def deform_from_images(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
-        import traceback
-
-        tb = traceback.format_exc()
-        raise HTTPException(status_code=500, detail=f"{exc}\n\nTraceback:\n{tb}") from exc
+        logger.exception("Eyewear image-to-GLB pipeline failed")
+        raise HTTPException(
+            status_code=500,
+            detail="Pipeline failed. Check server logs for diagnostic details.",
+        ) from exc
     finally:
         import shutil as _shutil
 
@@ -211,6 +226,7 @@ async def deform_from_multiple_images(
             out_path,
             color=color,
             template_override=template,
+            reference_width_mm=frame_width_mm,
         )
         result["job_id"] = job_id
         result["download_url"] = f"/api/output/{job_id}.glb"
@@ -219,10 +235,11 @@ async def deform_from_multiple_images(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
-        import traceback
-
-        tb = traceback.format_exc()
-        raise HTTPException(status_code=500, detail=f"{exc}\n\nTraceback:\n{tb}") from exc
+        logger.exception("Eyewear image-to-GLB pipeline failed")
+        raise HTTPException(
+            status_code=500,
+            detail="Pipeline failed. Check server logs for diagnostic details.",
+        ) from exc
     finally:
         import shutil as _shutil
 
@@ -231,16 +248,16 @@ async def deform_from_multiple_images(
 
 @app.post("/api/deform/measurements")
 async def deform_from_measurements(
-    frame_width: float = Form(145),
-    lens_width: float = Form(54),
-    lens_height: float = Form(50),
-    bridge_width: float = Form(18),
-    temple_length: float = Form(140),
-    rim_thickness: float = Form(1.2),
+    frame_width: float = Form(145, ge=80, le=200),
+    lens_width: float = Form(54, ge=20, le=70),
+    lens_height: float = Form(50, ge=15, le=65),
+    bridge_width: float = Form(18, ge=8, le=35),
+    temple_length: float = Form(140, ge=100, le=180),
+    rim_thickness: float = Form(1.2, ge=0.3, le=8),
     material: str = Form("metal"),
     shape: str = Form("rectangle"),
     nose_pads: bool = Form(True),
-    temple_curve_angle: float = Form(28),
+    temple_curve_angle: float = Form(28, ge=0, le=60),
     color: str = Form("#d9a7a2"),
     template: str = Form("rectangle_metal"),
 ):
@@ -274,7 +291,11 @@ async def deform_from_measurements(
         result["download_url"] = f"/api/output/{job_id}.glb"
         return result
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+        logger.exception("Deformation from supplied measurements failed")
+        raise HTTPException(
+            status_code=500,
+            detail="Pipeline failed. Check server logs for diagnostic details.",
+        ) from exc
 
 
 @app.get("/api/output/{filename}")

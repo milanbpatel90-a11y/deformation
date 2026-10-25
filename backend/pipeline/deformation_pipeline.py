@@ -134,31 +134,6 @@ class DeformationPipeline:
                 scene.geometry[logical_name] = copy
 
     @staticmethod
-    def _uniform_scale_fallback(scene: trimesh.Scene, template_info, measurements: Measurements) -> trimesh.Scene:
-        """Descriptor-free fallback: uniformly rescale every mesh in the scene so
-        the template's frame_width matches the requested measurements.frame_width.
-        Coarser than the descriptor-driven pipeline (no per-part reshaping), but
-        it is a real, working deformation rather than a crash -- used only when a
-        template is missing its descriptor.json or fails descriptor validation."""
-        from copy import deepcopy
-
-        out = deepcopy(scene)
-        template_width = float(getattr(template_info.dimensions, "frame_width", 0.0) or 0.0)
-        if template_width <= 0:
-            return out
-
-        scale = float(measurements.frame_width) / template_width
-        scale = float(np.clip(scale, 0.5, 2.0))
-
-        for node_name in out.graph.nodes_geometry:
-            transform, geom_name = out.graph[node_name]
-            new_transform = transform.copy()
-            new_transform[:3, :3] *= scale
-            new_transform[:3, 3] *= scale
-            out.graph.update(frame_to=node_name, matrix=new_transform)
-        return out
-
-    @staticmethod
     def _optimize_scene(scene: trimesh.Scene) -> trimesh.Scene:
         """Run non-destructive cleanup after deformation and material assignment."""
         for geom in scene.geometry.values():
@@ -194,6 +169,7 @@ class DeformationPipeline:
         color: str = "#d9a7a2",
         template_override: str | None = None,
         top_path: Path | str | None = None,
+        reference_width_mm: float | None = None,
     ) -> dict:
         front = self._imread(front_path)
         if front is None:
@@ -202,7 +178,10 @@ class DeformationPipeline:
         side = self._imread(side_path) if side_path else None
         top = self._imread(top_path) if top_path else None
 
-        return self.run_from_arrays(front, side, output_path, color, template_override, top=top)
+        return self.run_from_arrays(
+            front, side, output_path, color, template_override,
+            top=top, reference_width_mm=reference_width_mm,
+        )
 
     def run_from_measurements(
         self,
@@ -218,9 +197,14 @@ class DeformationPipeline:
 
         scene = trimesh.load(template_info.glb_path, force="scene")
         
-        # Try to load descriptor, fall back to simple deformation if template not properly prepared
+        # Fail closed if a template cannot support actual part-aware deformation.
+        # Uniformly scaling a complete GLB is not a substitute for validated
+        # frame, bridge, lens, and temple deformation.
         try:
-            descriptor = self.descriptor_loader.load(template_name, measurements=measurements, template_info=template_info)
+            descriptor = self.descriptor_loader.load(
+                template_name, measurements=measurements, template_info=template_info
+            )
+            self._inject_aliases_into_scene(scene, descriptor)
             ctx = DeformationContext(
                 template_info=template_info,
                 template_scene=scene,
@@ -231,25 +215,24 @@ class DeformationPipeline:
             deformer = MeshDeformer(scene, template_info.dimensions, rim_pull_strength=rim_pull)
             deformed_ctx, quality = deformer.deform(ctx)
             deformed = deformed_ctx.template_scene
-        except (ValueError, KeyError) as e:
-            # Fallback when the template has no usable descriptor. There is no
-            # separate "simple" deformer left in this codebase -- MeshDeformer
-            # is the only deformer, and its .deform() requires a
-            # DeformationContext, not a raw Measurements object, so calling it
-            # here would always raise AttributeError. Instead, do a uniform
-            # scale of the whole template toward the requested frame_width,
-            # which needs no descriptor at all.
-            import warnings
-            warnings.warn(f"Template {template_name} not properly prepared (descriptor error: {e}). Using uniform-scale fallback.")
-            deformed = self._uniform_scale_fallback(scene, template_info, measurements)
-        
+        except (ValueError, KeyError, FileNotFoundError) as exc:
+            raise RuntimeError(
+                f"Template '{template_name}' has no valid deformation descriptor; "
+                "refusing to export a scale-only model."
+            ) from exc
+        if not quality.passed:
+            raise RuntimeError(
+                f"Deformation quality gate failed for '{template_name}' "
+                f"(score={quality.score:.1f}/100): {'; '.join(quality.warnings)}"
+            )
+
         deformed = apply_materials(deformed, measurements)
 
         out = Path(output_path)
         self.exporter.export(deformed, out, measurements, template_name)
 
         meta_path = out.with_suffix(".metadata.json")
-        anchors = self.exporter._compute_anchors(deformed, measurements)
+        anchors = self.exporter._compute_anchors(deformed, measurements, coordinate_scale=0.001)
 
         metadata = ExportMetadata(
             shape=measurements.shape.value,
@@ -278,6 +261,8 @@ class DeformationPipeline:
                 ],
             },
             "scale_factors": self._scale_summary(measurements, template_info.dimensions),
+            "quality": quality.to_dict(),
+            "calibration": {"source": "supplied_measurements", "absolute_size_calibrated": True},
         }
 
     def run_from_arrays(
@@ -288,13 +273,27 @@ class DeformationPipeline:
         color: str = "#d9a7a2",
         template_override: str | None = None,
         top: np.ndarray | None = None,
+        reference_width_mm: float | None = None,
     ) -> dict:
         report = PipelineReport()
 
         s1 = report.add("YOLO Segmentation")
         t = s1.start()
         masks = self.segmenter.segment(front)
-        s1.finish(t, model=masks.get("model_type", "unknown"), detections=masks.get("detections", 0))
+        front_mask = masks.get("front")
+        if front_mask is None or front_mask.shape != front.shape[:2]:
+            raise ValueError("Segmentation did not return a mask matching the input image.")
+        foreground_fraction = float(np.count_nonzero(front_mask)) / float(front_mask.size or 1)
+        if foreground_fraction < 0.0001 or foreground_fraction > 0.98:
+            raise ValueError(
+                "Eyewear segmentation is empty or covers almost the whole image. "
+                "Verify the fine-tuned eyewear checkpoint and use a clear front-view photo."
+            )
+        s1.finish(
+            t, model=masks.get("model_type", "unknown"),
+            detections=masks.get("detections", 0),
+            foreground_fraction=round(foreground_fraction, 5),
+        )
 
         s2 = report.add("Shape Classification")
         t = s2.start()
@@ -322,6 +321,7 @@ class DeformationPipeline:
             style.nose_pads,
             color,
             top=top,
+            reference_width_mm=reference_width_mm,
         )
         s3.finish(
             t,
@@ -375,7 +375,13 @@ class DeformationPipeline:
             deformation_mode="template_vertex_groups",
             contour_used=False,
             scale_factors=self._scale_summary(measurements, template_info.dimensions),
+            quality=quality.to_dict(),
         )
+        if not quality.passed:
+            raise RuntimeError(
+                f"Deformation quality gate failed for '{template_name}' "
+                f"(score={quality.score:.1f}/100): {'; '.join(quality.warnings)}"
+            )
 
         s7 = report.add("Texture Mapping")
         t = s7.start()
@@ -402,7 +408,7 @@ class DeformationPipeline:
 
         self.exporter.export(deformed, out, measurements, template_name)
         meta_path = out.with_suffix(".metadata.json")
-        anchors = self.exporter._compute_anchors(deformed, measurements)
+        anchors = self.exporter._compute_anchors(deformed, measurements, coordinate_scale=0.001)
 
         metadata = ExportMetadata(
             shape=measurements.shape.value,
@@ -433,6 +439,12 @@ class DeformationPipeline:
             },
             "scale_factors": self._scale_summary(measurements, template_info.dimensions),
             "lens_contour": lens_contour.model_dump(),
+            "quality": quality.to_dict(),
+            "calibration": {
+                "source": "manufacturer_reference_width" if reference_width_mm is not None else "assumed_135mm",
+                "absolute_size_calibrated": reference_width_mm is not None,
+                "reference_width_mm": reference_width_mm if reference_width_mm is not None else 135.0,
+            },
             "pipeline": report.to_dict(),
         }
 
@@ -442,6 +454,7 @@ class DeformationPipeline:
         output_path: Path | str | None = None,
         color: str = "#d9a7a2",
         template_override: str | None = None,
+        reference_width_mm: float | None = None,
     ) -> dict:
         """
         Run the full pipeline on 4-6 images:
@@ -481,6 +494,7 @@ class DeformationPipeline:
                 material=style.material,
                 nose_pads=style.nose_pads,
                 color=color,
+                reference_width_mm=reference_width_mm,
             )
             
             extracted_views.append((view_type, measurements))
@@ -491,6 +505,8 @@ class DeformationPipeline:
                 
         if not extracted_views:
             raise ValueError("No valid images could be processed")
+        if len(extracted_views) < 2:
+            raise ValueError("At least two valid images are required for multi-view fusion.")
             
         # If no front view was classified, pick the first view as front fallback
         if front_image is None:
@@ -551,7 +567,13 @@ class DeformationPipeline:
             rim_pull_strength=rim_pull,
             deformation_mode="template_vertex_groups",
             scale_factors=self._scale_summary(fused_measurements, template_info.dimensions),
+            quality=quality.to_dict(),
         )
+        if not quality.passed:
+            raise RuntimeError(
+                f"Deformation quality gate failed for '{template_name}' "
+                f"(score={quality.score:.1f}/100): {'; '.join(quality.warnings)}"
+            )
 
         s4 = report.add("Texture Mapping")
         t = s4.start()
@@ -580,7 +602,7 @@ class DeformationPipeline:
 
         self.exporter.export(deformed, out, fused_measurements, template_name)
         meta_path = out.with_suffix(".metadata.json")
-        anchors = self.exporter._compute_anchors(deformed, fused_measurements)
+        anchors = self.exporter._compute_anchors(deformed, fused_measurements, coordinate_scale=0.001)
 
         metadata = ExportMetadata(
             shape=fused_measurements.shape.value,
@@ -604,6 +626,13 @@ class DeformationPipeline:
             "features": features.model_dump(mode="json"),
             "scale_factors": self._scale_summary(fused_measurements, template_info.dimensions),
             "lens_contour": front_lens_contour.model_dump(),
+            "quality": quality.to_dict(),
+            "calibration": {
+                "source": "manufacturer_reference_width" if reference_width_mm is not None else "assumed_135mm",
+                "absolute_size_calibrated": reference_width_mm is not None,
+                "reference_width_mm": reference_width_mm if reference_width_mm is not None else 135.0,
+            },
+            "images_processed": len(extracted_views),
             "pipeline": report.to_dict(),
         }
 

@@ -1,0 +1,43 @@
+name: Python CI
+
+on:
+  push:
+    branches: [main, "fix/**", "feature/**"]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install native geometry libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgl1 libegl1 libgomp1
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install CPU-only PyTorch for tests
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+
+      - name: Install project and test dependencies
+        run: python -m pip install -r requirements.txt pytest
+
+      - name: Compile project Python files
+        run: python -m compileall -q backend tests
+
+      - name: Run full test suite
+        run: python -m pytest -q
