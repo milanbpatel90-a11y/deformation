@@ -22,15 +22,17 @@ def _measurements():
 
 def _scene():
     scene = trimesh.Scene()
-    scene.add_geometry(trimesh.creation.box(extents=(140.0, 42.0, 20.0)), node_name="Frame")
-    scene.add_geometry(trimesh.creation.box(extents=(2.0, 8.0, 6.0)), node_name="Bridge")
+    scene.add_geometry(trimesh.creation.box(extents=(140.0, 42.0, 20.0)), geom_name="Frame", node_name="Frame")
+    scene.add_geometry(trimesh.creation.box(extents=(2.0, 8.0, 6.0)), geom_name="Bridge", node_name="Bridge")
     scene.add_geometry(
         trimesh.creation.box(extents=(70.0, 4.0, 4.0)),
+        geom_name="LeftTemple",
         node_name="LeftTemple",
         transform=trimesh.transformations.translation_matrix((-45.0, 0.0, -10.0)),
     )
     scene.add_geometry(
         trimesh.creation.box(extents=(70.0, 4.0, 4.0)),
+        geom_name="RightTemple",
         node_name="RightTemple",
         transform=trimesh.transformations.translation_matrix((45.0, 0.0, -10.0)),
     )
