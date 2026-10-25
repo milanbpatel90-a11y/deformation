@@ -153,6 +153,8 @@
     <div class="section-title">Options</div>
     <label class="field">Frame colour</label>
     <input type="color" id="color-pick" value="#d9a7a2" />
+    <label class="field">Known frame width (mm; optional)</label>
+    <input type="number" id="frame-width-mm" min="100" max="180" step="0.5" placeholder="e.g. 140" />
     <label class="field">Template</label>
     <input type="text" id="template-input" placeholder="auto-detect" />
   </div>
@@ -257,6 +259,12 @@ function loadGLB(url) {
   loader.load(url, (gltf) => {
     if (currentModel) scene.remove(currentModel);
     currentModel = gltf.scene;
+    const modelBounds = new THREE.Box3().setFromObject(currentModel);
+    const modelSize = modelBounds.getSize(new THREE.Vector3());
+    // Model geometry is authored in physical units; cache its unscaled width once.
+    // Webcam alignment then scales it to the tracked head width, independent of
+    // whether an older GLB was stored in mm or a new GLB in standard glTF metres.
+    currentModel.userData.baseWidth = Math.max(Math.abs(modelSize.x), 1e-6);
     scene.add(currentModel);
     if (!isTryOnActive) {
       fitCamera(currentModel);
@@ -418,6 +426,10 @@ document.getElementById('generate-btn').addEventListener('click', async () => {
   }
 
   form.append('color', document.getElementById('color-pick').value);
+  const knownFrameWidth = Number(document.getElementById('frame-width-mm').value);
+  if (Number.isFinite(knownFrameWidth) && knownFrameWidth > 0) {
+    form.append('frame_width_mm', String(knownFrameWidth));
+  }
   const tpl = document.getElementById('template-input').value.trim();
   if (tpl) form.append('template', tpl);
 
@@ -432,10 +444,14 @@ document.getElementById('generate-btn').addEventListener('click', async () => {
     }
 
     const m = data.measurements || {};
+    const calibrationNote = data.calibration && data.calibration.absolute_size_calibrated
+      ? 'Manufacturer width calibrated'
+      : 'Estimated size — enter known frame width for calibration';
     statusBox.textContent =
       `✓ Done  ·  Template: ${data.template}\n` +
       `Frame ${m.frame_width}mm  ·  Lens ${m.lens_width}×${m.lens_height}mm\n` +
-      `Bridge ${m.bridge_width}mm  ·  Temple ${m.temple_length}mm  ·  Rim ${m.rim_thickness}mm`;
+      `Bridge ${m.bridge_width}mm  ·  Temple ${m.temple_length}mm  ·  Rim ${m.rim_thickness}mm\n` +
+      calibrationNote;
 
     renderPipelineStages(data.pipeline);
 
@@ -503,8 +519,11 @@ function onResults(results) {
       // Offset slightly forward along the look direction so glasses sit on the nose
       currentModel.position.addScaledVector(v_dir, face_width * 0.15);
       
-      // 2. Scale the model dynamically based on face width
-      const base_scale = face_width * 0.72;
+      // 2. Fit the model's measured width to the tracked temple-to-temple span.
+      // Dividing by source width prevents mm-sized GLBs from rendering 1000x too large.
+      const targetWidth = face_width * 0.72;
+      const sourceWidth = Math.max(Number(currentModel.userData.baseWidth) || 0, 1e-6);
+      const base_scale = targetWidth / sourceWidth;
       currentModel.scale.set(base_scale, base_scale, base_scale);
       
       overlayStatus.textContent = 'Webcam Try-On active · Face tracked';
