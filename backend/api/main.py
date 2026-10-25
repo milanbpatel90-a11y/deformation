@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import uuid
+import os
+import logging
 from pathlib import Path
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
@@ -15,6 +17,9 @@ from backend.pipeline import DeformationPipeline
 from backend.template_library.loader import TemplateLibrary
 from backend.api import rim_detection_routes
 
+logger = logging.getLogger(__name__)
+MAX_UPLOAD_BYTES = int(os.getenv("MAX_UPLOAD_BYTES", str(15 * 1024 * 1024)))
+
 app = FastAPI(
     title="Defirmation API",
     description="Template deformation pipeline for eyewear virtual try-on — product images → 3D GLB",
@@ -23,9 +28,9 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=[origin.strip() for origin in os.getenv("CORS_ORIGINS", "http://localhost:3000,http://localhost:5173").split(",") if origin.strip()],
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type"],
 )
 
 OUTPUT_DIR = Path(__file__).resolve().parents[2] / "output"
@@ -155,10 +160,8 @@ async def deform_from_images(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
-        import traceback
-
-        tb = traceback.format_exc()
-        raise HTTPException(status_code=500, detail=f"{exc}\n\nTraceback:\n{tb}") from exc
+        logger.exception("Deformation failed (job_id=%s)", job_id)
+        raise HTTPException(status_code=500, detail="Deformation failed. Check server logs using the job ID.") from exc
     finally:
         import shutil as _shutil
 
@@ -219,10 +222,8 @@ async def deform_from_multiple_images(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
-        import traceback
-
-        tb = traceback.format_exc()
-        raise HTTPException(status_code=500, detail=f"{exc}\n\nTraceback:\n{tb}") from exc
+        logger.exception("Deformation failed (job_id=%s)", job_id)
+        raise HTTPException(status_code=500, detail="Deformation failed. Check server logs using the job ID.") from exc
     finally:
         import shutil as _shutil
 
@@ -274,7 +275,8 @@ async def deform_from_measurements(
         result["download_url"] = f"/api/output/{job_id}.glb"
         return result
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+        logger.exception("Measurement-based deformation failed (job_id=%s)", job_id)
+        raise HTTPException(status_code=500, detail="Deformation failed. Check server logs using the job ID.") from exc
 
 
 @app.get("/api/output/{filename}")
