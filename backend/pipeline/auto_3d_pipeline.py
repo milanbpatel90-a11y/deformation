@@ -89,6 +89,15 @@ class Auto3DPipeline:
         # 2. Segment glasses
         logger.info("Step 1/4: Segmenting glasses parts...")
         masks = self.segmenter.segment(image)
+        mask = masks.get("front")
+        if mask is None or mask.shape != image.shape[:2]:
+            raise ValueError("Segmentation mask is missing or has the wrong image dimensions.")
+        foreground_fraction = float(np.count_nonzero(mask)) / float(mask.size or 1)
+        if foreground_fraction < 0.0001 or foreground_fraction > 0.98:
+            raise ValueError(
+                "Eyewear segmentation is empty or covers almost the whole image; "
+                "check the trained checkpoint and input photograph."
+            )
         
         # Save segmentation visualization
         seg_viz_path = output_dir / f"{image_path.stem}_segmentation.jpg"
@@ -110,14 +119,19 @@ class Auto3DPipeline:
         logger.info("Step 3/4: Extracting measurements...")
         
         # For YOLO results, we need to handle differently
-        if hasattr(self.segmenter, '_model') and self.segmenter._model is not None:
-            # Run YOLO again to get results object
+        if (
+            getattr(self.segmenter, "_model", None) is not None
+            and getattr(self.segmenter, "supports_part_masks", False)
+        ):
+            # This converter expects the fixed six-part class contract only.
             results = self.segmenter._model(image, verbose=False)
             measurements, lens_contour = self.mask_converter.extract_from_yolo_results(
                 image, results, shape, material, color
             )
         else:
-            # Fallback: use OpenCV masks
+            # A one-class eyewear silhouette cannot identify each lens/bridge/temple
+            # independently. Use the silhouette-based extractor instead of treating
+            # the entire eyewear mask as class 0 (rim).
             measurements, lens_contour = self._extract_from_opencv_masks(
                 image, masks, shape, material, color, nose_pads
             )
@@ -167,7 +181,14 @@ class Auto3DPipeline:
         image_dir = Path(image_dir)
         output_dir = Path(output_dir)
         
-        image_files = sorted(image_dir.glob(pattern))
+        if pattern in {"*", "*.*", "*.jpg"}:
+            allowed = {".jpg", ".jpeg", ".png", ".webp", ".bmp"}
+            image_files = sorted(
+                p for p in image_dir.iterdir()
+                if p.is_file() and p.suffix.lower() in allowed
+            )
+        else:
+            image_files = sorted(p for p in image_dir.glob(pattern) if p.is_file())
         logger.info(f"Found {len(image_files)} images to process")
         
         results = []

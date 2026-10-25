@@ -35,18 +35,22 @@ class TemplateMatcher:
         if override:
             try:
                 template = self.library.load(override)
-                scored = self.scorer.score(features, template)
-                return TemplateMatchResult(best=scored, candidates=[scored])
-            except FileNotFoundError:
-                pass
+            except FileNotFoundError as exc:
+                raise FileNotFoundError(
+                    f"Requested template '{override}' is unavailable or has no GLB metadata."
+                ) from exc
+            scored = self.scorer.score(features, template)
+            return TemplateMatchResult(best=scored, candidates=[scored])
 
         candidates = []
         for template in self._load_candidates():
             candidates.append(self.scorer.score(features, template))
 
         if not candidates:
-            fallback = self.scorer.score(features, self.library.load("geometric_metal"))
-            return TemplateMatchResult(best=fallback, candidates=[fallback])
+            raise RuntimeError(
+                "No usable eyewear template is registered. Each selectable template must "
+                "have a GLB, measurements JSON, and valid descriptor JSON."
+            )
 
         ranked = sorted(candidates, key=lambda item: item.score, reverse=True)
         return TemplateMatchResult(best=ranked[0], candidates=ranked)
@@ -63,8 +67,29 @@ class TemplateMatcher:
                 info = self.library.load(name)
             except (FileNotFoundError, KeyError, ValueError):
                 continue
-            if not Path(info.glb_path).exists():
+            if not Path(info.glb_path).is_file():
                 continue
+
+            descriptor_candidates = [
+                self.library.templates_dir / "descriptors" / f"{name}.json",
+                self.library.templates_dir / "descriptors" / f"{Path(info.glb_path).stem}.json",
+                self.library.templates_dir / "processed" / f"{name}.descriptor.json",
+                self.library.templates_dir / "processed" / f"{Path(info.glb_path).stem}.descriptor.json",
+            ]
+            descriptor_path = next((p for p in descriptor_candidates if p.is_file()), None)
+            if descriptor_path is None:
+                continue
+            try:
+                descriptor_payload = json.loads(descriptor_path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                continue
+            required_descriptor_keys = {
+                "hinges", "bridge", "rim_loops", "temple_pivots",
+                "lens_planes", "symmetry_plane", "deformation_regions",
+            }
+            if not isinstance(descriptor_payload, dict) or not required_descriptor_keys.issubset(descriptor_payload):
+                continue
+
             templates.append(info)
         return templates
 
