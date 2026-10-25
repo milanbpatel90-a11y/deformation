@@ -181,13 +181,15 @@ class Auto3DPipeline:
         image_dir = Path(image_dir)
         output_dir = Path(output_dir)
         
-        if pattern in {"*", "*.*", "*.jpg"}:
+        if pattern in {"*", "*.*"}:
             allowed = {".jpg", ".jpeg", ".png", ".webp", ".bmp"}
             image_files = sorted(
                 p for p in image_dir.iterdir()
                 if p.is_file() and p.suffix.lower() in allowed
             )
         else:
+            # Respect explicit filters such as *.jpg instead of silently
+            # broadening the caller's requested pattern to every image format.
             image_files = sorted(p for p in image_dir.glob(pattern) if p.is_file())
         logger.info(f"Found {len(image_files)} images to process")
         
