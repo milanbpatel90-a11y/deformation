@@ -401,7 +401,7 @@ document.getElementById('generate-btn').addEventListener('click', async () => {
   document.getElementById('pipeline-stages').style.display = 'none';
 
   const form = new FormData();
-  const API_BASE = 'http://localhost:8000';
+  const API_BASE = (new URLSearchParams(window.location.search).get('api') || window.location.origin).replace(/\/$/, '');
   let endpoint = `${API_BASE}/api/deform`;
 
   if (multiFiles && multiFiles.length > 0) {
