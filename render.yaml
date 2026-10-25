@@ -1,0 +1,10 @@
+services:
+  - type: web
+    name: deformation-api
+    runtime: python
+    plan: free
+    region: singapore
+    branch: deploy/render-blueprint
+    buildCommand: pip install --upgrade pip && pip install -r requirements.txt
+    startCommand: uvicorn backend.api.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /api/health

@@ -20,3 +20,8 @@ open3d>=0.18.0; python_version < "3.13"
 # Utilities
 python-dotenv>=1.0.0
 requests>=2.31.0
+
+# Render/Linux CPU deployment: avoid downloading CUDA-enabled PyTorch wheels
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch==2.11.0+cpu
+torchvision==0.26.0+cpu
