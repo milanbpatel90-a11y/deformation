@@ -33,7 +33,7 @@ The validator checks manifest references, file presence, label syntax/class ID, 
 
 ## Human review and application
 
-1. Open `dataset/real_eyewear_1000/HUMAN_REVIEW_TOOL_FIXED.html) in a desktop browser, select the dataset root, and compare the green overlay with the original image.
+1. Open `dataset/real_eyewear_1000/HUMAN_REVIEW_TOOL_FIXED.html` in a desktop browser, select the dataset root, and compare the green overlay with the original image.
 2. Record accepted, corrected, or rejected decisions with a reviewer ID. Export audit JSON and CSV regularly; browser session persistence is not a substitute for exported backups.
 3. For corrected masks, download each PNG into a `review_masks` directory, keeping the expected `<image_id>_mask.png` filename.
 4. From the dataset folder, run the review helper in dry-run mode first:
@@ -52,7 +52,7 @@ The helper backs up masks/labels under `human_review_backups/`, updates manifest
 
 ## Training integration
 
-The existing `train_yolov8_seg.py` expects a `splits/manifest.json` layout for its validation command, while this dataset uses `manifest.csv` and `images/{train,val,test}`, `masks/{train,val,test}`, `labels/{train,val,test}`. Do not run that existing validator against this dataset as-is. Use the new validator, then configure Ultralytics against this dataset's portable YAML. Keep `test` out of training and make performance claims only against human-verified labels.
+The existing `train_yolov8_seg.py` expects a `splits/manifest.json` layout for its validation command, while this dataset uses `manifest.csv` and `images/{train,val,test}`, `masks/{train,val,test}`, `labels/{train,val,test}`. Do not run that existing validation command against this dataset as-is. Use the new validator, then configure Ultralytics against this dataset's portable YAML. Keep `test` out of training and make performance claims only against human-verified labels.
 
 ## Repository integration policy
 
