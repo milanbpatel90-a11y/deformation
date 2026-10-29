@@ -1,0 +1,10 @@
+# Local real-eyewear dataset
+#
+# Importer copies data into this directory. Large binary dataset files should
+# remain local by default; track manifests/docs, not the full image corpus.
+images/
+masks/
+labels/
+review_masks/
+human_review_backups/
+__pycache__/
