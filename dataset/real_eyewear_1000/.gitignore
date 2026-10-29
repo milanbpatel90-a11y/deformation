@@ -1,0 +1,6 @@
+# Add these entries to the repository's .gitignore if the real dataset is stored under the repo.
+dataset/real_eyewear_1000/images/
+dataset/real_eyewear_1000/masks/
+dataset/real_eyewear_1000/labels/
+dataset/real_eyewear_1000/review_masks/
+dataset/real_eyewear_1000/human_review_backups/
