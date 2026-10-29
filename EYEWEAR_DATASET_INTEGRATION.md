@@ -21,7 +21,7 @@ python import_eyewear_segmentation_dataset.py `
   --repo-root .
 ```
 
-Default destination is `dataset/real_eyewear_1000`. If it exists, the importer refuses to overwrite it. Back it up before explicitly passing `--replace`.
+Default destination is `dataset/real_eyewear_1000`. The directory is tracked with its README and `.gitignore`; the importer preserves those code/docs files. It refuses to overwrite existing data directories or data metadata. Back up any existing data before explicitly passing `--replace`.
 
 ## Validate
 
@@ -56,6 +56,6 @@ The existing `train_yolov8_seg.py` expects a `splits/manifest.json` layout for i
 
 ## Repository integration policy
 
-- Dataset images/masks/labels are imported locally and are not committed by the importer; this avoids pushing a large unverified binary dataset to Git.
+- Dataset images/masks/labels are imported locally and ignored by the target folder's `.gitignore`; this avoids pushing a large unverified binary dataset to Git. The importer preserves the tracked review tools, documentation and helper scripts.
 - Existing `dataset/`, `models/`, `runs/`, `backend/segmentation/segmenter.py`, and model weights remain untouched.
 - Keep the real dataset separate from the existing synthetic dataset until review and controlled real-image validation succeed.
