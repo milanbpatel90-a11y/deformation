@@ -102,3 +102,37 @@ def test_rimless_scale_uses_lens_and_bridge_union():
     scale_mask = cv2.bitwise_or(scale_mask, masks[MaskToMeasurements.CLASS_BRIDGE])
     mm_per_px = converter._calculate_scale(scale_mask, 120)
     assert mm_per_px == pytest.approx(140.0 / 86.0)
+
+
+def test_temple_length_uses_centerline_not_filled_mask_perimeter():
+    mask = np.zeros((80, 180), dtype=np.uint8)
+    mask[35:45, 25:145] = 255  # 120-pixel straight arm, 10 pixels thick
+    converter = MaskToMeasurements(reference_width_mm=140.0)
+    measured = converter._measure_temple_length(
+        {MaskToMeasurements.CLASS_TEMPLE: mask}, mm_per_px=1.0
+    )
+    assert measured == pytest.approx(119.0, abs=2.0)
+
+
+def test_temple_length_averages_two_visible_arms():
+    mask = np.zeros((100, 200), dtype=np.uint8)
+    mask[20:30, 20:120] = 255
+    mask[65:75, 30:130] = 255
+    converter = MaskToMeasurements(reference_width_mm=140.0)
+    measured = converter._measure_temple_length(
+        {MaskToMeasurements.CLASS_TEMPLE: mask}, mm_per_px=1.0
+    )
+    assert measured == pytest.approx(99.0, abs=2.0)
+
+
+def test_temple_length_rejects_implausible_or_missing_masks():
+    converter = MaskToMeasurements(reference_width_mm=140.0)
+    with pytest.raises(ValueError, match="no non-empty temple mask"):
+        converter._measure_temple_length({}, mm_per_px=1.0)
+
+    mask = np.zeros((10, 500), dtype=np.uint8)
+    mask[4:6, 10:490] = 255
+    with pytest.raises(ValueError, match="implausible"):
+        converter._measure_temple_length(
+            {MaskToMeasurements.CLASS_TEMPLE: mask}, mm_per_px=1.0
+        )
