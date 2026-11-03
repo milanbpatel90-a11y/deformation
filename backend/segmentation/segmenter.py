@@ -112,7 +112,18 @@ def _validate_model_names(names: Any) -> tuple[int, dict[int, str], bool]:
 class GlassesSegmenter:
     """Segment the glasses silhouette using a validated model or explicit fallback."""
 
-    def __init__(self, model_path: str | Path | None = None):
+    def __init__(
+        self,
+        model_path: str | Path | None = None,
+        *,
+        require_model: bool | None = None,
+    ):
+        # Production deployments can fail closed instead of generating models
+        # from a low-confidence OpenCV threshold fallback. Local development
+        # retains the fallback unless explicitly disabled.
+        if require_model is None:
+            require_model = os.environ.get("DEFIRM_REQUIRE_YOLO", "").strip().lower() in {"1", "true", "yes"}
+        self.require_model = bool(require_model)
         self._model = None
         self.model_type = "opencv_fallback"
         self.model_names: dict[int, str] = {}
@@ -125,10 +136,13 @@ class GlassesSegmenter:
 
         resolved = Path(configured).expanduser() if configured else _find_model()
         if resolved is None:
-            logger.warning(
-                "No fine-tuned eyewear checkpoint found. Using OpenCV fallback; "
-                "production generation should set DEFIRM_YOLO_MODEL to a validated model."
+            message = (
+                "No fine-tuned eyewear checkpoint found. Set DEFIRM_YOLO_MODEL "
+                "to a validated one-class or six-class eyewear segmentation model."
             )
+            if self.require_model:
+                raise RuntimeError(message + " DEFIRM_REQUIRE_YOLO is enabled; refusing OpenCV fallback.")
+            logger.warning("%s Using low-confidence OpenCV fallback for development only.", message)
             return
         if resolved.suffix.lower() not in _MODEL_EXTENSIONS:
             raise ValueError(f"Unsupported model extension: {resolved.suffix}")
