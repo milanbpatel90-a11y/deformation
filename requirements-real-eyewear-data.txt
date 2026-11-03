@@ -1,0 +1,4 @@
+# Optional dependencies for streaming real eyewear product photos
+datasets>=3.0.0
+Pillow>=10.0
+PyYAML>=6.0
