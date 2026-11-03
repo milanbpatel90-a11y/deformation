@@ -338,27 +338,75 @@ class MaskToMeasurements:
         x, y, w, h = cv2.boundingRect(points)
         return w * mm_per_px
     
+    @staticmethod
+    def _skeleton_component_lengths(mask: np.ndarray) -> list[float]:
+        """Return approximate centerline lengths for each connected mask component."""
+        binary = (mask > 0).astype(np.uint8) * 255
+        points = cv2.findNonZero(binary)
+        if points is None:
+            return []
+        x, y, width, height = cv2.boundingRect(points)
+        working = binary[y:y + height, x:x + width].copy()
+        skeleton = np.zeros_like(working)
+        kernel = cv2.getStructuringElement(cv2.MORPH_CROSS, (3, 3))
+
+        # Morphological skeletonization; works with standard OpenCV builds and
+        # does not require opencv-contrib/ximgproc.
+        while cv2.countNonZero(working) > 0:
+            eroded = cv2.erode(working, kernel)
+            opened = cv2.dilate(eroded, kernel)
+            edge = cv2.subtract(working, opened)
+            skeleton = cv2.bitwise_or(skeleton, edge)
+            working = eroded
+
+        component_count, labels = cv2.connectedComponents(
+            (skeleton > 0).astype(np.uint8), connectivity=8
+        )
+        lengths: list[float] = []
+        diagonal = float(np.sqrt(2.0))
+        for component_id in range(1, component_count):
+            ys, xs = np.where(labels == component_id)
+            if len(xs) < 2:
+                continue
+            coords = set(zip(ys.tolist(), xs.tolist()))
+            length = 0.0
+            for row, col in coords:
+                if (row, col + 1) in coords:
+                    length += 1.0
+                if (row + 1, col) in coords:
+                    length += 1.0
+                if (row + 1, col + 1) in coords:
+                    length += diagonal
+                if (row + 1, col - 1) in coords:
+                    length += diagonal
+            if length > 0:
+                lengths.append(length)
+        return sorted(lengths, reverse=True)
+
     def _measure_temple_length(self, masks: Dict[int, np.ndarray], mm_per_px: float) -> float:
-        """Measure temple length from contour arc length."""
+        """Measure temple-arm centerline length, not the perimeter of its filled mask."""
         temple_mask = masks.get(self.CLASS_TEMPLE)
-        
-        if temple_mask is None or temple_mask.sum() == 0:
-            # Standard temple length: ~140mm
-            return 140.0
-        
-        contours, _ = cv2.findContours(temple_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        if not contours:
-            return 140.0
-        
-        # Get longest contour (should be temple arm)
-        longest = max(contours, key=lambda c: cv2.arcLength(c, False))
-        arc_length_px = cv2.arcLength(longest, False)
-        
-        # Temple length is typically 85-90% of arc length (accounting for curve)
-        temple_length = arc_length_px * mm_per_px * 0.87
-        
-        # Clamp to reasonable range
-        return max(120.0, min(150.0, temple_length))
+        if temple_mask is None or not np.any(temple_mask):
+            raise ValueError("Cannot measure temple length: no non-empty temple mask was detected.")
+
+        component_lengths = self._skeleton_component_lengths(temple_mask)
+        if not component_lengths:
+            raise ValueError("Cannot measure temple length: mask has no measurable centerline.")
+
+        # If both temple arms are visible and of similar size, average them.
+        # Otherwise use the longest valid arm, ignoring tiny hinge/noise fragments.
+        if len(component_lengths) >= 2 and component_lengths[1] >= component_lengths[0] * 0.65:
+            length_px = float(np.mean(component_lengths[:2]))
+        else:
+            length_px = component_lengths[0]
+
+        temple_length = length_px * mm_per_px
+        if not 70.0 <= temple_length <= 190.0:
+            raise ValueError(
+                f"Measured temple centerline is implausible ({temple_length:.1f} mm); "
+                "check side-view visibility, mask quality and physical scale calibration."
+            )
+        return temple_length
     
     def _measure_temple_curve(self, masks: Dict[int, np.ndarray]) -> float:
         """Estimate temple curve angle from temple mask."""
