@@ -98,3 +98,8 @@ def test_training_gate_rejects_one_class_silhouette_yaml(tmp_path):
     data_yaml.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
     with pytest.raises(ValueError, match="Six-part class contract mismatch"):
         validate_dataset(data_yaml, manifest)
+
+
+def test_polygon_parser_rejects_degenerate_zero_area_polygon():
+    with pytest.raises(ValueError, match="zero or negligible area"):
+        parse_polygon_line("0 0.1 0.1 0.5 0.5 0.9 0.9", 1)
