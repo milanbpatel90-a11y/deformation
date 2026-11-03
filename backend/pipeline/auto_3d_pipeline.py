@@ -274,22 +274,34 @@ class Auto3DPipeline:
     ) -> None:
         """Save visualization of segmentation results."""
         viz = image.copy()
-        
-        # Overlay masks with different colors
+        # Draw each semantic class once. The legacy front/side/full aliases
+        # all refer to the same input view and must not be blended three times.
         colors = {
-            "front": (0, 255, 0),    # Green
-            "side": (255, 0, 0),     # Blue
-            "full": (0, 0, 255)      # Red
+            "eyewear_rim": (0, 220, 0),
+            "eyewear_temple": (255, 120, 0),
+            "bridge": (0, 180, 255),
+            "left_lens": (255, 0, 180),
+            "right_lens": (180, 0, 255),
+            "nose_pad": (0, 255, 255),
+            "eyewear": (0, 220, 0),
         }
-        
-        for key, mask in masks.items():
-            if mask is not None and mask.sum() > 0:
-                color = colors.get(key, (255, 255, 255))
+        part_masks = masks.get("part_masks")
+        if isinstance(part_masks, dict) and part_masks:
+            for name, mask in part_masks.items():
+                if mask is None or not np.any(mask):
+                    continue
                 colored_mask = np.zeros_like(image)
-                colored_mask[mask > 0] = color
-                viz = cv2.addWeighted(viz, 0.7, colored_mask, 0.3, 0)
-        
-        cv2.imwrite(str(output_path), viz)
+                colored_mask[np.asarray(mask) > 0] = colors.get(name, (255, 255, 255))
+                viz = cv2.addWeighted(viz, 0.72, colored_mask, 0.28, 0)
+        else:
+            mask = masks.get("front")
+            if mask is not None and np.any(mask):
+                colored_mask = np.zeros_like(image)
+                colored_mask[np.asarray(mask) > 0] = (0, 220, 0)
+                viz = cv2.addWeighted(viz, 0.72, colored_mask, 0.28, 0)
+
+        if not cv2.imwrite(str(output_path), viz):
+            raise OSError(f"Failed to write segmentation visualization: {output_path}")
 
 
 def main():
