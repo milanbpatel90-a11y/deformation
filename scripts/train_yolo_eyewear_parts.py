@@ -61,6 +61,16 @@ def parse_polygon_line(line: str, line_number: int, num_classes: int = 6) -> int
         raise ValueError(f"line {line_number}: class ID {class_id} outside [0,{num_classes - 1}]")
     if any(not 0.0 <= value <= 1.0 for value in coords):
         raise ValueError(f"line {line_number}: polygon coordinates must be normalized to [0,1]")
+
+    points = list(zip(coords[0::2], coords[1::2]))
+    if len(set(points)) < 3:
+        raise ValueError(f"line {line_number}: polygon must contain at least 3 distinct points")
+    twice_area = 0.0
+    for index, (x1, y1) in enumerate(points):
+        x2, y2 = points[(index + 1) % len(points)]
+        twice_area += x1 * y2 - x2 * y1
+    if abs(twice_area) <= 1e-8:
+        raise ValueError(f"line {line_number}: polygon has zero or negligible area")
     return class_id
 
 
