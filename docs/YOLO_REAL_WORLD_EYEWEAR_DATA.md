@@ -36,7 +36,15 @@ python scripts/fetch_real_eyewear_photos.py --split train --max-per-class 250
 python scripts/fetch_real_eyewear_photos.py --split validation --max-per-class 100
 ~~~
 
-The script writes source label, split, SHA-256 and attribution metadata. Images are saved as **UNLABELLED** for segmentation. It deliberately does not create YOLO masks from the eyeglasses/sunglasses category labels.
+The script writes source label, product folder ID, split, SHA-256 and attribution metadata. It saves catalogue product shots (not review photos) as **UNLABELLED** for segmentation. It deliberately does not create YOLO masks from the eyeglasses/sunglasses category labels.
+
+After you have a checkpoint, preview it on those real product photos:
+
+~~~powershell
+python scripts/preview_eyewear_segmentation.py --input dataset/real_world_eyewear_photos/images/train --model models/glasses_seg.pt --output output/real_photo_segmentation_review
+~~~
+
+Inspect the saved overlays and individual class PNGs. A one-class checkpoint will report SILHOUETTE_ONLY; only a validated six-class checkpoint will report separate component coverage. Missing bridge/lens/temple masks are flagged for review; absence of nose pads or rims can be legitimate for some product designs. The preview report is not an accuracy score.
 
 Additional public mask resources can help bootstrap annotation, but they are not a substitute for the product-photo six-part dataset:
 
