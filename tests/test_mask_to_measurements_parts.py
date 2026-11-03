@@ -71,3 +71,34 @@ def test_class_mask_extraction_uses_full_frame_extent():
     assert measurements.frame_width == 140.0
     assert len(contours.left) >= 4
     assert len(contours.right) >= 4
+
+
+def test_class_mask_extraction_rejects_missing_temple_in_front_view():
+    masks = _blank_masks()
+    masks[MaskToMeasurements.CLASS_RIM][10:18, 10:100] = 255
+    masks[MaskToMeasurements.CLASS_BRIDGE][12:18, 48:55] = 255
+    masks[MaskToMeasurements.CLASS_LEFT_LENS][20:50, 12:42] = 255
+    masks[MaskToMeasurements.CLASS_RIGHT_LENS][20:50, 68:98] = 255
+
+    converter = MaskToMeasurements(reference_width_mm=140.0)
+    with pytest.raises(ValueError, match="missing non-empty temple"):
+        converter.extract_from_class_masks(
+            np.zeros((80, 120, 3), dtype=np.uint8), masks
+        )
+
+
+def test_rimless_scale_uses_lens_and_bridge_union():
+    masks = _blank_masks()
+    masks[MaskToMeasurements.CLASS_BRIDGE][12:18, 48:55] = 255
+    masks[MaskToMeasurements.CLASS_LEFT_LENS][20:50, 12:42] = 255
+    masks[MaskToMeasurements.CLASS_RIGHT_LENS][20:50, 68:98] = 255
+    masks[MaskToMeasurements.CLASS_TEMPLE][55:70, 10:14] = 255
+
+    converter = MaskToMeasurements(reference_width_mm=140.0)
+    scale_mask = cv2.bitwise_or(
+        masks[MaskToMeasurements.CLASS_LEFT_LENS],
+        masks[MaskToMeasurements.CLASS_RIGHT_LENS],
+    )
+    scale_mask = cv2.bitwise_or(scale_mask, masks[MaskToMeasurements.CLASS_BRIDGE])
+    mm_per_px = converter._calculate_scale(scale_mask, 120)
+    assert mm_per_px == pytest.approx(140.0 / 86.0)
