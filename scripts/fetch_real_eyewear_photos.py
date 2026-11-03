@@ -106,7 +106,12 @@ def main() -> int:
         counts[label] = counts.get(label, 0) + 1
         source_image = row.get("image")
         source_path = source_image.get("path") if isinstance(source_image, dict) else None
-        product_id = Path(str(source_path)).parent.name if source_path else ""
+        source_parts = Path(str(source_path)).parts if source_path else ()
+        # The upstream layout is split/category/product_id/{product,review}/file.
+        # Keep catalogue product shots only and group all angles by product ID.
+        if len(source_parts) < 4 or source_parts[-2].lower() != "product":
+            continue
+        product_id = source_parts[-3]
         training_split = "val" if args.split == "validation" else "train"
         rows.append({
             "split": training_split,
