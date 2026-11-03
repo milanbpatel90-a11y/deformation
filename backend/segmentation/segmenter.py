@@ -1,9 +1,8 @@
-"""Eyewear segmentation with explicit, validated checkpoint selection.
+"""Eyewear segmentation with validated YOLO class contracts.
 
-Production rule: never silently load the generic COCO YOLO checkpoint as an
-eyewear model. A custom one-class eyewear model is supported for the primary
-deformation pipeline; the six-class model is required by the legacy part-mask
-measurement route.
+Supports either a single-class full-eyewear silhouette model or the agreed
+six-class part model. Per-class masks are preserved; the combined silhouette
+is only a compatibility/output mask and must not be used as a part mask.
 """
 from __future__ import annotations
 
@@ -24,14 +23,17 @@ except ImportError:
 logger = logging.getLogger(__name__)
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
-# Class order shared with MaskToMeasurements and the six-class training format.
 _PART_ALIASES: dict[int, set[str]] = {
     0: {"eyewearrim", "rim", "frame", "eyewearfront"},
-    1: {"eyeweartemple", "temple", "templearm", "arm"},
+    1: {"eyeweartemple", "temple", "templearm", "arm", "legs"},
     2: {"bridge", "nosebridge"},
     3: {"leftlens", "lensleft"},
     4: {"rightlens", "lensright"},
     5: {"nosepad", "nosepads"},
+}
+_SILHOUETTE_ALIASES = {
+    "eyewear", "glasses", "spectacles", "eyeglasses", "sunglasses",
+    "frame", "eyewearmask", "eyewearoutline", "eyewear_silhouette",
 }
 _MODEL_EXTENSIONS = {".pt", ".pth", ".onnx", ".engine", ".xml", ".mlpackage", ".tflite"}
 
@@ -40,8 +42,18 @@ def _normalise_label(value: Any) -> str:
     return re.sub(r"[^a-z0-9]", "", str(value).lower())
 
 
+def _as_numpy(value: Any) -> np.ndarray:
+    """Convert numpy-like or torch-like values without requiring torch in tests."""
+    if hasattr(value, "detach"):
+        value = value.detach()
+    if hasattr(value, "cpu"):
+        value = value.cpu()
+    if hasattr(value, "numpy"):
+        value = value.numpy()
+    return np.asarray(value)
+
+
 def _candidate_paths() -> list[Path]:
-    """Resolve fine-tuned checkpoints, with a configured override first."""
     candidates: list[Path] = []
     env_model = os.environ.get("DEFIRM_YOLO_MODEL", "").strip()
     if env_model:
@@ -56,7 +68,7 @@ def _candidate_paths() -> list[Path]:
 
 
 def _find_model() -> Path | None:
-    """Find a fine-tuned eyewear model; generic yolov8n-seg.pt is never implicit."""
+    """Find a fine-tuned eyewear checkpoint; generic COCO weights are never implicit."""
     env_model = os.environ.get("DEFIRM_YOLO_MODEL", "").strip()
     if env_model:
         configured = Path(env_model).expanduser()
@@ -73,7 +85,7 @@ def _find_model() -> Path | None:
 
 
 def _validate_model_names(names: Any) -> tuple[int, dict[int, str], bool]:
-    """Accept either one eyewear-silhouette class or the agreed six-part map."""
+    """Accept a known one-class silhouette or the exact six-part class contract."""
     if isinstance(names, dict):
         normalized = {int(k): str(v) for k, v in names.items()}
     elif isinstance(names, (list, tuple)):
@@ -83,15 +95,17 @@ def _validate_model_names(names: Any) -> tuple[int, dict[int, str], bool]:
 
     if not normalized:
         raise ValueError("The eyewear checkpoint has no classes.")
-
     count = len(normalized)
     if set(normalized) != set(range(count)):
         raise ValueError(f"Model class IDs must be contiguous from zero; received {sorted(normalized)}.")
 
     if count == 1:
         name = _normalise_label(normalized[0])
-        if name in {"person", "bicycle", "car", "motorcycle", "airplane", "bus", "train", "truck", "boat"}:
-            raise ValueError(f"Checkpoint is not an eyewear model (class 0={normalized[0]!r}).")
+        if name not in {_normalise_label(v) for v in _SILHOUETTE_ALIASES}:
+            raise ValueError(
+                f"Unsupported one-class checkpoint label {normalized[0]!r}; "
+                "expected an eyewear/glasses/spectacles silhouette class."
+            )
         return count, normalized, False
 
     if count != 6:
@@ -101,7 +115,7 @@ def _validate_model_names(names: Any) -> tuple[int, dict[int, str], bool]:
 
     for class_id, aliases in _PART_ALIASES.items():
         actual = _normalise_label(normalized[class_id])
-        if actual not in aliases:
+        if actual not in {_normalise_label(v) for v in aliases}:
             raise ValueError(
                 f"Wrong class contract at ID {class_id}: expected one of {sorted(aliases)}, "
                 f"received {normalized[class_id]!r}. Update data.yaml/model together."
@@ -110,20 +124,31 @@ def _validate_model_names(names: Any) -> tuple[int, dict[int, str], bool]:
 
 
 class GlassesSegmenter:
-    """Segment the glasses silhouette using a validated model or explicit fallback."""
+    """Return a combined eyewear mask plus class-specific masks and diagnostics."""
 
     def __init__(
         self,
         model_path: str | Path | None = None,
         *,
         require_model: bool | None = None,
+        confidence_threshold: float | None = None,
     ):
-        # Production deployments can fail closed instead of generating models
-        # from a low-confidence OpenCV threshold fallback. Local development
-        # retains the fallback unless explicitly disabled.
         if require_model is None:
-            require_model = os.environ.get("DEFIRM_REQUIRE_YOLO", "").strip().lower() in {"1", "true", "yes"}
+            require_model = os.environ.get("DEFIRM_REQUIRE_YOLO", "").strip().lower() in {
+                "1", "true", "yes"
+            }
         self.require_model = bool(require_model)
+
+        if confidence_threshold is None:
+            raw_conf = os.environ.get("DEFIRM_YOLO_CONF", "0.25").strip()
+            try:
+                confidence_threshold = float(raw_conf)
+            except ValueError as exc:
+                raise ValueError("DEFIRM_YOLO_CONF must be a number between 0 and 1.") from exc
+        if not 0.0 <= float(confidence_threshold) <= 1.0:
+            raise ValueError("YOLO confidence threshold must be between 0 and 1.")
+        self.confidence_threshold = float(confidence_threshold)
+
         self._model = None
         self.model_type = "opencv_fallback"
         self.model_names: dict[int, str] = {}
@@ -165,41 +190,100 @@ class GlassesSegmenter:
         )
 
     def segment(self, image: np.ndarray) -> dict[str, Any]:
-        """Return a full eyewear mask and model diagnostics."""
-        if image is None or not isinstance(image, np.ndarray) or image.ndim != 3 or image.shape[2] != 3:
+        """Return full-resolution binary masks and segmentation provenance."""
+        if (
+            image is None
+            or not isinstance(image, np.ndarray)
+            or image.ndim != 3
+            or image.shape[2] != 3
+            or image.shape[0] == 0
+            or image.shape[1] == 0
+        ):
             raise ValueError("Expected a non-empty BGR image with shape (height, width, 3).")
+        image = np.ascontiguousarray(image)
         if self._model is not None:
             return self._segment_yolo(image)
         return self._segment_opencv(image)
 
     def _segment_yolo(self, image: np.ndarray) -> dict[str, Any]:
         h, w = image.shape[:2]
-        mask = np.zeros((h, w), dtype=np.uint8)
+        class_masks = {
+            class_id: np.zeros((h, w), dtype=np.uint8)
+            for class_id in self.model_names
+        }
         detections = 0
-        for result in self._model(image, verbose=False):
-            if result.masks is None:
+
+        results = self._model(image, verbose=False, conf=self.confidence_threshold)
+        for result in results:
+            result_masks = getattr(result, "masks", None)
+            if result_masks is None:
                 continue
-            for item in result.masks.data:
+            boxes = getattr(result, "boxes", None)
+            if boxes is None:
+                raise ValueError("YOLO returned segmentation masks without class boxes; cannot assign part labels.")
+
+            mask_data = _as_numpy(result_masks.data)
+            if mask_data.ndim == 2:
+                mask_data = mask_data[None, ...]
+            if mask_data.ndim != 3:
+                raise ValueError(f"Unexpected YOLO mask tensor shape: {mask_data.shape}")
+
+            class_ids = _as_numpy(boxes.cls).reshape(-1)
+            confidences = (
+                _as_numpy(boxes.conf).reshape(-1)
+                if getattr(boxes, "conf", None) is not None
+                else np.ones(len(class_ids), dtype=np.float32)
+            )
+            if len(mask_data) != len(class_ids) or len(mask_data) != len(confidences):
+                raise ValueError(
+                    "YOLO returned a different number of masks, class IDs and confidence scores; "
+                    "refusing to pair unrelated detections."
+                )
+
+            for item, raw_class_id, confidence in zip(mask_data, class_ids, confidences):
+                if float(confidence) < self.confidence_threshold:
+                    continue
+                class_id = int(raw_class_id)
+                if class_id not in class_masks:
+                    raise ValueError(
+                        f"YOLO predicted unknown class ID {class_id}; "
+                        f"checkpoint declares {sorted(class_masks)}."
+                    )
                 resized = cv2.resize(
-                    item.cpu().numpy().astype(np.float32),
+                    np.asarray(item, dtype=np.float32),
                     (w, h),
                     interpolation=cv2.INTER_LINEAR,
                 )
-                mask = np.maximum(mask, (resized > 0.5).astype(np.uint8) * 255)
+                binary = (resized >= 0.5).astype(np.uint8) * 255
+                if not np.any(binary):
+                    continue
+                class_masks[class_id] = cv2.bitwise_or(class_masks[class_id], binary)
                 detections += 1
+
+        combined = np.zeros((h, w), dtype=np.uint8)
+        part_masks: dict[str, np.ndarray] = {}
+        for class_id, class_mask in class_masks.items():
+            combined = cv2.bitwise_or(combined, class_mask)
+            part_masks[self.model_names[class_id]] = class_mask
+
         return {
-            "front": mask,
-            # Compatibility aliases only: one photo is not three observed views.
-            "side": mask,
-            "full": mask,
+            "front": combined,
+            # Compatibility aliases. A single uploaded photo is still one observed view.
+            "side": combined,
+            "full": combined,
+            "part_masks": part_masks,
+            "class_masks": class_masks,
             "model_type": self.model_type,
             "detections": detections,
             "class_count": self.model_class_count,
+            "class_names": dict(self.model_names),
             "supports_part_masks": self.supports_part_masks,
+            "observed_views": ["front"],
+            "confidence_threshold": self.confidence_threshold,
         }
 
     def _segment_opencv(self, image: np.ndarray) -> dict[str, Any]:
-        """Low-confidence fallback for high-contrast product photographs."""
+        """Low-confidence fallback for development on high-contrast product photos."""
         gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
         dark = (gray < 55).astype(np.uint8) * 255
         kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
@@ -207,29 +291,36 @@ class GlassesSegmenter:
         contours, _ = cv2.findContours(dark, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         if not contours:
             mask = np.zeros_like(gray)
-            return {
-                "front": mask, "side": mask, "full": mask,
-                "model_type": self.model_type, "detections": 0,
-                "class_count": 0, "supports_part_masks": False,
-            }
+            detections = 0
+        else:
+            h, w = gray.shape
+            image_center = (w / 2.0, h / 2.0)
 
-        h, w = gray.shape
-        image_center = (w / 2.0, h / 2.0)
+            def score(contour: np.ndarray) -> tuple[float, float, float]:
+                x, y, cw, ch = cv2.boundingRect(contour)
+                area = float(cv2.contourArea(contour))
+                center = (x + cw / 2.0, y + ch / 2.0)
+                distance = ((center[0] - image_center[0]) / max(w, 1)) ** 2
+                distance += ((center[1] - image_center[1]) / max(h, 1)) ** 2
+                aspect_penalty = abs(cw / max(ch, 1) - 3.0)
+                return distance, aspect_penalty, -area
 
-        def score(contour: np.ndarray) -> tuple[float, float, float]:
-            x, y, cw, ch = cv2.boundingRect(contour)
-            area = float(cv2.contourArea(contour))
-            center = (x + cw / 2.0, y + ch / 2.0)
-            distance = ((center[0] - image_center[0]) / max(w, 1)) ** 2
-            distance += ((center[1] - image_center[1]) / max(h, 1)) ** 2
-            aspect_penalty = abs(cw / max(ch, 1) - 3.0)
-            return distance, aspect_penalty, -area
+            selected = min(contours, key=score)
+            mask = np.zeros_like(gray)
+            cv2.drawContours(mask, [selected], -1, 255, -1)
+            detections = 1
 
-        selected = min(contours, key=score)
-        mask = np.zeros_like(gray)
-        cv2.drawContours(mask, [selected], -1, 255, -1)
         return {
-            "front": mask, "side": mask, "full": mask,
-            "model_type": self.model_type, "detections": 1,
-            "class_count": 0, "supports_part_masks": False,
+            "front": mask,
+            "side": mask,
+            "full": mask,
+            "part_masks": {"eyewear": mask},
+            "class_masks": {},
+            "model_type": self.model_type,
+            "detections": detections,
+            "class_count": 0,
+            "class_names": {},
+            "supports_part_masks": False,
+            "observed_views": ["front"],
+            "confidence_threshold": None,
         }
