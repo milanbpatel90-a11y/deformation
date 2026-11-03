@@ -171,8 +171,14 @@ def main() -> int:
         target = output / relative
         target.parent.mkdir(parents=True, exist_ok=True)
         if target.exists():
-            continue
-        target.write_bytes(payload)
+            # A previous run of the older script may have left the exact image
+            # on disk before it failed to write a manifest. Reuse it without
+            # overwriting any local file, then rebuild its manifest row.
+            existing_digest = hashlib.sha256(target.read_bytes()).hexdigest()
+            if existing_digest != digest:
+                continue
+        else:
+            target.write_bytes(payload)
 
         training_split = "val" if args.split == "validation" else "train"
         rows.append({
