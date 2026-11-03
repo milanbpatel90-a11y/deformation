@@ -64,3 +64,31 @@ def test_configured_missing_checkpoint_fails_instead_of_silent_fallback(tmp_path
     monkeypatch.setenv("DEFIRM_YOLO_MODEL", str(tmp_path / "missing.pt"))
     with pytest.raises(FileNotFoundError, match="missing file"):
         _find_model()
+
+
+def test_require_model_rejects_missing_checkpoint_in_production_mode(monkeypatch):
+    import backend.segmentation.segmenter as module
+
+    monkeypatch.setattr(module, "_find_model", lambda: None)
+    monkeypatch.delenv("DEFIRM_YOLO_MODEL", raising=False)
+    with pytest.raises(RuntimeError, match="refusing OpenCV fallback"):
+        module.GlassesSegmenter(require_model=True)
+
+
+def test_require_model_can_be_enabled_by_environment(monkeypatch):
+    import backend.segmentation.segmenter as module
+
+    monkeypatch.setattr(module, "_find_model", lambda: None)
+    monkeypatch.delenv("DEFIRM_YOLO_MODEL", raising=False)
+    monkeypatch.setenv("DEFIRM_REQUIRE_YOLO", "true")
+    with pytest.raises(RuntimeError, match="refusing OpenCV fallback"):
+        module.GlassesSegmenter()
+
+
+def test_development_mode_keeps_explicit_low_confidence_fallback(monkeypatch):
+    import backend.segmentation.segmenter as module
+
+    monkeypatch.setattr(module, "_find_model", lambda: None)
+    monkeypatch.delenv("DEFIRM_REQUIRE_YOLO", raising=False)
+    segmenter = module.GlassesSegmenter()
+    assert segmenter.model_type == "opencv_fallback"
