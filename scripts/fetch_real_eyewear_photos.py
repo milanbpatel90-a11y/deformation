@@ -55,7 +55,7 @@ def main() -> int:
         parser.error("--max-per-class must be at least 1")
 
     try:
-        from datasets import load_dataset
+        from datasets import Image, load_dataset
     except ImportError:
         parser.error("Install optional dependencies first: pip install datasets pillow")
 
@@ -67,6 +67,9 @@ def main() -> int:
 
     try:
         dataset = load_dataset(DATASET_ID, split=args.split, streaming=True)
+        # Preserve the source path so product-model folder IDs can be retained
+        # in the annotation manifest instead of losing product grouping.
+        dataset = dataset.cast_column("image", Image(decode=False))
     except Exception as exc:
         parser.error(f"Could not open the public Hugging Face dataset/split: {exc}")
 
@@ -101,12 +104,19 @@ def main() -> int:
             continue
         target.write_bytes(payload)
         counts[label] = counts.get(label, 0) + 1
+        source_image = row.get("image")
+        source_path = source_image.get("path") if isinstance(source_image, dict) else None
+        product_id = Path(str(source_path)).parent.name if source_path else ""
+        training_split = "val" if args.split == "validation" else "train"
         rows.append({
-            "image_path": relative.as_posix(),
+            "split": training_split,
+            "local_image": relative.as_posix(),
+            "product_id": product_id,
             "source_split": args.split,
             "source_label": label,
             "sha256": digest,
             "annotation_status": "UNLABELLED",
+            "reviewer": "",
             "source_dataset": DATASET_ID,
             "source_license": "CC-BY-4.0",
         })
