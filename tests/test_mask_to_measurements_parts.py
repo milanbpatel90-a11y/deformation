@@ -111,7 +111,7 @@ def test_temple_length_uses_centerline_not_filled_mask_perimeter():
     measured = converter._measure_temple_length(
         {MaskToMeasurements.CLASS_TEMPLE: mask}, mm_per_px=1.0
     )
-    assert measured == pytest.approx(119.0, abs=2.0)
+    assert measured == pytest.approx(120.0, abs=2.0)
 
 
 def test_temple_length_averages_two_visible_arms():
@@ -122,7 +122,7 @@ def test_temple_length_averages_two_visible_arms():
     measured = converter._measure_temple_length(
         {MaskToMeasurements.CLASS_TEMPLE: mask}, mm_per_px=1.0
     )
-    assert measured == pytest.approx(99.0, abs=2.0)
+    assert measured == pytest.approx(100.0, abs=2.0)
 
 
 def test_temple_length_rejects_implausible_or_missing_masks():
