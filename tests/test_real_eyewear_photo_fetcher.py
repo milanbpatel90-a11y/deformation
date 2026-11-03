@@ -7,6 +7,7 @@ import pytest
 
 from scripts.fetch_real_eyewear_photos import (
     DATASET_ID,
+    _category_from_source_path,
     _decode_image,
     _hub_file_location,
     _product_id_from_source_path,
@@ -67,6 +68,29 @@ def test_incomplete_hf_directory_uri_is_rejected():
         _hub_file_location(
             "hf://datasets/shravya11/eyeglasses-dataset@7011dd3ac628040a8885a4b597399409643a9e04/train/eyeglasses/0/product"
         )
+
+
+@pytest.mark.parametrize(
+    ("source_path", "expected"),
+    [
+        (
+            "hf://datasets/shravya11/eyeglasses-dataset@abc123/train/eyeglasses/118/product/frame.jpg",
+            "eyeglasses",
+        ),
+        (
+            "hf://datasets/shravya11/eyeglasses-dataset@abc123/validation/sunglasses/369/product/frame.webp",
+            "sunglasses",
+        ),
+    ],
+)
+def test_category_is_read_from_dataset_path(source_path, expected):
+    assert _category_from_source_path(source_path) == expected
+
+
+def test_generic_product_label_is_not_used_as_category():
+    assert _category_from_source_path(
+        "hf://datasets/shravya11/eyeglasses-dataset@abc123/train/eyeglasses/118/product/frame.jpg"
+    ) != "product"
 
 
 def test_remote_hub_image_path_is_downloaded_before_pillow_open(monkeypatch):
