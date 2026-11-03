@@ -96,21 +96,38 @@ class MaskToMeasurements:
 
         # Lens polygons must come from actual left/right lens detections. Do not
         # fabricate default lens shapes when the model failed to segment them.
-        missing_lenses = [
-            name for class_id, name in (
-                (self.CLASS_LEFT_LENS, "left_lens"),
-                (self.CLASS_RIGHT_LENS, "right_lens"),
-            )
+        # These parts are required to compute the corresponding dimensions.
+        # In particular, temple length cannot be inferred from a front-only
+        # photograph. Nose pads and rims may legitimately be absent on some
+        # frame designs (rimless / molded acetate bridge).
+        required_parts = (
+            (self.CLASS_BRIDGE, "bridge"),
+            (self.CLASS_LEFT_LENS, "left_lens"),
+            (self.CLASS_RIGHT_LENS, "right_lens"),
+            (self.CLASS_TEMPLE, "temple"),
+        )
+        missing_parts = [
+            name for class_id, name in required_parts
             if class_id not in masks or not np.any(masks[class_id])
         ]
-        if missing_lenses:
+        if missing_parts:
             raise ValueError(
                 "Six-class segmentation is incomplete; missing non-empty "
-                + ", ".join(missing_lenses)
-                + " mask(s). Review the image/annotations or use another view."
+                + ", ".join(missing_parts)
+                + " mask(s). A front-only image cannot reliably supply temple length; "
+                "provide a view where the temple is visible and review the masks."
             )
 
-        mm_per_px = self._calculate_scale(masks.get(self.CLASS_RIM), image_w)
+        # Calibrate against the full product width. A rimless frame has no
+        # rim pixels, so use the combined left/right lens and bridge envelope
+        # rather than an image-width percentage heuristic.
+        scale_mask = masks.get(self.CLASS_RIM)
+        if scale_mask is None or not np.any(scale_mask):
+            scale_mask = cv2.bitwise_or(
+                masks[self.CLASS_LEFT_LENS], masks[self.CLASS_RIGHT_LENS]
+            )
+            scale_mask = cv2.bitwise_or(scale_mask, masks[self.CLASS_BRIDGE])
+        mm_per_px = self._calculate_scale(scale_mask, image_w)
         measurements = self._extract_measurements(masks, mm_per_px, shape, material, color)
         lens_contour = self._extract_lens_contours(masks, image_h, image_w)
         return measurements, lens_contour
