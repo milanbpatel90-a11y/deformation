@@ -340,30 +340,73 @@ class MaskToMeasurements:
     
     @staticmethod
     def _skeleton_component_lengths(mask: np.ndarray) -> list[float]:
-        """Return approximate centerline lengths for each connected mask component."""
-        binary = (mask > 0).astype(np.uint8) * 255
+        """Return approximate centerline lengths for each connected mask component.
+
+        Zhang-Suen thinning gives a one-pixel medial axis using NumPy only;
+        correcting by the estimated average mask width restores the two end
+        caps lost during thinning of a filled bar.
+        """
+        binary = (mask > 0).astype(np.uint8)
         points = cv2.findNonZero(binary)
         if points is None:
             return []
         x, y, width, height = cv2.boundingRect(points)
-        working = binary[y:y + height, x:x + width].copy()
-        skeleton = np.zeros_like(working)
-        kernel = cv2.getStructuringElement(cv2.MORPH_CROSS, (3, 3))
+        image = binary[y:y + height, x:x + width].copy()
 
-        # Morphological skeletonization; works with standard OpenCV builds and
-        # does not require opencv-contrib/ximgproc.
-        while cv2.countNonZero(working) > 0:
-            eroded = cv2.erode(working, kernel)
-            opened = cv2.dilate(eroded, kernel)
-            edge = cv2.subtract(working, opened)
-            skeleton = cv2.bitwise_or(skeleton, edge)
-            working = eroded
+        changed = True
+        iterations = 0
+        max_iterations = max(image.shape) + 2
+        while changed:
+            changed = False
+            iterations += 1
+            if iterations > max_iterations:
+                raise RuntimeError("Temple mask skeletonization did not converge.")
 
-        component_count, labels = cv2.connectedComponents(
-            (skeleton > 0).astype(np.uint8), connectivity=8
+            for step in (0, 1):
+                padded = np.pad(image, 1, mode="constant")
+                p2 = padded[:-2, 1:-1]
+                p3 = padded[:-2, 2:]
+                p4 = padded[1:-1, 2:]
+                p5 = padded[2:, 2:]
+                p6 = padded[2:, 1:-1]
+                p7 = padded[2:, :-2]
+                p8 = padded[1:-1, :-2]
+                p9 = padded[:-2, :-2]
+
+                neighbors = (p2, p3, p4, p5, p6, p7, p8, p9)
+                neighbor_count = sum(neighbors)
+                sequence = (p2, p3, p4, p5, p6, p7, p8, p9, p2)
+                transitions = np.zeros_like(image)
+                for first, second in zip(sequence[:-1], sequence[1:]):
+                    transitions += ((first == 0) & (second == 1)).astype(np.uint8)
+
+                remove = (
+                    (image == 1)
+                    & (neighbor_count >= 2)
+                    & (neighbor_count <= 6)
+                    & (transitions == 1)
+                )
+                if step == 0:
+                    remove &= (p2 * p4 * p6 == 0) & (p4 * p6 * p8 == 0)
+                else:
+                    remove &= (p2 * p4 * p8 == 0) & (p2 * p6 * p8 == 0)
+
+                if np.any(remove):
+                    image[remove] = 0
+                    changed = True
+
+        component_count, labels = cv2.connectedComponents(image, connectivity=8)
+        if component_count <= 1:
+            return []
+
+        skeleton_pixels = int(np.count_nonzero(image))
+        estimated_width = (
+            float(np.count_nonzero(binary[y:y + height, x:x + width]))
+            / max(skeleton_pixels, 1)
         )
-        lengths: list[float] = []
         diagonal = float(np.sqrt(2.0))
+        lengths: list[float] = []
+
         for component_id in range(1, component_count):
             ys, xs = np.where(labels == component_id)
             if len(xs) < 2:
@@ -380,7 +423,8 @@ class MaskToMeasurements:
                 if (row + 1, col - 1) in coords:
                     length += diagonal
             if length > 0:
-                lengths.append(length)
+                lengths.append(length + estimated_width)
+
         return sorted(lengths, reverse=True)
 
     def _measure_temple_length(self, masks: Dict[int, np.ndarray], mm_per_px: float) -> float:
