@@ -292,7 +292,7 @@ class GlassesSegmenter:
             "detections": detections,
             "class_count": self.model_class_count,
             "class_names": dict(self.model_names),
-            "checkpoint_class_names": dict(self.checkpoint_class_names),
+            "checkpoint_class_names": dict(getattr(self, "checkpoint_class_names", self.model_names)),
             "supports_part_masks": self.supports_part_masks,
             "observed_views": ["front"],
             "confidence_threshold": self.confidence_threshold,
