@@ -18,13 +18,11 @@ import numpy as np
 from backend.segmentation.segmenter import GlassesSegmenter
 
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".bmp"}
-EXPECTED_PARTS = {
-    "eyewear_rim",
+REQUIRED_PARTS = {
     "eyewear_temple",
     "bridge",
     "left_lens",
     "right_lens",
-    "nose_pad",
 }
 COLORS = {
     "eyewear": (0, 220, 0),
@@ -69,8 +67,10 @@ def preview(input_path: Path, output_dir: Path, model_path: Path, confidence: fl
     records = []
     overlay_dir = output_dir / "overlays"
     masks_dir = output_dir / "masks"
+    root_dir = input_path if input_path.is_dir() else input_path.parent
 
     for image_path in input_images:
+        relative_path = image_path.relative_to(root_dir)
         image = cv2.imread(str(image_path), cv2.IMREAD_COLOR)
         if image is None:
             records.append({
@@ -106,11 +106,11 @@ def preview(input_path: Path, output_dir: Path, model_path: Path, confidence: fl
                 overlay = cv2.addWeighted(overlay, 0.72, colored, 0.28, 0)
 
             mask_name = f"{image_path.stem}_{class_name}.png"
-            _write_image(masks_dir / mask_name, mask.astype(np.uint8))
+            _write_image(masks_dir / relative_path.parent / mask_name, mask.astype(np.uint8))
 
         if result.get("supports_part_masks"):
             missing_parts = sorted(
-                name for name in EXPECTED_PARTS
+                name for name in REQUIRED_PARTS
                 if class_metrics.get(name, {}).get("area_pixels", 0) == 0
             )
             status = "REVIEW_REQUIRED" if missing_parts else "PART_MASKS_PRESENT_REVIEW_VISUALLY"
@@ -123,7 +123,7 @@ def preview(input_path: Path, output_dir: Path, model_path: Path, confidence: fl
         combined_area = int(np.count_nonzero(combined)) if combined is not None else 0
         combined_pct = 100.0 * combined_area / max(image.shape[0] * image.shape[1], 1)
 
-        _write_image(overlay_dir / f"{image_path.stem}_overlay.jpg", overlay)
+        _write_image(overlay_dir / relative_path.parent / f"{image_path.stem}_overlay.jpg", overlay)
         records.append({
             "image": str(image_path),
             "status": status,
