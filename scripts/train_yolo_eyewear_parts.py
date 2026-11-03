@@ -270,10 +270,16 @@ def train(args: argparse.Namespace) -> dict[str, Any]:
     ):
         value = getattr(seg, attribute, None) if seg is not None else None
         if value is not None:
-            try:
+            # Ultralytics returns scalar mAP values and per-class precision /
+            # recall arrays. Preserve arrays as JSON numbers rather than
+            # turning them into lossy string representations.
+            if hasattr(value, "tolist"):
+                value = value.tolist()
+            if isinstance(value, (list, tuple)):
+                metrics[key] = [float(item) for item in value]
+            else:
                 metrics[key] = float(value)
-            except (TypeError, ValueError):
-                metrics[key] = str(value)
+    metrics["class_order"] = list(EXPECTED_NAMES)
 
     report_path = save_dir / "real_world_segmentation_report.json"
     report_path.write_text(json.dumps({
