@@ -123,10 +123,11 @@ class Auto3DPipeline:
             getattr(self.segmenter, "_model", None) is not None
             and getattr(self.segmenter, "supports_part_masks", False)
         ):
-            # This converter expects the fixed six-part class contract only.
-            results = self.segmenter._model(image, verbose=False)
-            measurements, lens_contour = self.mask_converter.extract_from_yolo_results(
-                image, results, shape, material, color
+            # Reuse the exact class-specific masks from the segmentation pass.
+            # This avoids a second model invocation and prevents the display
+            # union mask from being mistaken for individual eyewear parts.
+            measurements, lens_contour = self.mask_converter.extract_from_class_masks(
+                image, masks.get("class_masks", {}), shape, material, color
             )
         else:
             # A one-class eyewear silhouette cannot identify each lens/bridge/temple
@@ -165,7 +166,7 @@ class Auto3DPipeline:
         self,
         image_dir: str | Path,
         output_dir: str | Path,
-        pattern: str = "*.jpg"
+        pattern: str = "*"
     ) -> list[dict]:
         """
         Process multiple images in batch.
