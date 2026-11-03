@@ -17,6 +17,8 @@ from typing import Any
 
 DATASET_ID = "shravya11/eyeglasses-dataset"
 DATASET_URL = f"https://huggingface.co/datasets/{DATASET_ID}"
+IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".webp", ".bmp"}
+SOURCE_CATEGORIES = {"eyeglasses", "sunglasses"}
 
 
 def _source_path(value: Any) -> str | None:
@@ -55,19 +57,41 @@ def _hub_file_location(source_path: str) -> tuple[str, str | None]:
         revision, separator, filename = revision_and_filename.partition("/")
         if not separator or not revision or not filename:
             raise ValueError(f"Incomplete Hugging Face dataset file URI: {source_path}")
+        if PurePosixPath(filename).suffix.lower() not in IMAGE_SUFFIXES:
+            raise ValueError(f"Incomplete or non-image Hugging Face dataset file URI: {source_path}")
         return filename, revision
 
     plain_prefix = f"hf://datasets/{DATASET_ID}/"
     if normalized.startswith(plain_prefix):
         filename = normalized[len(plain_prefix):]
-        if not filename:
-            raise ValueError(f"Incomplete Hugging Face dataset file URI: {source_path}")
+        if not filename or PurePosixPath(filename).suffix.lower() not in IMAGE_SUFFIXES:
+            raise ValueError(f"Incomplete or non-image Hugging Face dataset file URI: {source_path}")
         return filename, None
 
     if normalized.startswith("hf://"):
         raise ValueError(f"Unexpected Hugging Face dataset URI: {source_path}")
 
-    return normalized.lstrip("/"), None
+    filename = normalized.lstrip("/")
+    if PurePosixPath(filename).suffix.lower() not in IMAGE_SUFFIXES:
+        raise ValueError(f"Expected an image filename, got: {source_path}")
+    return filename, None
+
+
+def _category_from_source_path(source_path: str | None) -> str | None:
+    """Read eyeglasses/sunglasses from the source folder, not its generic label field."""
+    if not source_path:
+        return None
+    try:
+        filename, _revision = _hub_file_location(source_path)
+    except ValueError:
+        return None
+    parts = PurePosixPath(filename.replace("\\", "/")).parts
+    if len(parts) < 5 or parts[0].lower() not in {"train", "validation"}:
+        return None
+    if parts[-2].lower() != "product":
+        return None
+    category = parts[1].lower()
+    return category if category in SOURCE_CATEGORIES else None
 
 
 def _decode_image(value: Any, source_path: str | None = None):
@@ -154,19 +178,26 @@ def main() -> int:
     scanned = 0
     skipped_non_product = 0
     skipped_missing_path = 0
+    skipped_unknown_category = 0
     decode_failures = 0
     sample_decode_errors: list[str] = []
 
     for row in dataset:
         scanned += 1
-        label = _label_name(dataset, row.get("label", "unknown"))
+        source_image = row.get("image")
+        source_path = _source_path(source_image)
+        label = _category_from_source_path(source_path)
+        if not label:
+            skipped_unknown_category += 1
+            continue
         if counts.get(label, 0) >= args.max_per_class:
-            if len(counts) >= 2 and all(value >= args.max_per_class for value in counts.values()):
+            if len(counts) >= len(SOURCE_CATEGORIES) and all(
+                counts.get(category, 0) >= args.max_per_class
+                for category in SOURCE_CATEGORIES
+            ):
                 break
             continue
 
-        source_image = row.get("image")
-        source_path = _source_path(source_image)
         product_id = _product_id_from_source_path(source_path)
         if not source_path:
             skipped_missing_path += 1
@@ -230,6 +261,7 @@ def main() -> int:
             f"Scanned {scanned} rows; saved 0 catalogue product images. "
             f"Missing source paths: {skipped_missing_path}; "
             f"non-product/review paths: {skipped_non_product}; "
+            f"unknown/non-eyewear categories: {skipped_unknown_category}; "
             f"image decode/download failures: {decode_failures}."
         )
         if sample_decode_errors:
@@ -258,6 +290,11 @@ def main() -> int:
     print("Images are UNLABELLED for segmentation. No YOLO labels were generated.")
     if decode_failures:
         print(f"Warning: {decode_failures} image rows could not be decoded/downloaded.")
+    missing_categories = sorted(
+        category for category in SOURCE_CATEGORIES if counts.get(category, 0) == 0
+    )
+    if missing_categories:
+        print(f"Warning: no images were saved for categories: {', '.join(missing_categories)}")
     return 0
 
 
