@@ -50,8 +50,6 @@ def main() -> int:
     parser.add_argument("--max-per-class", type=int, default=250,
                         help="Maximum photos to save per classification label (default: 250).")
     parser.add_argument("--output", type=Path, default=Path("dataset/real_world_eyewear_photos"))
-    parser.add_argument("--overwrite", action="store_true",
-                        help="Allow additional files in an existing output directory; existing files are never replaced.")
     args = parser.parse_args()
     if args.max_per_class < 1:
         parser.error("--max-per-class must be at least 1")
@@ -64,8 +62,8 @@ def main() -> int:
     output = args.output.resolve()
     output.mkdir(parents=True, exist_ok=True)
     manifest_path = output / f"{args.split}_manifest.csv"
-    if manifest_path.exists() and not args.overwrite:
-        parser.error(f"{manifest_path} already exists. Choose another output folder or pass --overwrite.")
+    if manifest_path.exists():
+        parser.error(f"{manifest_path} already exists. Choose a new output folder to preserve the previous manifest.")
 
     try:
         dataset = load_dataset(DATASET_ID, split=args.split, streaming=True)
