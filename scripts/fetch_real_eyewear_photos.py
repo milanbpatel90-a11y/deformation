@@ -46,6 +46,30 @@ def _product_id_from_source_path(source_path: str | None) -> str | None:
     return parts[product_folder_index - 1]
 
 
+def _hub_file_location(source_path: str) -> tuple[str, str | None]:
+    """Convert an hf:// dataset URI into a Hub-relative filename and revision."""
+    normalized = source_path.replace("\\", "/")
+    revision_prefix = f"hf://datasets/{DATASET_ID}@"
+    if normalized.startswith(revision_prefix):
+        revision_and_filename = normalized[len(revision_prefix):]
+        revision, separator, filename = revision_and_filename.partition("/")
+        if not separator or not revision or not filename:
+            raise ValueError(f"Incomplete Hugging Face dataset file URI: {source_path}")
+        return filename, revision
+
+    plain_prefix = f"hf://datasets/{DATASET_ID}/"
+    if normalized.startswith(plain_prefix):
+        filename = normalized[len(plain_prefix):]
+        if not filename:
+            raise ValueError(f"Incomplete Hugging Face dataset file URI: {source_path}")
+        return filename, None
+
+    if normalized.startswith("hf://"):
+        raise ValueError(f"Unexpected Hugging Face dataset URI: {source_path}")
+
+    return normalized.lstrip("/"), None
+
+
 def _decode_image(value: Any, source_path: str | None = None):
     """Decode an image whether the stream supplies bytes, a local path or a Hub path."""
     from PIL import Image
@@ -62,7 +86,6 @@ def _decode_image(value: Any, source_path: str | None = None):
         source_path = str(value)
 
     if source_path:
-        normalized_path = source_path.replace("\\", "/").lstrip("/")
         local_path = Path(source_path)
         if local_path.is_file():
             return Image.open(local_path).convert("RGB")
@@ -72,11 +95,15 @@ def _decode_image(value: Any, source_path: str | None = None):
         # Resolve it through the Hub cache before asking Pillow to open it.
         from huggingface_hub import hf_hub_download
 
-        cached_path = hf_hub_download(
-            repo_id=DATASET_ID,
-            filename=normalized_path,
-            repo_type="dataset",
-        )
+        filename, revision = _hub_file_location(source_path)
+        download_args = {
+            "repo_id": DATASET_ID,
+            "filename": filename,
+            "repo_type": "dataset",
+        }
+        if revision:
+            download_args["revision"] = revision
+        cached_path = hf_hub_download(**download_args)
         return Image.open(cached_path).convert("RGB")
 
     raise ValueError("Dataset row has no image bytes or source path.")
