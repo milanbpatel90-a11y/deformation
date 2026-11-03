@@ -1,0 +1,31 @@
+{
+  "name": "gold_template",
+  "shape": "geometric",
+  "material": "metal",
+  "glb_file": "gold_template.glb",
+  "dimensions": {
+    "frame_width": 145.33226013,
+    "lens_width": 55.75033617,
+    "lens_height": 36.52241039,
+    "bridge_width": 17.9,
+    "temple_length": 155.02,
+    "rim_thickness": 1.2,
+    "temple_curve_angle": 28,
+    "nose_pad_distance": 18,
+    "nose_pad_angle": 15,
+    "nose_pad_height": 3
+  },
+  "parts": [
+    "Frame",
+    "LeftLens",
+    "RightLens",
+    "Bridge",
+    "LeftRim",
+    "RightRim",
+    "LeftTemple",
+    "RightTemple",
+    "NosePads",
+    "TempleTips"
+  ],
+  "rim_pull_strength": 0.65
+}

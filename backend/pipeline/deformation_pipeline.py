@@ -26,6 +26,11 @@ from backend.fusion.measurement_fuser import MeasurementFuser
 from backend.fusion.opacity_detector import OpacityDetector
 
 
+# Deterministic base mesh for image-driven glasses reconstruction. An explicit
+# template override can still select a different template when needed.
+DEFAULT_TEMPLATE = "gold_template"
+
+
 class DeformationPipeline:
     """
     Full pipeline:
@@ -212,6 +217,7 @@ class DeformationPipeline:
     ) -> dict:
         style = self._style_from_measurements(measurements)
         features = self.feature_extractor.from_measurements(measurements, style)
+        template_name = template_name or DEFAULT_TEMPLATE
         match = self.matcher.match(features, template_name)
         template_info = match.best.template
         template_name = template_info.name
@@ -339,7 +345,7 @@ class DeformationPipeline:
 
         s5 = report.add("Template Scoring")
         t = s5.start()
-        match = self.matcher.match(features, template_override)
+        match = self.matcher.match(features, template_override or DEFAULT_TEMPLATE)
         template_info = match.best.template
         template_name = template_info.name
         s5.finish(
@@ -516,7 +522,7 @@ class DeformationPipeline:
         
         style = self._style_from_measurements(fused_measurements)
         features = self.feature_extractor.from_measurements(fused_measurements, style)
-        match = self.matcher.match(features, template_override)
+        match = self.matcher.match(features, template_override or DEFAULT_TEMPLATE)
         template_info = match.best.template
         template_name = template_info.name
         s2.finish(

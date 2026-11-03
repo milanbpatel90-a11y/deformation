@@ -11,7 +11,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from backend.models import FrameMaterial, FrameShape, Measurements
-from backend.pipeline import DeformationPipeline
+from backend.pipeline import DEFAULT_TEMPLATE, DeformationPipeline
 from backend.template_library.loader import TemplateLibrary
 from backend.api import rim_detection_routes
 
@@ -31,8 +31,9 @@ app.add_middleware(
 OUTPUT_DIR = Path(__file__).resolve().parents[2] / "output"
 OUTPUT_DIR.mkdir(exist_ok=True)
 
-# Prefer topology-cleaned production templates (see templates/FIXED_TEMPLATES_README.txt)
+# Keep the API's active-template indicator consistent with the image pipeline.
 PREFERRED_TEMPLATES = (
+    DEFAULT_TEMPLATE,
     "rectangle_metal",
     "cat_eye_gold",
     "round_wire_metal",
