@@ -180,6 +180,11 @@ class Auto3DPipeline:
         """
         image_dir = Path(image_dir)
         output_dir = Path(output_dir)
+        if not image_dir.is_dir():
+            raise NotADirectoryError(f"Image input directory does not exist: {image_dir}")
+        # Create the destination even when no images match or every image fails.
+        # This keeps batch_summary.json durable and makes the operation repeatable.
+        output_dir.mkdir(parents=True, exist_ok=True)
         
         if pattern in {"*", "*.*"}:
             allowed = {".jpg", ".jpeg", ".png", ".webp", ".bmp"}
