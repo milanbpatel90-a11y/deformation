@@ -57,19 +57,62 @@ class MaskToMeasurements:
             Tuple of (Measurements, LensContour)
         """
         h, w = image.shape[:2]
-        
-        # Extract masks by class
         masks = self._extract_masks_by_class(results, (h, w))
-        
-        # Calculate pixel-to-mm ratio from rim mask
-        mm_per_px = self._calculate_scale(masks.get(self.CLASS_RIM), w)
-        
-        # Extract measurements from each mask
+        return self.extract_from_class_masks(image, masks, shape, material, color)
+
+    def extract_from_class_masks(
+        self,
+        image: np.ndarray,
+        class_masks: Dict[int, np.ndarray],
+        shape: FrameShape = FrameShape.GEOMETRIC,
+        material: FrameMaterial = FrameMaterial.METAL,
+        color: str = "#000000",
+    ) -> Tuple[Measurements, LensContour]:
+        """Convert full-resolution, class-indexed masks without rerunning YOLO."""
+        if image is None or image.ndim != 3 or image.shape[2] != 3:
+            raise ValueError("Expected a valid BGR image for measurement extraction.")
+        image_h, image_w = image.shape[:2]
+        masks: Dict[int, np.ndarray] = {}
+        for raw_class_id, raw_mask in class_masks.items():
+            try:
+                class_id = int(raw_class_id)
+            except (TypeError, ValueError) as exc:
+                raise ValueError(f"Invalid eyewear class ID: {raw_class_id!r}") from exc
+            if class_id not in {
+                self.CLASS_RIM, self.CLASS_TEMPLE, self.CLASS_BRIDGE,
+                self.CLASS_LEFT_LENS, self.CLASS_RIGHT_LENS, self.CLASS_NOSE_PAD,
+            }:
+                raise ValueError(f"Unsupported eyewear part class ID: {class_id}")
+            mask = np.asarray(raw_mask)
+            if mask.ndim != 2 or mask.shape != (image_h, image_w):
+                raise ValueError(
+                    f"Class {class_id} mask must have shape {(image_h, image_w)}; "
+                    f"received {mask.shape}."
+                )
+            masks[class_id] = (mask > 0).astype(np.uint8) * 255
+
+        if not any(np.any(mask) for mask in masks.values()):
+            raise ValueError("The six-class eyewear model returned no non-empty part masks.")
+
+        # Lens polygons must come from actual left/right lens detections. Do not
+        # fabricate default lens shapes when the model failed to segment them.
+        missing_lenses = [
+            name for class_id, name in (
+                (self.CLASS_LEFT_LENS, "left_lens"),
+                (self.CLASS_RIGHT_LENS, "right_lens"),
+            )
+            if class_id not in masks or not np.any(masks[class_id])
+        ]
+        if missing_lenses:
+            raise ValueError(
+                "Six-class segmentation is incomplete; missing non-empty "
+                + ", ".join(missing_lenses)
+                + " mask(s). Review the image/annotations or use another view."
+            )
+
+        mm_per_px = self._calculate_scale(masks.get(self.CLASS_RIM), image_w)
         measurements = self._extract_measurements(masks, mm_per_px, shape, material, color)
-        
-        # Extract lens contours
-        lens_contour = self._extract_lens_contours(masks, h, w)
-        
+        lens_contour = self._extract_lens_contours(masks, image_h, image_w)
         return measurements, lens_contour
     
     def _extract_masks_by_class(
@@ -87,15 +130,28 @@ class MaskToMeasurements:
         masks = {}
         
         for result in results:
-            if result.masks is None or result.boxes is None:
+            if result.masks is None:
                 continue
-                
-            for mask_data, box in zip(result.masks.data, result.boxes):
+            if result.boxes is None:
+                raise ValueError("YOLO returned masks without class boxes; cannot assign measurement parts.")
+
+            mask_items = list(result.masks.data)
+            box_items = list(result.boxes)
+            if len(mask_items) != len(box_items):
+                raise ValueError("YOLO returned different numbers of masks and boxes; refusing ambiguous class pairing.")
+
+            for mask_data, box in zip(mask_items, box_items):
                 class_id = int(box.cls[0])
-                
+                if class_id not in {
+                    self.CLASS_RIM, self.CLASS_TEMPLE, self.CLASS_BRIDGE,
+                    self.CLASS_LEFT_LENS, self.CLASS_RIGHT_LENS, self.CLASS_NOSE_PAD,
+                }:
+                    raise ValueError(f"Unexpected eyewear part class ID {class_id}.")
+
                 # Resize mask to image size
+                raw_mask = mask_data.cpu().numpy() if hasattr(mask_data, "cpu") else np.asarray(mask_data)
                 mask = cv2.resize(
-                    mask_data.cpu().numpy().astype(np.float32),
+                    raw_mask.astype(np.float32),
                     (w, h),
                     interpolation=cv2.INTER_LINEAR
                 )
@@ -123,18 +179,16 @@ class MaskToMeasurements:
             Millimeters per pixel
         """
         if rim_mask is None or rim_mask.sum() == 0:
-            # Fallback: assume frame is 70% of image width
+            # This is an assumed scale, not physical calibration. Supply the
+            # manufacturer's known frame width for dimensionally reliable output.
             return self.reference_width_mm / (image_width * 0.7)
-        
-        # Get bounding box of rim
-        contours, _ = cv2.findContours(rim_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        if not contours:
+
+        points = cv2.findNonZero((rim_mask > 0).astype(np.uint8))
+        if points is None:
             return self.reference_width_mm / (image_width * 0.7)
-        
-        largest = max(contours, key=cv2.contourArea)
-        x, y, w, h = cv2.boundingRect(largest)
-        
-        # Frame width in pixels
+        # Use the bounds of all rim components. Taking only the largest contour
+        # would measure one eye/rim, not the total left-to-right frame width.
+        x, y, w, h = cv2.boundingRect(points)
         frame_width_px = w
         
         # Calculate scale
@@ -206,13 +260,13 @@ class MaskToMeasurements:
         else:
             return self.reference_width_mm
         
-        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        if not contours:
+        points = cv2.findNonZero((mask > 0).astype(np.uint8))
+        if points is None:
             return self.reference_width_mm
-        
-        largest = max(contours, key=cv2.contourArea)
-        x, y, w, h = cv2.boundingRect(largest)
-        
+
+        # The rim is usually two disconnected lens surrounds. Measure the
+        # full union bounds rather than only the larger single-eye contour.
+        x, y, w, h = cv2.boundingRect(points)
         return w * mm_per_px
     
     def _measure_lens_dimensions(
@@ -221,25 +275,28 @@ class MaskToMeasurements:
         mm_per_px: float
     ) -> Tuple[float, float]:
         """Measure lens width and height."""
-        # Use left lens as reference (they should be symmetric)
-        lens_mask = masks.get(self.CLASS_LEFT_LENS)
-        if lens_mask is None or lens_mask.sum() == 0:
-            lens_mask = masks.get(self.CLASS_RIGHT_LENS)
-        
-        if lens_mask is None or lens_mask.sum() == 0:
-            # Fallback: estimate from frame width
+        dimensions = []
+        for class_id in (self.CLASS_LEFT_LENS, self.CLASS_RIGHT_LENS):
+            lens_mask = masks.get(class_id)
+            if lens_mask is None or not np.any(lens_mask):
+                continue
+            points = cv2.findNonZero((lens_mask > 0).astype(np.uint8))
+            if points is None:
+                continue
+            x, y, width, height = cv2.boundingRect(points)
+            dimensions.append((width * mm_per_px, height * mm_per_px))
+
+        if not dimensions:
+            # Legacy development fallback only. Production six-class extraction
+            # rejects missing lens masks before reaching this method.
             frame_width = self._measure_frame_width(masks, mm_per_px)
             return frame_width * 0.38, frame_width * 0.35
-        
-        contours, _ = cv2.findContours(lens_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        if not contours:
-            frame_width = self._measure_frame_width(masks, mm_per_px)
-            return frame_width * 0.38, frame_width * 0.35
-        
-        largest = max(contours, key=cv2.contourArea)
-        x, y, w, h = cv2.boundingRect(largest)
-        
-        return w * mm_per_px, h * mm_per_px
+
+        # Average both eyes when both are visible to reduce one-sided mask noise.
+        return (
+            float(np.mean([item[0] for item in dimensions])),
+            float(np.mean([item[1] for item in dimensions])),
+        )
     
     def _measure_bridge_width(self, masks: Dict[int, np.ndarray], mm_per_px: float) -> float:
         """Measure bridge width."""
@@ -250,14 +307,11 @@ class MaskToMeasurements:
             frame_width = self._measure_frame_width(masks, mm_per_px)
             return frame_width * 0.13
         
-        contours, _ = cv2.findContours(bridge_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        if not contours:
+        points = cv2.findNonZero((bridge_mask > 0).astype(np.uint8))
+        if points is None:
             frame_width = self._measure_frame_width(masks, mm_per_px)
             return frame_width * 0.13
-        
-        largest = max(contours, key=cv2.contourArea)
-        x, y, w, h = cv2.boundingRect(largest)
-        
+        x, y, w, h = cv2.boundingRect(points)
         return w * mm_per_px
     
     def _measure_temple_length(self, masks: Dict[int, np.ndarray], mm_per_px: float) -> float:
