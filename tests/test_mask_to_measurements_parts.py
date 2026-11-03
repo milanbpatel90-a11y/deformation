@@ -62,7 +62,7 @@ def test_class_mask_extraction_uses_full_frame_extent():
     masks[MaskToMeasurements.CLASS_LEFT_LENS][20:50, 12:40] = 255
     masks[MaskToMeasurements.CLASS_RIGHT_LENS][20:50, 70:98] = 255
     # A visible temple mask is available; nose pads are legitimately absent.
-    masks[MaskToMeasurements.CLASS_TEMPLE][55:70, 10:14] = 255
+    masks[MaskToMeasurements.CLASS_TEMPLE][5:75, 105:111] = 255  # visible temple arm, ~70 px
 
     converter = MaskToMeasurements(reference_width_mm=140.0)
     measurements, contours = converter.extract_from_class_masks(
