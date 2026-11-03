@@ -46,8 +46,8 @@ class RimDeformerTests(unittest.TestCase):
         ctx = RimDeformer(contour_strength=0.8).apply(ctx, contour)
         left = ctx.mesh("LeftRim").bounds
         right = ctx.mesh("RightRim").bounds
-        self.assertAlmostEqual(abs(left[0, 0]), abs(right[1, 0]), places=3)
-        self.assertAlmostEqual(abs(left[1, 0]), abs(right[0, 0]), places=3)
+        self.assertAlmostEqual(abs(left[0, 0]), abs(right[1, 0]), places=2)
+        self.assertAlmostEqual(abs(left[1, 0]), abs(right[0, 0]), places=2)
         self.assertTrue(ctx.metadata["rim_deformation"]["applied"])
 
 

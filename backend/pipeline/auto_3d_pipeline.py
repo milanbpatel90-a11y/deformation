@@ -89,6 +89,15 @@ class Auto3DPipeline:
         # 2. Segment glasses
         logger.info("Step 1/4: Segmenting glasses parts...")
         masks = self.segmenter.segment(image)
+        mask = masks.get("front")
+        if mask is None or mask.shape != image.shape[:2]:
+            raise ValueError("Segmentation mask is missing or has the wrong image dimensions.")
+        foreground_fraction = float(np.count_nonzero(mask)) / float(mask.size or 1)
+        if foreground_fraction < 0.0001 or foreground_fraction > 0.98:
+            raise ValueError(
+                "Eyewear segmentation is empty or covers almost the whole image; "
+                "check the trained checkpoint and input photograph."
+            )
         
         # Save segmentation visualization
         seg_viz_path = output_dir / f"{image_path.stem}_segmentation.jpg"
@@ -110,14 +119,20 @@ class Auto3DPipeline:
         logger.info("Step 3/4: Extracting measurements...")
         
         # For YOLO results, we need to handle differently
-        if hasattr(self.segmenter, '_model') and self.segmenter._model is not None:
-            # Run YOLO again to get results object
-            results = self.segmenter._model(image, verbose=False)
-            measurements, lens_contour = self.mask_converter.extract_from_yolo_results(
-                image, results, shape, material, color
+        if (
+            getattr(self.segmenter, "_model", None) is not None
+            and getattr(self.segmenter, "supports_part_masks", False)
+        ):
+            # Reuse the exact class-specific masks from the segmentation pass.
+            # This avoids a second model invocation and prevents the display
+            # union mask from being mistaken for individual eyewear parts.
+            measurements, lens_contour = self.mask_converter.extract_from_class_masks(
+                image, masks.get("class_masks", {}), shape, material, color
             )
         else:
-            # Fallback: use OpenCV masks
+            # A one-class eyewear silhouette cannot identify each lens/bridge/temple
+            # independently. Use the silhouette-based extractor instead of treating
+            # the entire eyewear mask as class 0 (rim).
             measurements, lens_contour = self._extract_from_opencv_masks(
                 image, masks, shape, material, color, nose_pads
             )
@@ -151,7 +166,7 @@ class Auto3DPipeline:
         self,
         image_dir: str | Path,
         output_dir: str | Path,
-        pattern: str = "*.jpg"
+        pattern: str = "*"
     ) -> list[dict]:
         """
         Process multiple images in batch.
@@ -166,8 +181,22 @@ class Auto3DPipeline:
         """
         image_dir = Path(image_dir)
         output_dir = Path(output_dir)
+        if not image_dir.is_dir():
+            raise NotADirectoryError(f"Image input directory does not exist: {image_dir}")
+        # Create the destination even when no images match or every image fails.
+        # This keeps batch_summary.json durable and makes the operation repeatable.
+        output_dir.mkdir(parents=True, exist_ok=True)
         
-        image_files = sorted(image_dir.glob(pattern))
+        if pattern in {"*", "*.*"}:
+            allowed = {".jpg", ".jpeg", ".png", ".webp", ".bmp"}
+            image_files = sorted(
+                p for p in image_dir.iterdir()
+                if p.is_file() and p.suffix.lower() in allowed
+            )
+        else:
+            # Respect explicit filters such as *.jpg instead of silently
+            # broadening the caller's requested pattern to every image format.
+            image_files = sorted(p for p in image_dir.glob(pattern) if p.is_file())
         logger.info(f"Found {len(image_files)} images to process")
         
         results = []
@@ -245,22 +274,34 @@ class Auto3DPipeline:
     ) -> None:
         """Save visualization of segmentation results."""
         viz = image.copy()
-        
-        # Overlay masks with different colors
+        # Draw each semantic class once. The legacy front/side/full aliases
+        # all refer to the same input view and must not be blended three times.
         colors = {
-            "front": (0, 255, 0),    # Green
-            "side": (255, 0, 0),     # Blue
-            "full": (0, 0, 255)      # Red
+            "eyewear_rim": (0, 220, 0),
+            "eyewear_temple": (255, 120, 0),
+            "bridge": (0, 180, 255),
+            "left_lens": (255, 0, 180),
+            "right_lens": (180, 0, 255),
+            "nose_pad": (0, 255, 255),
+            "eyewear": (0, 220, 0),
         }
-        
-        for key, mask in masks.items():
-            if mask is not None and mask.sum() > 0:
-                color = colors.get(key, (255, 255, 255))
+        part_masks = masks.get("part_masks")
+        if isinstance(part_masks, dict) and part_masks:
+            for name, mask in part_masks.items():
+                if mask is None or not np.any(mask):
+                    continue
                 colored_mask = np.zeros_like(image)
-                colored_mask[mask > 0] = color
-                viz = cv2.addWeighted(viz, 0.7, colored_mask, 0.3, 0)
-        
-        cv2.imwrite(str(output_path), viz)
+                colored_mask[np.asarray(mask) > 0] = colors.get(name, (255, 255, 255))
+                viz = cv2.addWeighted(viz, 0.72, colored_mask, 0.28, 0)
+        else:
+            mask = masks.get("front")
+            if mask is not None and np.any(mask):
+                colored_mask = np.zeros_like(image)
+                colored_mask[np.asarray(mask) > 0] = (0, 220, 0)
+                viz = cv2.addWeighted(viz, 0.72, colored_mask, 0.28, 0)
+
+        if not cv2.imwrite(str(output_path), viz):
+            raise OSError(f"Failed to write segmentation visualization: {output_path}")
 
 
 def main():

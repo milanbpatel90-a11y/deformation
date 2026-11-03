@@ -60,6 +60,9 @@ class MeshDeformer:
                     context = stage.apply(context)
 
         self._refresh_normals(context)
+        # Deformers mutate context.meshes, not the source scene graph's original
+        # geometry. Synchronize before returning so export uses deformed parts.
+        context.sync_scene_from_meshes()
         quality = self.quality_checker.evaluate(context)
         return context, quality
 

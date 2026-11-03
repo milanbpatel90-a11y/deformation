@@ -30,14 +30,22 @@ class MeasurementExtractor:
         nose_pads: bool = True,
         color: str = "#d9a7a2",
         top: np.ndarray | None = None,
+        reference_width_mm: float | None = None,
     ) -> tuple[Measurements, LensContour]:
+        if reference_width_mm is not None and not 100.0 <= float(reference_width_mm) <= 180.0:
+            raise ValueError("reference_width_mm must be between 100 and 180 mm.")
         front_mask = mask if mask is not None else self._auto_mask(front)
         contour = self._largest_contour(front_mask)
         if contour is None:
             return self._default_measurements(shape, material, nose_pads, color), LensContour()
 
         x, y, w, h = cv2.boundingRect(contour)
-        mm_per_px = self.DEFAULT_FRAME_WIDTH_MM / max(w, 1)
+        calibration_width = (
+            float(reference_width_mm)
+            if reference_width_mm is not None
+            else self.DEFAULT_FRAME_WIDTH_MM
+        )
+        mm_per_px = calibration_width / max(w, 1)
 
         # Detect lens regions via horizontal valley in upper half
         lens_w_px, lens_h_px, bridge_w_px = self._detect_lens_regions(front_mask, x, y, w, h)
@@ -57,7 +65,12 @@ class MeasurementExtractor:
             rim_thickness = self._measure_rim_thickness(top)
 
         # ── Sanity clamp: all values must be physically plausible ─────────────
-        frame_width     = self._clamp(frame_width,   110.0, 160.0, "frame_width")
+        if reference_width_mm is not None:
+            # A known manufacturer width is the calibration reference, so do not
+            # silently overwrite it with the generic-image clamp.
+            frame_width = float(reference_width_mm)
+        else:
+            frame_width = self._clamp(frame_width, 110.0, 160.0, "frame_width")
         lens_width      = self._clamp(lens_width,     28.0,  62.0, "lens_width")
         lens_height     = self._clamp(lens_height,    20.0,  56.0, "lens_height")
         bridge_width    = self._clamp(bridge_width,   10.0,  28.0, "bridge_width")
