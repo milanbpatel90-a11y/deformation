@@ -249,14 +249,21 @@ class MaskToMeasurements:
     
     def _measure_frame_width(self, masks: Dict[int, np.ndarray], mm_per_px: float) -> float:
         """Measure total frame width."""
-        # Try rim mask first
-        if self.CLASS_RIM in masks:
-            mask = masks[self.CLASS_RIM]
-        # Fallback: combine lens masks
-        elif self.CLASS_LEFT_LENS in masks and self.CLASS_RIGHT_LENS in masks:
+        # Prefer a non-empty rim mask. Rimless frames legitimately have no
+        # rim pixels, so use the measured lens/bridge envelope in that case.
+        rim_mask = masks.get(self.CLASS_RIM)
+        if rim_mask is not None and np.any(rim_mask):
+            mask = rim_mask
+        elif (
+            masks.get(self.CLASS_LEFT_LENS) is not None
+            and masks.get(self.CLASS_RIGHT_LENS) is not None
+            and np.any(masks[self.CLASS_LEFT_LENS])
+            and np.any(masks[self.CLASS_RIGHT_LENS])
+        ):
             mask = cv2.bitwise_or(masks[self.CLASS_LEFT_LENS], masks[self.CLASS_RIGHT_LENS])
-            if self.CLASS_BRIDGE in masks:
-                mask = cv2.bitwise_or(mask, masks[self.CLASS_BRIDGE])
+            bridge_mask = masks.get(self.CLASS_BRIDGE)
+            if bridge_mask is not None and np.any(bridge_mask):
+                mask = cv2.bitwise_or(mask, bridge_mask)
         else:
             return self.reference_width_mm
         
