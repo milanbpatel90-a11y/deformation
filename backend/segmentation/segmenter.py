@@ -35,6 +35,14 @@ _SILHOUETTE_ALIASES = {
     "eyewear", "glasses", "spectacles", "eyeglasses", "sunglasses",
     "frame", "eyewearmask", "eyewearoutline", "eyewear_silhouette",
 }
+_PART_CANONICAL = {
+    0: "eyewear_rim",
+    1: "eyewear_temple",
+    2: "bridge",
+    3: "left_lens",
+    4: "right_lens",
+    5: "nose_pad",
+}
 _MODEL_EXTENSIONS = {".pt", ".pth", ".onnx", ".engine", ".xml", ".mlpackage", ".tflite"}
 
 
@@ -152,6 +160,7 @@ class GlassesSegmenter:
         self._model = None
         self.model_type = "opencv_fallback"
         self.model_names: dict[int, str] = {}
+        self.checkpoint_class_names: dict[int, str] = {}
         self.model_class_count = 0
         self.supports_part_masks = False
 
@@ -181,7 +190,13 @@ class GlassesSegmenter:
         count, names, supports_parts = _validate_model_names(getattr(loaded, "names", None))
         self._model = loaded
         self.model_type = f"yolo:{resolved.name}"
-        self.model_names = names
+        self.checkpoint_class_names = dict(names)
+        # Normalize accepted aliases such as "legs" to the stable semantic
+        # names consumed by visualization and downstream application code.
+        self.model_names = (
+            {class_id: _PART_CANONICAL[class_id] for class_id in names}
+            if supports_parts else dict(names)
+        )
         self.model_class_count = count
         self.supports_part_masks = supports_parts
         logger.info(
@@ -277,6 +292,7 @@ class GlassesSegmenter:
             "detections": detections,
             "class_count": self.model_class_count,
             "class_names": dict(self.model_names),
+            "checkpoint_class_names": dict(self.checkpoint_class_names),
             "supports_part_masks": self.supports_part_masks,
             "observed_views": ["front"],
             "confidence_threshold": self.confidence_threshold,
