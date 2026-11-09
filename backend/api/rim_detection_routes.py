@@ -4,7 +4,8 @@ Endpoints to integrate rim detection into main eyewear-vto backend.
 Add these to backend.api.main or create backend.api.rim_detection_routes.py
 """
 
-from fastapi import APIRouter, UploadFile, File, HTTPException, BackgroundTasks
+from fastapi import APIRouter, UploadFile, File, HTTPException, BackgroundTasks, Depends
+from backend.auth import require_roles
 from fastapi.responses import JSONResponse
 import cv2
 import numpy as np
@@ -17,7 +18,7 @@ import json
 logger = logging.getLogger(__name__)
 
 # Initialize router
-router = APIRouter(prefix="/api/rim-detection", tags=["rim-detection"])
+router = APIRouter(prefix="/api/rim-detection", tags=["rim-detection"], dependencies=[Depends(require_roles("owner", "editor"))])
 
 
 # ============================================================================
