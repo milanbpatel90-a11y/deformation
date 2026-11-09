@@ -39,6 +39,8 @@ SESSION_COOKIE_NAME = "defirmation_session"
 CSRF_COOKIE_NAME = "defirmation_csrf"
 SESSION_TTL_SECONDS = 8 * 60 * 60
 PASSWORD_ITERATIONS = 310_000
+LOGIN_WINDOW_SECONDS = 15 * 60
+MAX_LOGIN_ATTEMPTS = 10
 ALLOWED_USER_ROLES = {"editor", "operator", "viewer"}
 ROLE_PERMISSIONS = {
     "owner": ["user_management", "settings", "generate_models", "rim_calibration", "view_models"],
@@ -132,6 +134,20 @@ def initialize_auth_database() -> None:
             """
         )
         connection.execute("CREATE INDEX IF NOT EXISTS idx_users_role ON users(role)")
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS auth_login_attempts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT NOT NULL,
+                client_ip TEXT NOT NULL,
+                attempted_at INTEGER NOT NULL
+            )
+            """
+        )
+        connection.execute(
+            "CREATE INDEX IF NOT EXISTS idx_login_attempts_window "
+            "ON auth_login_attempts(username, client_ip, attempted_at)"
+        )
 
 
 initialize_auth_database()
@@ -431,23 +447,58 @@ def setup_owner(body: SetupRequest, response: Response) -> dict:
 
 
 @auth_router.post("/login")
-def login(body: LoginRequest, response: Response) -> dict:
+def login(body: LoginRequest, response: Response, request: Request) -> dict:
     username = body.username.strip().lower()
+    client_ip = request.client.host if request.client else "unknown"
+    now = int(time.time())
+
     with _db() as connection:
+        attempts = connection.execute(
+            """
+            SELECT COUNT(*) AS total
+            FROM auth_login_attempts
+            WHERE username = ? AND client_ip = ? AND attempted_at >= ?
+            """,
+            (username, client_ip, now - LOGIN_WINDOW_SECONDS),
+        ).fetchone()["total"]
+        if attempts >= MAX_LOGIN_ATTEMPTS:
+            raise HTTPException(
+                status_code=429,
+                detail="Too many sign-in attempts. Try again in 15 minutes.",
+                headers={"Retry-After": str(LOGIN_WINDOW_SECONDS)},
+            )
         row = connection.execute(
             "SELECT * FROM users WHERE username = ? COLLATE NOCASE",
             (username,),
         ).fetchone()
 
-    if not row:
-        _hash_password("not-a-real-password-value")
-        raise HTTPException(status_code=401, detail="Incorrect username or password.")
-    if not row["is_active"] or not _verify_password(body.password, row["password_hash"]):
+    password_matches = (
+        _verify_password(body.password, row["password_hash"])
+        if row
+        else False
+    )
+    if not row or not row["is_active"] or not password_matches:
+        with _db() as connection:
+            connection.execute(
+                "INSERT INTO auth_login_attempts (username, client_ip, attempted_at) VALUES (?, ?, ?)",
+                (username, client_ip, now),
+            )
+            # Keep the audit/rate-limit table bounded.
+            connection.execute(
+                "DELETE FROM auth_login_attempts WHERE attempted_at < ?",
+                (now - 24 * 60 * 60,),
+            )
+        if not row:
+            # Make unknown-user requests pay a password-hash-sized cost too.
+            _hash_password("not-a-real-password-value")
         raise HTTPException(status_code=401, detail="Incorrect username or password.")
 
-    now = int(time.time())
     with _db() as connection:
         connection.execute("UPDATE users SET last_login_at = ? WHERE id = ?", (now, row["id"]))
+        connection.execute(
+            "DELETE FROM auth_login_attempts WHERE username = ? AND client_ip = ?",
+            (username, client_ip),
+        )
     set_session_cookies(response, row["id"])
     return {
         "message": "Signed in successfully.",
