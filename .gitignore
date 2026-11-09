@@ -1,24 +1,28 @@
-```
-# Build artifacts and output
+# Build artifacts and generated 3D output
 output/
 *.glb
 
-# Dependencies
-node_modules/
+# Python and virtual environments
 .venv/
 venv/
 __pycache__/
+*.py[cod]
 
-# Logs and temp files
-*.log
-*.tmp
+# Frontend dependencies
+node_modules/
 
-# Environment
+# Runtime secrets and authentication data
 .env
 .env.local
 *.env.*
+.auth_secret
+data/*.sqlite3
+data/*.db
+
+# Logs and temporary files
+*.log
+*.tmp
 
 # Editors
 .vscode/
 .idea/
-```
