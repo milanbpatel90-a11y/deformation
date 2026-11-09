@@ -2,36 +2,73 @@
 
 from __future__ import annotations
 
+import os
 import uuid
 from pathlib import Path
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
-from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 
+from backend.auth import (
+    SESSION_COOKIE_NAME,
+    admin_router,
+    auth_router,
+    csrf_token_is_valid,
+    get_current_user,
+    get_current_user_optional,
+    require_roles,
+)
 from backend.models import FrameMaterial, FrameShape, Measurements
 from backend.pipeline import DeformationPipeline
 from backend.template_library.loader import TemplateLibrary
 from backend.api import rim_detection_routes
 
+
 app = FastAPI(
     title="Defirmation API",
-    description="Template deformation pipeline for eyewear virtual try-on — product images → 3D GLB",
-    version="1.1.0",
+    description="Eyewear template deformation and virtual try-on — protected with role-based accounts",
+    version="1.2.0",
 )
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# The browser viewer is served by this same application. Cross-origin access is
+# disabled unless explicitly allowlisted for a separate trusted frontend.
+allowed_origins = [
+    origin.strip()
+    for origin in os.getenv("CORS_ALLOWED_ORIGINS", "").split(",")
+    if origin.strip()
+]
+if allowed_origins:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=allowed_origins,
+        allow_credentials=True,
+        allow_methods=["GET", "POST", "PATCH", "OPTIONS"],
+        allow_headers=["Content-Type", "X-CSRF-Token"],
+    )
+
+
+@app.middleware("http")
+async def csrf_protection(request: Request, call_next):
+    """Require the double-submit CSRF token on authenticated state changes."""
+    safe_methods = {"GET", "HEAD", "OPTIONS"}
+    exempt_paths = {"/api/auth/login", "/api/auth/setup"}
+    if (
+        request.method not in safe_methods
+        and request.url.path not in exempt_paths
+        and request.cookies.get(SESSION_COOKIE_NAME)
+        and not csrf_token_is_valid(request)
+    ):
+        return JSONResponse(
+            status_code=403,
+            content={"detail": "CSRF validation failed. Refresh the page and try again."},
+        )
+    return await call_next(request)
+
 
 OUTPUT_DIR = Path(__file__).resolve().parents[2] / "output"
 OUTPUT_DIR.mkdir(exist_ok=True)
 
-# Prefer topology-cleaned production templates (see templates/FIXED_TEMPLATES_README.txt)
 PREFERRED_TEMPLATES = (
     "rectangle_metal",
     "cat_eye_gold",
@@ -43,11 +80,10 @@ PREFERRED_TEMPLATES = (
 
 pipeline = DeformationPipeline()
 library = TemplateLibrary()
-
 viewer_dir = Path(__file__).resolve().parents[2] / "viewer"
-if viewer_dir.exists():
-    app.mount("/viewer", StaticFiles(directory=str(viewer_dir), html=True), name="viewer")
 
+app.include_router(auth_router)
+app.include_router(admin_router)
 app.include_router(rim_detection_routes.router)
 
 
@@ -58,21 +94,51 @@ def _pick_active_template(available: list[str]) -> str | None:
     return available[0] if available else None
 
 
-@app.get("/")
-def root():
+@app.get("/", include_in_schema=False)
+def root(request: Request):
+    """Send signed-in users to the viewer and everyone else to the login page."""
+    return RedirectResponse(
+        url="/viewer/" if get_current_user_optional(request) else "/login",
+        status_code=303,
+    )
+
+
+@app.get("/login", include_in_schema=False)
+def login_page():
+    return FileResponse(viewer_dir / "login.html")
+
+
+@app.get("/viewer", include_in_schema=False)
+@app.get("/viewer/", include_in_schema=False)
+def viewer_page(user: dict = Depends(get_current_user)):
+    return FileResponse(viewer_dir / "index.html")
+
+
+@app.get("/admin", include_in_schema=False)
+@app.get("/admin/", include_in_schema=False)
+def admin_page(user: dict = Depends(require_roles("owner"))):
+    return FileResponse(viewer_dir / "admin.html")
+
+
+@app.get("/api")
+def api_info():
     return {
         "service": "defirmation",
-        "version": "1.1.0",
+        "version": "1.2.0",
+        "authentication": "session-cookie",
         "endpoints": {
             "health": "GET /api/health",
+            "auth_status": "GET /api/auth/status",
+            "login": "POST /api/auth/login",
+            "setup_owner": "POST /api/auth/setup (one-time)",
+            "current_user": "GET /api/auth/me",
+            "admin_users": "GET/POST /api/admin/users (Owner only)",
             "deform_from_images": "POST /api/deform",
             "deform_from_multi_view": "POST /api/deform/multi-view",
             "deform_from_measurements": "POST /api/deform/measurements",
             "templates": "GET /api/templates",
             "download": "GET /api/output/{filename}",
-            "detect_rim": "POST /api/rim-detection/detect",
-            "apply_rim_to_template": "POST /api/rim-detection/apply-to-template",
-            "rim_status": "GET /api/rim-detection/status",
+            "rim_detection": "/api/rim-detection/* (Owner/Editor)",
             "viewer": "GET /viewer/",
         },
     }
@@ -85,7 +151,7 @@ def health():
     active = _pick_active_template(available)
     return {
         "status": "ok",
-        "version": "1.1.0",
+        "version": "1.2.0",
         "templates_available": len(available),
         "active_template": active,
         "preferred_templates": [t for t in PREFERRED_TEMPLATES if t in available],
@@ -94,7 +160,7 @@ def health():
 
 
 @app.get("/api/templates")
-def list_templates():
+def list_templates(user: dict = Depends(get_current_user)):
     available = library.list_templates()
     active = _pick_active_template(available)
     return {
@@ -111,11 +177,10 @@ async def deform_from_images(
     top: UploadFile | None = File(None, description="Top product image"),
     color: str = Form("#d9a7a2"),
     template: str | None = Form(None),
+    user: dict = Depends(require_roles("owner", "editor", "operator")),
 ):
     """Upload up to 3 images (front, side, top), detect measurements, deform template, export GLB."""
     job_id = uuid.uuid4().hex[:12]
-    # Use OUTPUT_DIR (project-local, ASCII-safe path) instead of system temp
-    # to avoid Windows 8.3 tilde paths (PETPOO~1) that break cv2.imread.
     work_dir = OUTPUT_DIR / f"_upload_{job_id}"
     work_dir.mkdir(parents=True, exist_ok=True)
 
@@ -151,6 +216,7 @@ async def deform_from_images(
         )
         result["job_id"] = job_id
         result["download_url"] = f"/api/output/{job_id}.glb"
+        result["created_by"] = user["username"]
         return result
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -170,11 +236,9 @@ async def deform_from_multiple_images(
     images: list[UploadFile] = File(..., description="List of 2–8 product images from multiple view angles"),
     color: str = Form("#d9a7a2"),
     template: str | None = Form(None),
+    user: dict = Depends(require_roles("owner", "editor", "operator")),
 ):
-    """Upload multiple product images, classify views, fuse measurements, deform template, and export GLB.
-
-    Recommended: 4–5 images (front, left, right, 3/4 angle, optional top).
-    """
+    """Upload multiple product images, classify views, fuse measurements, deform template, and export GLB."""
     job_id = uuid.uuid4().hex[:12]
     work_dir = OUTPUT_DIR / f"_upload_multi_{job_id}"
     work_dir.mkdir(parents=True, exist_ok=True)
@@ -188,7 +252,6 @@ async def deform_from_multiple_images(
             if not file_bytes:
                 continue
             suffix = Path(file.filename).suffix or ".jpg"
-            # Normalize common image types
             if suffix.lower() not in {".jpg", ".jpeg", ".png", ".webp", ".bmp"}:
                 suffix = ".jpg"
             file_path = work_dir / f"image_{i}{suffix}"
@@ -215,6 +278,7 @@ async def deform_from_multiple_images(
         result["job_id"] = job_id
         result["download_url"] = f"/api/output/{job_id}.glb"
         result["images_used"] = len(image_paths)
+        result["created_by"] = user["username"]
         return result
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -243,11 +307,9 @@ async def deform_from_measurements(
     temple_curve_angle: float = Form(28),
     color: str = Form("#d9a7a2"),
     template: str = Form("rectangle_metal"),
+    user: dict = Depends(require_roles("owner", "editor", "operator")),
 ):
-    """Deform template directly from known measurements (no images required).
-
-    Preferred when manufacturer specs are known — most accurate size for try-on.
-    """
+    """Deform template directly from known measurements (no images required)."""
     try:
         measurements = Measurements(
             frame_width=frame_width,
@@ -272,13 +334,17 @@ async def deform_from_measurements(
         result = pipeline.run_from_measurements(measurements, out_path, template)
         result["job_id"] = job_id
         result["download_url"] = f"/api/output/{job_id}.glb"
+        result["created_by"] = user["username"]
         return result
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 @app.get("/api/output/{filename}")
-def download_output(filename: str):
+def download_output(
+    filename: str,
+    user: dict = Depends(require_roles("owner", "editor", "operator", "viewer")),
+):
     # Prevent path traversal
     safe_name = Path(filename).name
     if safe_name != filename or ".." in filename:
