@@ -224,7 +224,32 @@
                 toggle.disabled = false;
               }
             });
-            actions.append(save, toggle);
+            const reset = document.createElement('button');
+            reset.className = 'save';
+            reset.style.marginLeft = '5px';
+            reset.textContent = 'Reset PW';
+            reset.addEventListener('click', async () => {
+              const newPassword = window.prompt('Enter a new temporary password (at least 12 characters) for ' + user.username + ':');
+              if (newPassword === null) return;
+              if (newPassword.length < 12) {
+                setMessage(document.getElementById('list-message'), 'Password must contain at least 12 characters.');
+                return;
+              }
+              reset.disabled = true;
+              try {
+                await api('/api/admin/users/' + encodeURIComponent(user.id), {
+                  method: 'PATCH',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ password: newPassword })
+                });
+                setMessage(document.getElementById('list-message'), 'Password reset. Share the new temporary password privately.', true);
+              } catch (error) {
+                setMessage(document.getElementById('list-message'), error.message);
+              } finally {
+                reset.disabled = false;
+              }
+            });
+            actions.append(save, toggle, reset);
           }
 
           tr.append(account, access, status, actions);
