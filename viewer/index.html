@@ -247,9 +247,51 @@ logoutButton.addEventListener('click', async () => {
   if (result.ok) window.location.replace('/login');
   else alert('Unable to sign out. Refresh the page and try again.');
 });
-accountActions.appendChild(logoutButton);
+const changePasswordButton = document.createElement('button');
+changePasswordButton.type = 'button';
+changePasswordButton.textContent = 'Change password';
+changePasswordButton.style.cssText = 'font-size:10px;padding:5px 8px;border:1px solid #555;border-radius:5px;background:#292944;color:#eee;cursor:pointer;';
+changePasswordButton.addEventListener('click', async () => {
+  const currentPassword = window.prompt('Enter your current password:');
+  if (currentPassword === null) return;
+  const newPassword = window.prompt('Enter a new password (at least 12 characters):');
+  if (newPassword === null) return;
+  const confirmation = window.prompt('Confirm your new password:');
+  if (newPassword !== confirmation) {
+    alert('The new passwords do not match.');
+    return;
+  }
+  try {
+    const response = await fetch('/api/auth/change-password', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-CSRF-Token': readCookie('defirmation_csrf')
+      },
+      body: JSON.stringify({ current_password: currentPassword, new_password: newPassword })
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data.detail || 'Password change failed.');
+    alert('Password changed successfully.');
+  } catch (error) {
+    alert(error.message);
+  }
+});
+accountActions.append(changePasswordButton, logoutButton);
 accountBar.append(accountIdentity, accountActions);
 document.getElementById('sidebar').insertBefore(accountBar, document.getElementById('sidebar').firstChild);
+
+// Read-only users can browse models and use the try-on viewer, but cannot submit generation jobs.
+if (!profileData.permissions.includes('generate_models')) {
+  document.querySelectorAll('.section').forEach(section => {
+    if (section.querySelector('.img-card') || section.querySelector('#color-pick')) {
+      section.style.display = 'none';
+    }
+  });
+  document.getElementById('generate-btn').style.display = 'none';
+  document.getElementById('status-box').textContent = 'Read-only access: load a permitted GLB model to view or try it on.';
+}
 
 // ── Three.js scene setup ──────────────────────────────────────────────────────
 const container = document.getElementById('canvas-container');
