@@ -16,6 +16,7 @@ import secrets
 import sqlite3
 import time
 import uuid
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Literal
 
@@ -100,8 +101,21 @@ def _connect() -> sqlite3.Connection:
     return connection
 
 
+@contextmanager
+def _db():
+    connection = _connect()
+    try:
+        yield connection
+        connection.commit()
+    except Exception:
+        connection.rollback()
+        raise
+    finally:
+        connection.close()
+
+
 def initialize_auth_database() -> None:
-    with _connect() as connection:
+    with _db() as connection:
         connection.execute(
             """
             CREATE TABLE IF NOT EXISTS users (
@@ -269,7 +283,7 @@ def get_current_user_optional(request: Request) -> dict | None:
     payload = _read_session_token(request.cookies.get(SESSION_COOKIE_NAME))
     if not payload:
         return None
-    with _connect() as connection:
+    with _db() as connection:
         row = connection.execute(
             "SELECT * FROM users WHERE id = ? AND is_active = 1",
             (payload["sub"],),
@@ -358,7 +372,7 @@ admin_router = APIRouter(
 
 @auth_router.get("/status")
 def authentication_status() -> dict:
-    with _connect() as connection:
+    with _db() as connection:
         setup_required = not _owner_exists(connection)
     return {
         "setup_required": setup_required,
@@ -386,7 +400,7 @@ def setup_owner(body: SetupRequest, response: Response) -> dict:
     user_id = str(uuid.uuid4())
     now = int(time.time())
     try:
-        with _connect() as connection:
+        with _db() as connection:
             connection.execute("BEGIN IMMEDIATE")
             if _owner_exists(connection):
                 raise HTTPException(status_code=409, detail="The Owner account has already been created.")
@@ -419,7 +433,7 @@ def setup_owner(body: SetupRequest, response: Response) -> dict:
 @auth_router.post("/login")
 def login(body: LoginRequest, response: Response) -> dict:
     username = body.username.strip().lower()
-    with _connect() as connection:
+    with _db() as connection:
         row = connection.execute(
             "SELECT * FROM users WHERE username = ? COLLATE NOCASE",
             (username,),
@@ -432,7 +446,7 @@ def login(body: LoginRequest, response: Response) -> dict:
         raise HTTPException(status_code=401, detail="Incorrect username or password.")
 
     now = int(time.time())
-    with _connect() as connection:
+    with _db() as connection:
         connection.execute("UPDATE users SET last_login_at = ? WHERE id = ?", (now, row["id"]))
     set_session_cookies(response, row["id"])
     return {
@@ -466,7 +480,7 @@ def change_password(
     _validate_password(body.new_password)
     if not _verify_password(body.current_password, user["password_hash"]):
         raise HTTPException(status_code=400, detail="Current password is incorrect.")
-    with _connect() as connection:
+    with _db() as connection:
         connection.execute(
             "UPDATE users SET password_hash = ? WHERE id = ?",
             (_hash_password(body.new_password), user["id"]),
@@ -476,7 +490,7 @@ def change_password(
 
 @admin_router.get("/users")
 def list_users() -> dict:
-    with _connect() as connection:
+    with _db() as connection:
         rows = connection.execute(
             """
             SELECT id, username, display_name, role, is_active, created_at, last_login_at
@@ -498,7 +512,7 @@ def create_user(body: UserCreateRequest, owner: dict = Depends(require_roles("ow
     user_id = str(uuid.uuid4())
     now = int(time.time())
     try:
-        with _connect() as connection:
+        with _db() as connection:
             connection.execute(
                 """
                 INSERT INTO users (id, username, display_name, password_hash, role, is_active, created_at, created_by)
@@ -518,7 +532,7 @@ def update_user(user_id: str, body: UserUpdateRequest) -> dict:
     if not changes:
         raise HTTPException(status_code=400, detail="No changes were supplied.")
 
-    with _connect() as connection:
+    with _db() as connection:
         row = connection.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
         if not row:
             raise HTTPException(status_code=404, detail="User not found.")
