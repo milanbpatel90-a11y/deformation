@@ -40,6 +40,8 @@ class GLBExporter:
             color=measurements.color,
             lens_color=measurements.lens_color,
             lens_opacity=measurements.lens_opacity,
+            scale_source=measurements.scale_source,
+            scale_calibrated=measurements.scale_calibrated,
         )
 
         # Work on an isolated copy: never mutate the runtime template or context.
