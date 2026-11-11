@@ -460,25 +460,21 @@ def download_output(
     filename: str,
     user: dict = Depends(require_roles("owner", "editor", "operator", "viewer")),
 ):
-    """Download only API-generated GLB artifacts addressed by opaque job IDs."""
-    if not re.fullmatch(r"[0-9a-f]{12}\.glb", filename):
+    """Download a generated GLB only to its owner or the system owner."""
+    if not re.fullmatch(r"[0-9a-f]{12}\\.glb", filename):
         raise HTTPException(status_code=400, detail="Invalid filename")
     path = OUTPUT_DIR / filename
-    if not path.exists() or not path.is_file():
+    if not path.is_file():
         raise HTTPException(status_code=404, detail="File not found")
+
+    if user["role"] != "owner":
+        metadata_path = path.with_suffix(".metadata.json")
+        try:
+            metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            raise HTTPException(status_code=404, detail="File not found")
+        if metadata.get("created_by_user_id") != user["id"]:
+            # Do not reveal whether another user's job ID exists.
+            raise HTTPException(status_code=404, detail="File not found")
+
     return FileResponse(path, media_type="model/gltf-binary", filename=filename)
-
-
-@app.get("/api/output/{filename}")
-def download_output(
-    filename: str,
-    user: dict = Depends(require_roles("owner", "editor", "operator", "viewer")),
-):
-    # Prevent path traversal
-    safe_name = Path(filename).name
-    if safe_name != filename or ".." in filename:
-        raise HTTPException(status_code=400, detail="Invalid filename")
-    path = OUTPUT_DIR / safe_name
-    if not path.exists() or not path.is_file():
-        raise HTTPException(status_code=404, detail="File not found")
-    return FileResponse(path, media_type="model/gltf-binary", filename=safe_name)
