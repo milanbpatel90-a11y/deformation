@@ -1,6 +1,7 @@
 """Regression tests for the production-safety fixes in the audit branch."""
 
 from pathlib import Path
+import time
 from types import SimpleNamespace
 
 import numpy as np
@@ -17,7 +18,14 @@ from backend.models import FrameMaterial, FrameShape, Measurements
 from backend.pipeline import DeformationPipeline
 from backend.template_library.loader import TemplateLibrary
 from backend.api.rim_detection_routes import RimDetectionEngine
-from backend.auth import _create_session_token, _read_session_token
+from backend.auth import (
+    SESSION_COOKIE_NAME,
+    _create_session_token,
+    _db,
+    _read_session_token,
+    get_current_user_optional,
+)
+from starlette.requests import Request
 
 
 def _measurements() -> Measurements:
@@ -218,6 +226,39 @@ def test_measurements_reject_impossible_physical_dimensions():
             bridge_width=18,
             temple_length=140,
         )
+
+
+def test_session_version_revokes_previously_issued_tokens():
+    user_id = "audit-session-revocation-test"
+    with _db() as connection:
+        connection.execute("DELETE FROM users WHERE id = ?", (user_id,))
+        connection.execute(
+            """
+            INSERT INTO users (
+                id, username, password_hash, role, is_active, created_at, session_version
+            ) VALUES (?, ?, ?, ?, 1, ?, 4)
+            """,
+            (user_id, user_id, "test-hash", "viewer", int(time.time())),
+        )
+
+    def request_with_version(version):
+        token = _create_session_token(user_id, session_version=version)
+        return Request(
+            {
+                "type": "http",
+                "method": "GET",
+                "path": "/",
+                "headers": [
+                    (b"cookie", f"{SESSION_COOKIE_NAME}={token}".encode("ascii"))
+                ],
+            }
+        )
+
+    assert get_current_user_optional(request_with_version(4))["id"] == user_id
+    assert get_current_user_optional(request_with_version(3)) is None
+
+    with _db() as connection:
+        connection.execute("DELETE FROM users WHERE id = ?", (user_id,))
 
 
 def test_session_token_contains_session_version_for_revocation():
