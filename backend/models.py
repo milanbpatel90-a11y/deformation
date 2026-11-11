@@ -63,7 +63,7 @@ class Measurements(BaseModel):
     lens_height: float = Field(..., gt=15, le=100, allow_inf_nan=False, description="Single lens height in mm")
     bridge_width: float = Field(..., gt=5, le=50, allow_inf_nan=False, description="Bridge width in mm")
     temple_length: float = Field(..., gt=80, le=220, allow_inf_nan=False, description="Temple arm length in mm")
-    rim_thickness: float = Field(default=1.2, gt=0, le=15, allow_inf_nan=False, description="Rim thickness in mm")
+    rim_thickness: float = Field(default=1.2, ge=0, le=15, allow_inf_nan=False, description="Rim thickness in mm")
     material: FrameMaterial = FrameMaterial.METAL
     shape: FrameShape = FrameShape.GEOMETRIC
     nose_pads: bool = True
