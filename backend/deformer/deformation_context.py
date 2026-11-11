@@ -140,8 +140,15 @@ class DeformationContext:
             if mesh is None or actual_name not in self.template_scene.geometry:
                 continue
             self.template_scene.geometry[actual_name] = to_local(mesh, actual_name)
-            # Keep a world-space logical copy for anchors and downstream metadata.
-            self.template_scene.geometry[logical_name] = mesh.copy()
+            # Keep a world-space logical copy for anchors when it is not itself
+            # the source geometry referenced by a scene-graph node.
+            if logical_name != actual_name:
+                if logical_name in node_transforms:
+                    raise ValueError(
+                        f"Logical alias '{logical_name}' already has its own GLB node; "
+                        "remove the conflicting alias or rename the source mesh."
+                    )
+                self.template_scene.geometry[logical_name] = mesh.copy()
 
         return self.template_scene
 
