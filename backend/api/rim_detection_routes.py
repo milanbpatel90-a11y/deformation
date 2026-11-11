@@ -4,18 +4,35 @@ Endpoints to integrate rim detection into main eyewear-vto backend.
 Add these to backend.api.main or create backend.api.rim_detection_routes.py
 """
 
-from fastapi import APIRouter, UploadFile, File, HTTPException, BackgroundTasks, Depends
+from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Depends
 from backend.auth import require_roles
 from fastapi.responses import JSONResponse
 import cv2
 import numpy as np
 import logging
-import tempfile
+import os
 from pathlib import Path
-from typing import Optional, List, Dict
-import json
+from typing import Optional, Dict
 
 logger = logging.getLogger(__name__)
+
+MAX_UPLOAD_BYTES = max(1, int(os.getenv("RIM_DETECTION_MAX_UPLOAD_BYTES", 10 * 1024 * 1024)))
+MAX_IMAGE_PIXELS = max(1, int(os.getenv("RIM_DETECTION_MAX_IMAGE_PIXELS", 40_000_000)))
+
+
+async def _decode_upload(file: UploadFile) -> np.ndarray:
+    contents = await file.read(MAX_UPLOAD_BYTES + 1)
+    if not contents:
+        raise HTTPException(status_code=400, detail="Image upload is empty.")
+    if len(contents) > MAX_UPLOAD_BYTES:
+        raise HTTPException(status_code=413, detail="Image exceeds the upload size limit.")
+    image = cv2.imdecode(np.frombuffer(contents, np.uint8), cv2.IMREAD_COLOR)
+    if image is None:
+        raise HTTPException(status_code=400, detail="Uploaded file is not a supported image.")
+    height, width = image.shape[:2]
+    if height * width > MAX_IMAGE_PIXELS:
+        raise HTTPException(status_code=413, detail="Image dimensions exceed the processing limit.")
+    return image
 
 # Initialize router
 router = APIRouter(prefix="/api/rim-detection", tags=["rim-detection"], dependencies=[Depends(require_roles("owner", "editor"))])
@@ -38,8 +55,10 @@ class RimDetectionEngine:
         """
         self.yolo_model = None
         self.use_yolo = False
+        self.model_path = None
         
-        if yolo_model_path and Path(yolo_model_path).exists():
+        if yolo_model_path and Path(yolo_model_path).is_file():
+            self.model_path = str(Path(yolo_model_path).resolve())
             try:
                 from ultralytics import YOLO
                 self.yolo_model = YOLO(yolo_model_path)
@@ -75,7 +94,12 @@ class RimDetectionEngine:
         try:
             results = self.yolo_model(image, conf=0.5, imgsz=640)
             
-            if results and len(results) > 0 and results[0].masks is not None:
+            if (
+                results
+                and len(results) > 0
+                and results[0].masks is not None
+                and len(results[0].masks.data) > 0
+            ):
                 # Get segmentation mask
                 mask = results[0].masks.data[0].cpu().numpy()
                 mask = (mask * 255).astype(np.uint8)
@@ -160,8 +184,20 @@ class RimDetectionEngine:
         epsilon = 0.02 * perimeter
         polygon = cv2.approxPolyDP(largest, epsilon, True)
         
+        # A contour with fewer than three polygon points cannot define a rim.
+        polygon_points = polygon.reshape(-1, 2)
+        if len(polygon_points) < 3:
+            return {
+                "vertices": [],
+                "edge_confidence": 0.0,
+                "fit_error": 1.0,
+                "contour_area": int(area),
+                "success": False,
+                "error": "Contour did not produce a valid polygon",
+            }
+
         # Resample to n_vertices
-        vertices = self._resample_polygon(polygon.reshape(-1, 2), n_vertices)
+        vertices = self._resample_polygon(polygon_points, n_vertices)
         
         # Measure metrics
         edge_conf = self._measure_edge_sharpness(mask, largest)
@@ -178,18 +214,22 @@ class RimDetectionEngine:
     def _resample_polygon(self, points: np.ndarray, n: int) -> np.ndarray:
         """Resample polygon to exactly n points"""
         
-        diffs = np.diff(points, axis=0)
+        points = np.asarray(points, dtype=np.float64)
+        if points.ndim != 2 or points.shape[1] != 2 or len(points) < 3 or n < 3:
+            return np.zeros((max(0, n), 2), dtype=np.int32)
+        closed = np.vstack([points, points[0]])
+        diffs = np.diff(closed, axis=0)
         distances = np.sqrt((diffs ** 2).sum(axis=1))
-        cumulative = np.concatenate([[0], np.cumsum(distances)])
-        total_length = cumulative[-1]
-        
-        new_distances = np.linspace(0, total_length, n)
-        
-        resampled = np.array([
-            np.interp(new_distances, cumulative, points[:, 0]),
-            np.interp(new_distances, cumulative, points[:, 1]),
-        ]).T
-        
+        cumulative = np.concatenate([[0.0], np.cumsum(distances)])
+        total_length = float(cumulative[-1])
+        if total_length <= 1e-8:
+            return np.repeat(points[:1].astype(np.int32), n, axis=0)
+
+        new_distances = np.linspace(0.0, total_length, n, endpoint=False)
+        resampled = np.column_stack((
+            np.interp(new_distances, cumulative, closed[:, 0]),
+            np.interp(new_distances, cumulative, closed[:, 1]),
+        ))
         return resampled.astype(np.int32)
     
     def _measure_edge_sharpness(self, mask: np.ndarray, contour: np.ndarray) -> float:
@@ -236,11 +276,12 @@ def get_rim_engine() -> RimDetectionEngine:
     
     if _rim_engine is None:
         # Search for trained YOLOv8 model in all possible locations
+        project_root = Path(__file__).resolve().parents[2]
         candidate_paths = [
-            Path("runs/segment/eyewear_seg/weights/best.pt"),
-            Path("runs/segment/train/weights/best.pt"),
-            Path("runs/segment/runs/segment/eyewear_seg/weights/best.pt"),
-            Path("runs/detect/eyewear_seg/weights/best.pt"),
+            project_root / "runs/segment/eyewear_seg/weights/best.pt",
+            project_root / "runs/segment/train/weights/best.pt",
+            project_root / "runs/segment/runs/segment/eyewear_seg/weights/best.pt",
+            project_root / "runs/detect/eyewear_seg/weights/best.pt",
         ]
         
         yolo_path = None
@@ -284,12 +325,7 @@ async def detect_rim_from_image(
     
     try:
         # Read image
-        contents = await file.read()
-        nparr = np.frombuffer(contents, np.uint8)
-        image = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-        
-        if image is None:
-            raise HTTPException(status_code=400, detail="Invalid image")
+        image = await _decode_upload(file)
         
         h, w = image.shape[:2]
         
@@ -320,15 +356,17 @@ async def detect_rim_from_image(
             "image_size": [w, h],
         })
     
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"Rim detection failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.exception("Rim detection failed")
+        raise HTTPException(status_code=500, detail="Rim detection failed.") from e
 
 
 @router.post("/apply-to-template")
 async def apply_rim_detection_to_template(
     file: UploadFile = File(...),
-    template_name: str = "geometric_metal",
+    template_name: str = Form("geometric_metal"),
 ) -> JSONResponse:
     """
     Detect rim, estimate pull strength, and suggest template calibration update.
@@ -343,20 +381,7 @@ async def apply_rim_detection_to_template(
     """
     
     try:
-        # Run rim detection first
-        contents = await file.read()
-        
-        # Create temporary file
-        with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as tmp:
-            tmp.write(contents)
-            tmp_path = tmp.name
-        
-        # Reopen as UploadFile-like
-        from fastapi import File as FastAPIFile
-        
-        nparr = np.frombuffer(contents, np.uint8)
-        image = cv2.imdecode(nparr, cv2.COLOR_BGR2BGR)
-        
+        image = await _decode_upload(file)
         engine = get_rim_engine()
         mask = engine.get_glasses_mask(image)
         result = engine.detect_rim_contour(mask)
@@ -379,9 +404,11 @@ async def apply_rim_detection_to_template(
             },
         })
     
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"Template calibration failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.exception("Template calibration failed")
+        raise HTTPException(status_code=500, detail="Template calibration failed.") from e
 
 
 @router.get("/status")
@@ -393,7 +420,7 @@ async def get_rim_detection_status() -> JSONResponse:
     return JSONResponse({
         "engine_ready": True,
         "using_yolo": engine.use_yolo,
-        "yolo_model_path": "runs/detect/eyewear_seg/weights/best.pt",
+        "yolo_model_path": engine.model_path,
         "yolo_available": engine.yolo_model is not None,
         "fallback": "OpenCV threshold" if not engine.use_yolo else None,
     })
