@@ -528,9 +528,6 @@ class DeformationPipeline:
             fused_measurements.material = front_style.material
             fused_measurements.nose_pads = front_style.nose_pads
             fused_measurements.color = color
-            if not fused_measurements.scale_calibrated:
-                fused_measurements.scale_source = "user_supplied"
-                fused_measurements.scale_calibrated = True
             measurement_source = fused_measurements.scale_source
         else:
             fused_measurements = fuser.fuse(extracted_views)
