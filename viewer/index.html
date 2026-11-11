@@ -372,7 +372,18 @@ function loadGLB(url) {
   overlayStatus.textContent = 'Loading model…';
   loader.load(url, (gltf) => {
     if (currentModel) scene.remove(currentModel);
-    currentModel = gltf.scene;
+    // GLB extras store the nose-bridge attachment point in metres. Offset the
+    // loaded scene so that this anchor, rather than an arbitrary model origin,
+    // is positioned on the detected face nose during virtual try-on.
+    const sceneIndex = gltf.parser?.json?.scene ?? 0;
+    const sceneExtras = gltf.parser?.json?.scenes?.[sceneIndex]?.extras;
+    const anchors = sceneExtras?.extras?.anchors || sceneExtras?.anchors || gltf.parser?.json?.extras?.anchors;
+    const noseAnchor = anchors?.NoseBridge;
+    if (Array.isArray(noseAnchor) && noseAnchor.length === 3 && noseAnchor.every(Number.isFinite)) {
+      gltf.scene.position.sub(new THREE.Vector3(noseAnchor[0], noseAnchor[1], noseAnchor[2]));
+    }
+    currentModel = new THREE.Group();
+    currentModel.add(gltf.scene);
     scene.add(currentModel);
     currentModel.updateMatrixWorld(true);
     const modelBounds = new THREE.Box3().setFromObject(currentModel);
