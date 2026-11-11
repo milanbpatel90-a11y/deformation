@@ -6,6 +6,7 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 
+from backend.deformer.descriptor_loader import DescriptorLoader
 from backend.models import TemplateInfo
 from backend.template_library.loader import TemplateLibrary
 from backend.template_matching.feature_extractor import EyewearFeatureSet
@@ -26,6 +27,18 @@ class TemplateMatcher:
     def __init__(self, library: TemplateLibrary, scorer: WeightedTemplateScorer | None = None):
         self.library = library
         self.scorer = scorer or WeightedTemplateScorer()
+        self.descriptor_loader = DescriptorLoader(library.templates_dir)
+
+    def _require_production_template(self, name: str, template: TemplateInfo) -> None:
+        source_glb = self.library.templates_dir / Path(template.profile.source_glb).name
+        if not source_glb.is_file():
+            raise FileNotFoundError(
+                f"Template '{name}' source GLB is missing: {source_glb}. "
+                "Fallback geometry is not accepted for production deformation."
+            )
+        # Validate the descriptor against the actual GLB, including independent
+        # frame/rim/bridge/lens/temple meshes, before ranking or selecting it.
+        self.descriptor_loader.load(name, template_info=template)
 
     def match(
         self,
@@ -33,20 +46,20 @@ class TemplateMatcher:
         override: str | None = None,
     ) -> TemplateMatchResult:
         if override:
-            try:
-                template = self.library.load(override)
-                scored = self.scorer.score(features, template)
-                return TemplateMatchResult(best=scored, candidates=[scored])
-            except FileNotFoundError:
-                pass
+            template = self.library.load(override)
+            self._require_production_template(override, template)
+            scored = self.scorer.score(features, template)
+            return TemplateMatchResult(best=scored, candidates=[scored])
 
         candidates = []
         for template in self._load_candidates():
             candidates.append(self.scorer.score(features, template))
 
         if not candidates:
-            fallback = self.scorer.score(features, self.library.load("geometric_metal"))
-            return TemplateMatchResult(best=fallback, candidates=[fallback])
+            raise ValueError(
+                "No production-ready eyewear templates are available. "
+                "Each template needs a valid GLB, descriptor, and independently deformable frame parts."
+            )
 
         ranked = sorted(candidates, key=lambda item: item.score, reverse=True)
         return TemplateMatchResult(best=ranked[0], candidates=ranked)
@@ -63,7 +76,9 @@ class TemplateMatcher:
                 info = self.library.load(name)
             except (FileNotFoundError, KeyError, ValueError):
                 continue
-            if not Path(info.glb_path).exists():
+            try:
+                self._require_production_template(name, info)
+            except (FileNotFoundError, KeyError, ValueError):
                 continue
             templates.append(info)
         return templates
