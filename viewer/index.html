@@ -148,7 +148,7 @@
     <div class="img-card" id="card-multi" onclick="document.getElementById('input-multi').click()">
       <input type="file" id="input-multi" accept=".jpg,.jpeg,.png,.webp,.bmp" multiple />
       <div class="label">Production input (4–5 images) <span class="badge required">required</span></div>
-      <div class="placeholder" id="ph-multi">Select 4–5 product photos</div>
+      <div class="placeholder" id="ph-multi">Select 4–5 photos; include front and side views</div>
       <div id="multi-preview-list" style="display: flex; gap: 4px; flex-wrap: wrap; margin-top: 6px;"></div>
     </div>
   </div>
@@ -164,7 +164,7 @@
 
   <div class="section" id="physical-measurements">
     <div class="section-title">Physical measurements (mm) — required for accurate scale</div>
-    <p style="font-size:12px;color:#9aa0b5;margin:0 0 10px;">Enter manufacturer specifications or measure the actual frame. Photos alone cannot establish millimetre scale.</p>
+    <p style="font-size:12px;color:#9aa0b5;margin:0 0 10px;">Include at least one front and one side/three-quarter view. Enter manufacturer specifications or measure the actual frame; photos alone cannot establish millimetre scale.</p>
     <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;">
       <label class="field">Frame width<input id="measure-frame-width" type="number" min="80" max="220" step="0.1" placeholder="e.g. 140" /></label>
       <label class="field">Lens width<input id="measure-lens-width" type="number" min="20" max="100" step="0.1" placeholder="e.g. 52" /></label>
