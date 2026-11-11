@@ -199,24 +199,50 @@ def api_info():
     }
 
 
-@app.get("/api/ready")
 @app.get("/api/health")
 def health():
-    """Liveness + basic readiness for production monitoring."""
-    available = library.list_templates()
-    active = _pick_active_template(available)
-    return {
-        "status": "ok",
-        "version": "1.2.0",
-        "templates_available": len(available),
-        "active_template": active,
-        "preferred_templates": [t for t in PREFERRED_TEMPLATES if t in available],
-    }
+    """Liveness probe: process is running and can answer HTTP requests."""
+    return {"status": "ok", "version": "1.3.0"}
+
+
+@app.get("/api/ready")
+def readiness():
+    """Readiness probe: production templates, model and artifact storage are usable."""
+    try:
+        candidates = pipeline.matcher._load_candidates()
+        names = [template.name for template in candidates]
+        if not names:
+            raise HTTPException(
+                status_code=503,
+                detail="No production-ready templates with independent mesh components are available.",
+            )
+        OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+        probe = OUTPUT_DIR / f".ready-{uuid.uuid4().hex}"
+        probe.write_text("ok", encoding="utf-8")
+        probe.unlink(missing_ok=True)
+        app_env = os.getenv("APP_ENV", "development").strip().lower()
+        if app_env in {"production", "prod"} and getattr(pipeline.segmenter, "model", None) is None:
+            raise HTTPException(
+                status_code=503,
+                detail="A trained eyewear segmentation model is required in production.",
+            )
+        return {
+            "status": "ready",
+            "version": "1.3.0",
+            "production_ready_templates": names,
+            "templates_available": len(names),
+        }
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("Readiness check failed")
+        raise HTTPException(status_code=503, detail="Production dependencies are not ready.") from exc
 
 
 @app.get("/api/templates")
 def list_templates(user: dict = Depends(get_current_user)):
-    available = library.list_templates()
+    candidates = pipeline.matcher._load_candidates()
+    available = [template.name for template in candidates]
     active = _pick_active_template(available)
     return {
         "templates": available,
