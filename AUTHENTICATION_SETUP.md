@@ -9,7 +9,9 @@ This application uses server-side role checks for the FastAPI endpoints and the 
 | **Owner** | One protected full-access account. Can generate models, use rim calibration, and create/manage all other accounts. |
 | **Editor** | Can upload images, generate models, and use rim-detection/calibration endpoints. Cannot manage accounts. |
 | **Operator** | Can upload images, generate models, and use the 3D viewer. Cannot manage accounts or use rim calibration. |
-| **Viewer** | Read-only access to the 3D viewer and GLB outputs. Cannot submit generation jobs. |
+| **Viewer** | Read-only access to the 3D viewer and only their own generated GLB outputs. Cannot submit generation jobs. |
+
+Non-owner users can download only the GLBs they generated. The Owner can access all generated GLBs.
 
 The Owner role is created once during initial setup. The user-management API does not permit an Owner to be demoted, disabled, or replaced through the UI. Only the Owner can create, change, or deactivate other accounts.
 
@@ -42,6 +44,7 @@ Set these server-side environment variables before starting the application:
 - `AUTH_SECRET_KEY`: a unique random secret with at least 32 characters. Generate with `python -c "import secrets; print(secrets.token_urlsafe(48))"`.
 - `AUTH_BOOTSTRAP_TOKEN`: a separate, random one-time setup token. Remove it from the deployment environment after the Owner account has been created.
 - `AUTH_COOKIE_SECURE=true`: required when the application is served over HTTPS.
+- `ALLOW_UNCALIBRATED_GENERATION=false`: keep false in production; image-only scale estimates are not accepted for production GLB generation.
 - `AUTH_DB_PATH`: point this to a persistent writable volume, for example `/var/data/auth.sqlite3` if the host mounts a persistent disk at `/var/data`.
 
 **Important:** the user database must live on persistent storage. Do not use an ephemeral container filesystem for production accounts; a redeploy or restart that discards the SQLite file would discard all user accounts. Back up the database regularly. For multiple independent application instances, use a shared production database such as PostgreSQL rather than separate local SQLite files.
@@ -52,10 +55,13 @@ Use HTTPS in production. Do not expose `.env`, `.auth_secret`, or the SQLite dat
 
 - Passwords are stored as salted PBKDF2-HMAC-SHA256 hashes (not plaintext).
 - Sessions use a signed, HttpOnly cookie with an eight-hour lifetime.
+- Logout and password changes increment the user's session version, invalidating previously issued cookies. Password changes keep only the current session active.
 - Cookies use `SameSite=Strict`; production cookies also use the Secure flag.
 - Authenticated state-changing requests require the CSRF token header.
 - Deformation, measurement, template, output, and rim-detection endpoints enforce access on the server. Hiding a UI control is not treated as authorization.
-- `GET /api/health` remains public for deployment health checks. The login status endpoint is public so the login page can determine whether first-run setup is required.
+- `GET /api/health` is a public liveness check. `GET /api/ready` verifies production-ready templates, segmentation model availability, and writable artifact storage.
+- The experimental `deformation_tuning_api.py` is local-development-only, binds to loopback, and refuses to start when `APP_ENV=production`.
+- The browser viewer and API should be same-origin. For a Vercel frontend with a Railway API, configure a Vercel rewrite/proxy for `/api/*` to the Railway service. The current Strict SameSite session and CSRF cookies are not designed for direct cross-origin browser calls; CORS alone does not solve that.
 - There is no self-service public sign-up. The Owner creates accounts from `/admin/`.
 - Users can change their own password from the workspace header after signing in.
 
@@ -71,7 +77,10 @@ Use HTTPS in production. Do not expose `.env`, `.auth_secret`, or the SQLite dat
 | `POST /api/auth/login`, `POST /api/auth/logout` | Authentication |
 | `GET /api/auth/me` | Any signed-in user |
 | `GET/POST/PATCH /api/admin/users` | Owner only |
-| `POST /api/deform*` | Owner, Editor, Operator |
+| `POST /api/deform` | Owner, Editor, Operator; legacy image-only route is blocked in production unless explicitly enabled |
+| `POST /api/deform/multi-view` | Owner, Editor, Operator; requires 4–5 images plus physical dimensions in millimetres |
+| `POST /api/deform/measurements` | Owner, Editor, Operator; requires explicit physical dimensions |
 | `/api/rim-detection/*` | Owner, Editor |
-| `GET /api/templates`, `GET /api/output/{filename}` | Any signed-in user |
+| `GET /api/templates` | Any signed-in user; only validated templates are listed |
+| `GET /api/output/{filename}` | Owner can access all; other signed-in users can access only their own outputs |
 

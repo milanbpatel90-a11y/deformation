@@ -59,6 +59,11 @@
       background: #1e1e3a; color: #eee; font-size: 13px;
     }
     input[type=text]:focus, input[type=color]:focus { outline: none; border-color: #8be9fd; box-shadow: 0 0 4px rgba(139, 233, 253, 0.2); }
+    input[type=number], select {
+      width: 100%; padding: 7px 8px; border-radius: 4px; border: 1px solid #3a3a5a;
+      background: #1e1e3a; color: #eee; font-size: 12px; min-width: 0;
+    }
+    input[type=number]:focus, select:focus { outline: none; border-color: #8be9fd; }
 
     /* ── Generate button ── */
     #generate-btn {
@@ -121,29 +126,29 @@
 
     <div class="img-card" id="card-front" onclick="document.getElementById('input-front').click()">
       <input type="file" id="input-front" accept="image/*" />
-      <div class="label">Front view <span class="badge required">required</span></div>
+      <div class="label">Front reference <span class="badge optional">preview only</span></div>
       <img class="preview" id="prev-front" />
       <div class="placeholder" id="ph-front">Click to choose</div>
     </div>
 
     <div class="img-card" id="card-side" onclick="document.getElementById('input-side').click()">
       <input type="file" id="input-side" accept="image/*" />
-      <div class="label">Side view <span class="badge optional">optional</span></div>
+      <div class="label">Side reference <span class="badge optional">preview only</span></div>
       <img class="preview" id="prev-side" />
       <div class="placeholder" id="ph-side">Click to choose</div>
     </div>
 
     <div class="img-card" id="card-top" onclick="document.getElementById('input-top').click()">
       <input type="file" id="input-top" accept="image/*" />
-      <div class="label">Top view <span class="badge optional">optional — rim thickness</span></div>
+      <div class="label">Top reference <span class="badge optional">preview only</span></div>
       <img class="preview" id="prev-top" />
       <div class="placeholder" id="ph-top">Click to choose</div>
     </div>
 
     <div class="img-card" id="card-multi" onclick="document.getElementById('input-multi').click()">
-      <input type="file" id="input-multi" accept="image/*" multiple />
-      <div class="label">Multi-View (4-6 images) <span class="badge optional">multi-fusion</span></div>
-      <div class="placeholder" id="ph-multi">Click to choose multiple files</div>
+      <input type="file" id="input-multi" accept=".jpg,.jpeg,.png,.webp,.bmp" multiple />
+      <div class="label">Production input (4–5 images) <span class="badge required">required</span></div>
+      <div class="placeholder" id="ph-multi">Select 4–5 photos; include front and side views</div>
       <div id="multi-preview-list" style="display: flex; gap: 4px; flex-wrap: wrap; margin-top: 6px;"></div>
     </div>
   </div>
@@ -157,10 +162,26 @@
     <input type="text" id="template-input" placeholder="auto-detect" />
   </div>
 
-  <button id="generate-btn" disabled>Generate 3D Mesh</button>
+  <div class="section" id="physical-measurements">
+    <div class="section-title">Physical measurements (mm) — required for accurate scale</div>
+    <p style="font-size:12px;color:#9aa0b5;margin:0 0 10px;">Include at least one front and one side/three-quarter view. Enter manufacturer specifications or measure the actual frame; photos alone cannot establish millimetre scale.</p>
+    <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;">
+      <label class="field">Frame width<input id="measure-frame-width" type="number" min="80" max="220" step="0.1" placeholder="e.g. 140" /></label>
+      <label class="field">Lens width<input id="measure-lens-width" type="number" min="20" max="100" step="0.1" placeholder="e.g. 52" /></label>
+      <label class="field">Lens height<input id="measure-lens-height" type="number" min="15" max="100" step="0.1" placeholder="e.g. 42" /></label>
+      <label class="field">Bridge width<input id="measure-bridge-width" type="number" min="5" max="50" step="0.1" placeholder="e.g. 18" /></label>
+      <label class="field">Temple length<input id="measure-temple-length" type="number" min="80" max="220" step="0.1" placeholder="e.g. 140" /></label>
+      <label class="field">Rim thickness<input id="measure-rim-thickness" type="number" min="0" max="15" step="0.1" value="1.2" /></label>
+      <label class="field">Temple curve angle<input id="measure-temple-curve" type="number" min="0" max="90" step="0.1" value="28" /></label>
+      <label class="field">Frame shape<select id="measure-shape"><option value="">AI classify</option><option value="rectangle">Rectangle</option><option value="round">Round</option><option value="square">Square</option><option value="geometric">Geometric</option><option value="aviator">Aviator</option><option value="cat_eye">Cat eye</option><option value="browline">Browline</option><option value="rimless">Rimless</option></select></label>
+      <label class="field">Material<select id="measure-material"><option value="">AI classify</option><option value="metal">Metal</option><option value="acetate">Acetate</option><option value="plastic">Plastic</option><option value="titanium">Titanium</option><option value="mixed">Mixed</option></select></label>
+    </div>
+  </div>
+
+  <button id="generate-btn" disabled>Generate calibrated 3D GLB</button>
   <button id="tryon-btn" style="margin-top: 8px; width: 100%; padding: 10px; border-radius: 6px; border: none; background: #8be9fd; color: #1a1a2e; font-weight: 700; font-size: 14px; cursor: pointer; transition: background .2s;">Enable Webcam Try-On</button>
 
-  <div id="status-box">Upload a front image to begin.</div>
+  <div id="status-box">Select 4–5 product images and enter their physical measurements in millimetres.</div>
   <button id="download-btn">⬇ Download GLB</button>
 
   <!-- Pipeline stages appear here after generation -->
@@ -322,6 +343,7 @@ fill.position.set(-60, -20, 50);
 scene.add(fill);
 
 let currentModel = null;
+let currentModelBaseWidth = 0;
 let isTryOnActive = false;
 let tryOnCamera = null;
 let tryOnVideo = null;
@@ -350,8 +372,27 @@ function loadGLB(url) {
   overlayStatus.textContent = 'Loading model…';
   loader.load(url, (gltf) => {
     if (currentModel) scene.remove(currentModel);
-    currentModel = gltf.scene;
+    // GLB extras store the nose-bridge attachment point in metres. Offset the
+    // loaded scene so that this anchor, rather than an arbitrary model origin,
+    // is positioned on the detected face nose during virtual try-on.
+    const sceneIndex = gltf.parser?.json?.scene ?? 0;
+    const sceneExtras = gltf.parser?.json?.scenes?.[sceneIndex]?.extras;
+    const anchors = sceneExtras?.extras?.anchors || sceneExtras?.anchors || gltf.parser?.json?.extras?.anchors;
+    const noseAnchor = anchors?.NoseBridge;
+    if (Array.isArray(noseAnchor) && noseAnchor.length === 3 && noseAnchor.every(Number.isFinite)) {
+      gltf.scene.position.sub(new THREE.Vector3(noseAnchor[0], noseAnchor[1], noseAnchor[2]));
+    }
+    currentModel = new THREE.Group();
+    currentModel.add(gltf.scene);
     scene.add(currentModel);
+    currentModel.updateMatrixWorld(true);
+    const modelBounds = new THREE.Box3().setFromObject(currentModel);
+    currentModelBaseWidth = modelBounds.getSize(new THREE.Vector3()).x;
+    if (!Number.isFinite(currentModelBaseWidth) || currentModelBaseWidth <= 1e-8) {
+      currentModelBaseWidth = 0;
+      overlayStatus.textContent = 'Error: GLB has no measurable frame width';
+      return;
+    }
     if (!isTryOnActive) {
       fitCamera(currentModel);
     }
@@ -411,6 +452,15 @@ inputMulti.addEventListener('change', (e) => {
   const files = e.target.files;
   multiPreviewList.innerHTML = '';
   if (!files || files.length === 0) return;
+
+  const status = document.getElementById('status-box');
+  if (files.length < 4 || files.length > 5) {
+    status.className = 'error';
+    status.textContent = 'Select 4–5 images for multi-view generation. You selected ' + files.length + '.';
+  } else {
+    status.className = '';
+    status.textContent = files.length + ' product images selected. Enter physical measurements below to enable generation.';
+  }
   
   for (let file of files) {
     const reader = new FileReader();
@@ -432,10 +482,25 @@ inputMulti.addEventListener('change', (e) => {
 });
 
 function updateGenerateBtn() {
-  const hasFront = document.getElementById('input-front').files.length > 0;
-  const hasMulti = document.getElementById('input-multi').files.length > 0;
-  document.getElementById('generate-btn').disabled = !(hasFront || hasMulti);
+  const multiCount = document.getElementById('input-multi').files.length;
+  const hasValidMulti = multiCount >= 4 && multiCount <= 5;
+  const requiredMeasurements = [
+    'measure-frame-width', 'measure-lens-width', 'measure-lens-height',
+    'measure-bridge-width', 'measure-temple-length'
+  ];
+  const hasMeasurements = requiredMeasurements.every((id) => {
+    const value = document.getElementById(id).value.trim();
+    return value !== '' && Number.isFinite(Number(value));
+  });
+  document.getElementById('generate-btn').disabled = !(hasValidMulti && hasMeasurements);
 }
+
+['measure-frame-width', 'measure-lens-width', 'measure-lens-height',
+ 'measure-bridge-width', 'measure-temple-length', 'measure-rim-thickness',
+ 'measure-temple-curve', 'measure-shape', 'measure-material'].forEach((id) => {
+  document.getElementById(id).addEventListener('input', updateGenerateBtn);
+  document.getElementById(id).addEventListener('change', updateGenerateBtn);
+});
 
 // ── Pipeline stages renderer ──────────────────────────────────────────────────
 function renderPipelineStages(stages) {
@@ -482,41 +547,63 @@ const statusBox = document.getElementById('status-box');
 const downloadBtn = document.getElementById('download-btn');
 
 document.getElementById('generate-btn').addEventListener('click', async () => {
-  const frontFile = document.getElementById('input-front').files[0];
   const multiFiles = document.getElementById('input-multi').files;
-  if (!frontFile && (!multiFiles || multiFiles.length === 0)) return;
+  if (!multiFiles || multiFiles.length < 4 || multiFiles.length > 5) {
+    statusBox.className = 'error';
+    statusBox.textContent = 'Select exactly 4–5 product images.';
+    return;
+  }
+
+  const requiredMeasurements = {
+    frame_width: 'measure-frame-width',
+    lens_width: 'measure-lens-width',
+    lens_height: 'measure-lens-height',
+    bridge_width: 'measure-bridge-width',
+    temple_length: 'measure-temple-length'
+  };
+  for (const [field, id] of Object.entries(requiredMeasurements)) {
+    const value = document.getElementById(id).value.trim();
+    if (!value || !Number.isFinite(Number(value))) {
+      statusBox.className = 'error';
+      statusBox.textContent = 'Enter all five physical measurements in millimetres before generating.';
+      document.getElementById(id).focus();
+      return;
+    }
+  }
 
   const btn = document.getElementById('generate-btn');
   btn.disabled = true;
   btn.textContent = 'Generating…';
   statusBox.className = '';
-  statusBox.textContent = 'Running pipeline…';
+  statusBox.textContent = 'Validating images and calibrated measurements…';
   downloadBtn.style.display = 'none';
   document.getElementById('pipeline-stages').style.display = 'none';
 
   const form = new FormData();
   const API_BASE = window.location.origin;
-  let endpoint = `${API_BASE}/api/deform`;
+  const endpoint = `${API_BASE}/api/deform/multi-view`;
 
-  if (multiFiles && multiFiles.length > 0) {
-    endpoint = `${API_BASE}/api/deform/multi-view`;
-    for (let file of multiFiles) {
-      form.append('images', file);
-    }
-  } else {
-    form.append('front', frontFile);
-    const sideFile = document.getElementById('input-side').files[0];
-    if (sideFile) form.append('side', sideFile);
-    const topFile = document.getElementById('input-top').files[0];
-    if (topFile) form.append('top', topFile);
+  for (const file of multiFiles) form.append('images', file);
+  for (const [field, id] of Object.entries(requiredMeasurements)) {
+    form.append(field, document.getElementById(id).value);
   }
-
+  form.append('rim_thickness', document.getElementById('measure-rim-thickness').value || '1.2');
+  form.append('temple_curve_angle', document.getElementById('measure-temple-curve').value || '28');
+  const shape = document.getElementById('measure-shape').value;
+  const material = document.getElementById('measure-material').value;
+  if (shape) form.append('shape', shape);
+  if (material) form.append('material', material);
   form.append('color', document.getElementById('color-pick').value);
-  const tpl = document.getElementById('template-input').value.trim();
-  if (tpl) form.append('template', tpl);
+  const template = document.getElementById('template-input').value.trim();
+  if (template) form.append('template', template);
 
   try {
-    const resp = await fetch(endpoint, {\n      method: 'POST',\n      body: form,\n      credentials: 'same-origin',\n      headers: { 'X-CSRF-Token': readCookie('defirmation_csrf') }\n    });
+    const resp = await fetch(endpoint, {
+      method: 'POST',
+      body: form,
+      credentials: 'same-origin',
+      headers: { 'X-CSRF-Token': readCookie('defirmation_csrf') }
+    });
     const data = await resp.json();
 
     if (!resp.ok) {
@@ -527,26 +614,24 @@ document.getElementById('generate-btn').addEventListener('click', async () => {
 
     const m = data.measurements || {};
     statusBox.textContent =
-      `✓ Done  ·  Template: ${data.template}\n` +
-      `Frame ${m.frame_width}mm  ·  Lens ${m.lens_width}×${m.lens_height}mm\n` +
-      `Bridge ${m.bridge_width}mm  ·  Temple ${m.temple_length}mm  ·  Rim ${m.rim_thickness}mm`;
+      `✓ Done · Template: ${data.template} · Scale: ${data.measurement_source}\n` +
+      `Frame ${m.frame_width}mm · Lens ${m.lens_width}×${m.lens_height}mm\n` +
+      `Bridge ${m.bridge_width}mm · Temple ${m.temple_length}mm · Rim ${m.rim_thickness}mm`;
 
     renderPipelineStages(data.pipeline);
 
-    const fullDownloadUrl = data.download_url.startsWith('http') 
-      ? data.download_url 
+    const fullDownloadUrl = data.download_url.startsWith('http')
+      ? data.download_url
       : `${API_BASE}${data.download_url}`;
 
     downloadBtn.style.display = 'block';
     downloadBtn.onclick = () => { window.location.href = fullDownloadUrl; };
-
     loadGLB(fullDownloadUrl);
   } catch (err) {
     statusBox.className = 'error';
     statusBox.textContent = 'Network error: ' + err.message;
   } finally {
-    btn.disabled = false;
-    btn.textContent = 'Generate 3D Mesh';
+    btn.textContent = 'Generate calibrated 3D GLB';
     updateGenerateBtn();
   }
 });
@@ -597,9 +682,11 @@ function onResults(results) {
       // Offset slightly forward along the look direction so glasses sit on the nose
       currentModel.position.addScaledVector(v_dir, face_width * 0.15);
       
-      // 2. Scale the model dynamically based on face width
-      const base_scale = face_width * 0.72;
-      currentModel.scale.set(base_scale, base_scale, base_scale);
+      // 2. Scale by the measured GLB frame width, not by face width alone.
+      // This keeps the model-to-face ratio stable regardless of GLB coordinate units.
+      const desiredFrameWidth = face_width * 0.72;
+      const baseScale = desiredFrameWidth / currentModelBaseWidth;
+      currentModel.scale.setScalar(baseScale);
       
       overlayStatus.textContent = 'Webcam Try-On active · Face tracked';
     }

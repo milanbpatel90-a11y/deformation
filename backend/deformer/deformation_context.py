@@ -89,5 +89,68 @@ class DeformationContext:
         parts = self.descriptor.vertex_groups.get(group_name, [])
         return [self.mesh(part) for part in parts]
 
+    def sync_meshes_to_scene(self) -> trimesh.Scene:
+        """Write deformed world-space meshes back to the scene's local geometry.
+
+        Deformation stages operate on independent, world-space copies in
+        self.meshes. GLB export reads template_scene and therefore must receive
+        those updated meshes, transformed back into each node's local coordinate
+        system. Logical aliases are copied back to their original GLB geometry
+        entries; alias-only geometry is retained for metadata and anchors.
+        """
+        aliases = self.descriptor.raw.get("mesh_aliases", {})
+        if not isinstance(aliases, dict):
+            aliases = {}
+        aliases = {
+            logical: actual
+            for logical, actual in aliases.items()
+            if isinstance(logical, str) and isinstance(actual, str)
+        }
+        alias_sources = set(aliases.values())
+
+        node_transforms: dict[str, np.ndarray] = {}
+        for node_name in self.template_scene.graph.nodes_geometry:
+            transform, geometry_name = self.template_scene.graph[node_name]
+            if geometry_name in node_transforms and not np.allclose(
+                node_transforms[geometry_name], transform
+            ):
+                raise ValueError(
+                    f"GLB geometry '{geometry_name}' is instanced with different transforms; "
+                    "split the instances into separate meshes before deformation."
+                )
+            node_transforms[geometry_name] = transform
+
+        def to_local(mesh: trimesh.Trimesh, geometry_name: str) -> trimesh.Trimesh:
+            result = mesh.copy()
+            transform = node_transforms.get(geometry_name)
+            if transform is not None and not np.allclose(transform, np.eye(4)):
+                result.apply_transform(np.linalg.inv(transform))
+            return result
+
+        # Synchronize non-aliased geometry first. Alias sources are updated
+        # below from their corresponding logical, independently deformed copy.
+        for name, mesh in self.meshes.items():
+            if name in aliases or name in alias_sources:
+                continue
+            if name in self.template_scene.geometry:
+                self.template_scene.geometry[name] = to_local(mesh, name)
+
+        for logical_name, actual_name in aliases.items():
+            mesh = self.meshes.get(logical_name)
+            if mesh is None or actual_name not in self.template_scene.geometry:
+                continue
+            self.template_scene.geometry[actual_name] = to_local(mesh, actual_name)
+            # Keep a world-space logical copy for anchors when it is not itself
+            # the source geometry referenced by a scene-graph node.
+            if logical_name != actual_name:
+                if logical_name in node_transforms:
+                    raise ValueError(
+                        f"Logical alias '{logical_name}' already has its own GLB node; "
+                        "remove the conflicting alias or rename the source mesh."
+                    )
+                self.template_scene.geometry[logical_name] = mesh.copy()
+
+        return self.template_scene
+
     def update_metadata(self, **values: Any) -> None:
         self.metadata.update(values)

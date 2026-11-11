@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 from io import BytesIO
+import os
 from pathlib import Path
+from uuid import uuid4
 
 import cv2
 import numpy as np
@@ -15,7 +17,14 @@ from backend.deformer.engine import MeshDeformer
 from backend.exporter.glb_exporter import GLBExporter
 from backend.materials.pbr import apply_materials
 from backend.measurement.extractor import MeasurementExtractor
-from backend.models import ExportMetadata, Measurements, PipelineReport, StyleClassification
+from backend.models import (
+    ExportMetadata,
+    FrameMaterial,
+    FrameShape,
+    Measurements,
+    PipelineReport,
+    StyleClassification,
+)
 from backend.segmentation.segmenter import GlassesSegmenter
 from backend.template_library.loader import TemplateLibrary
 from backend.template_matching import FeatureExtractor, TemplateMatcher
@@ -42,6 +51,40 @@ class DeformationPipeline:
         self.exporter = GLBExporter()
         self.descriptor_loader = DescriptorLoader(self.library.templates_dir)
 
+    @staticmethod
+    def _validate_glasses_mask(image: np.ndarray, mask: np.ndarray) -> None:
+        mask_array = np.asarray(mask)
+        if mask_array.ndim != 2 or mask_array.shape != image.shape[:2]:
+            raise ValueError("Segmentation mask dimensions do not match the source image.")
+        image_area = int(image.shape[0] * image.shape[1])
+        mask_ratio = float(np.count_nonzero(mask_array)) / max(image_area, 1)
+        if mask_ratio < 0.001 or mask_ratio > 0.75:
+            raise ValueError(
+                f"Glasses segmentation mask is implausible ({mask_ratio:.3%} of image); "
+                "check image quality and the segmentation model."
+            )
+
+    @staticmethod
+    def _require_calibrated_scale(measurements: Measurements) -> None:
+        app_env = os.getenv("APP_ENV", "development").strip().lower()
+        allow_uncalibrated = os.getenv("ALLOW_UNCALIBRATED_GENERATION", "false").strip().lower() in {
+            "1", "true", "yes", "on"
+        }
+        if app_env in {"production", "prod"} and not measurements.scale_calibrated and not allow_uncalibrated:
+            raise ValueError(
+                "Production GLB generation requires calibrated physical measurements. "
+                "Provide user-measured or manufacturer-specified frame dimensions; "
+                "image-only millimetre estimates are not a reliable scale reference."
+            )
+
+    @staticmethod
+    def _require_quality(quality) -> None:
+        if not quality.passed:
+            details = "; ".join(quality.warnings) or "Critical geometry checks failed."
+            raise ValueError(
+                f"Deformation quality gate failed ({quality.score:.1f}/100): {details}"
+            )
+
     def _style_from_measurements(self, measurements: Measurements) -> StyleClassification:
         aspect_ratio = measurements.lens_width / max(measurements.lens_height, 1e-6)
         return StyleClassification(
@@ -63,100 +106,59 @@ class DeformationPipeline:
 
     @staticmethod
     def _inject_aliases_into_scene(scene: trimesh.Scene, descriptor) -> None:
-        """Add logical mesh names into scene.geometry so DeformationContext can find them.
-
-        The descriptor_loader resolves aliases (e.g. 'LeftRim' -> 'Plane_glasses_mat_0')
-        but the scene itself only has the original GLB names. The DeformationContext builds
-        its meshes dict straight from scene.geometry, so logical names must be present there.
-        """
+        """Create independent world-space logical copies for descriptor aliases."""
         from copy import deepcopy
 
-        # Collect all unique actual→logical mappings from vertex_groups + descriptor parts
-        alias_map: dict[str, str] = {}  # logical_name -> actual_glb_name
-
-        # Pull from descriptor raw mesh_aliases if present
         raw_aliases = descriptor.raw.get("mesh_aliases", {})
-        if isinstance(raw_aliases, dict):
-            for logical, actual in raw_aliases.items():
-                if actual in scene.geometry and logical not in scene.geometry:
-                    alias_map[logical] = actual
+        if not isinstance(raw_aliases, dict):
+            raw_aliases = {}
 
-        # Also cover any logical names derived from vertex_groups that aren't in scene yet
+        node_geometry_names: set[str] = set()
+        geometry_transforms: dict[str, np.ndarray] = {}
+        for node_name in scene.graph.nodes_geometry:
+            transform, geometry_name = scene.graph[node_name]
+            node_geometry_names.add(geometry_name)
+            if geometry_name in geometry_transforms and not np.allclose(
+                geometry_transforms[geometry_name], transform
+            ):
+                raise ValueError(
+                    f"GLB geometry '{geometry_name}' has multiple node transforms; "
+                    "split the instances before deformation."
+                )
+            geometry_transforms[geometry_name] = transform
+
+        alias_map: dict[str, str] = {}
+        for logical_name, actual_name in raw_aliases.items():
+            if not isinstance(logical_name, str) or not isinstance(actual_name, str):
+                raise ValueError("Descriptor mesh_aliases must map string logical names to string GLB mesh names.")
+            if logical_name == actual_name:
+                continue
+            if actual_name not in scene.geometry:
+                raise ValueError(
+                    f"Descriptor alias '{logical_name}' references missing GLB mesh '{actual_name}'."
+                )
+            if logical_name in node_geometry_names:
+                raise ValueError(
+                    f"Logical mesh '{logical_name}' already has a GLB node but is aliased to "
+                    f"'{actual_name}'. Resolve the naming conflict in the descriptor."
+                )
+            alias_map[logical_name] = actual_name
+
         for group_parts in descriptor.vertex_groups.values():
             for logical_name in group_parts:
-                if logical_name not in scene.geometry:
-                    # Find the actual mesh this logical name maps to via raw_aliases
-                    actual = raw_aliases.get(logical_name)
-                    if actual and actual in scene.geometry:
-                        alias_map[logical_name] = actual
+                if logical_name not in scene.geometry and logical_name not in alias_map:
+                    raise ValueError(
+                        f"Descriptor requires logical mesh '{logical_name}', but the GLB has no "
+                        "matching mesh and no explicit mesh_aliases mapping."
+                    )
 
-        # Inject: add logical-named copies into scene.geometry, baked into WORLD
-        # space first.
-        #
-        # This MUST be an independent copy, not a shared reference. A degenerate/
-        # un-split template (confirmed on geometric_metal.glb, the repo's only
-        # pre-existing built-in template: its descriptor maps Frame, Bridge,
-        # LeftRim and RightRim all onto the single un-split mesh
-        # "Plane_glasses_mat_0") aliases several logical names to the same actual
-        # GLB mesh. `scene.geometry[logical] = scene.geometry[actual]` made every
-        # one of those logical names point at the literal same Trimesh instance,
-        # so BridgeDeformer mutating "Bridge".vertices silently mutated
-        # "LeftRim"/"RightRim"/"Frame" too (confirmed: running BridgeDeformer()
-        # alone moved LeftRim vertices by ~150mm even though it never touches
-        # LeftRim by name). deepcopy makes each logical part independently
-        # deformable, matching what every per-part deformer assumes.
-        #
-        # Baking the node transform in before the copy matters just as much as
-        # the independent-copy fix above: scene.geometry holds each mesh's LOCAL,
-        # untransformed vertex data, and on geometric_metal.glb the lens node's
-        # transform isn't just a translation -- it's a ~90 degree rotation that
-        # swaps the local Y and Z axes. Copying scene.geometry["Cube.002_glass_
-        # mat_0"] straight into "LeftLens"/"RightLens" (the previous behaviour)
-        # silently handed LensDeformer a mesh whose local Z axis was actually the
-        # lens's HEIGHT, not its depth -- LensDeformer._surface_indices splits
-        # front/back on Z, so it was splitting top-half vs bottom-half instead,
-        # which produced an undersized, badly-placed lens fit and tripped
-        # LensDeformer's own "valid" check (fit_error/inside_rim) regardless of
-        # measurements. Baking here, once, keeps every downstream consumer of
-        # the logical name correct without each deformer having to know about
-        # per-GLB node quirks.
-        geom_transforms: dict[str, np.ndarray] = {}
-        for node_name in scene.graph.nodes_geometry:
-            transform, geom_name = scene.graph[node_name]
-            if geom_name not in geom_transforms:
-                geom_transforms[geom_name] = transform
         for logical_name, actual_name in alias_map.items():
-            if logical_name not in scene.geometry:
-                copy = deepcopy(scene.geometry[actual_name])
-                transform = geom_transforms.get(actual_name)
-                if transform is not None and not np.allclose(transform, np.eye(4)):
-                    copy.apply_transform(transform)
-                scene.geometry[logical_name] = copy
-
-    @staticmethod
-    def _uniform_scale_fallback(scene: trimesh.Scene, template_info, measurements: Measurements) -> trimesh.Scene:
-        """Descriptor-free fallback: uniformly rescale every mesh in the scene so
-        the template's frame_width matches the requested measurements.frame_width.
-        Coarser than the descriptor-driven pipeline (no per-part reshaping), but
-        it is a real, working deformation rather than a crash -- used only when a
-        template is missing its descriptor.json or fails descriptor validation."""
-        from copy import deepcopy
-
-        out = deepcopy(scene)
-        template_width = float(getattr(template_info.dimensions, "frame_width", 0.0) or 0.0)
-        if template_width <= 0:
-            return out
-
-        scale = float(measurements.frame_width) / template_width
-        scale = float(np.clip(scale, 0.5, 2.0))
-
-        for node_name in out.graph.nodes_geometry:
-            transform, geom_name = out.graph[node_name]
-            new_transform = transform.copy()
-            new_transform[:3, :3] *= scale
-            new_transform[:3, 3] *= scale
-            out.graph.update(frame_to=node_name, matrix=new_transform)
-        return out
+            copy = deepcopy(scene.geometry[actual_name])
+            transform = geometry_transforms.get(actual_name)
+            if transform is not None and not np.allclose(transform, np.eye(4)):
+                copy.apply_transform(transform)
+            # Replace unreferenced stale aliases; never overwrite a graph node.
+            scene.geometry[logical_name] = copy
 
     @staticmethod
     def _optimize_scene(scene: trimesh.Scene) -> trimesh.Scene:
@@ -210,6 +212,7 @@ class DeformationPipeline:
         output_path: Path | str,
         template_name: str | None = None,
     ) -> dict:
+        self._require_calibrated_scale(measurements)
         style = self._style_from_measurements(measurements)
         features = self.feature_extractor.from_measurements(measurements, style)
         match = self.matcher.match(features, template_name)
@@ -218,31 +221,21 @@ class DeformationPipeline:
 
         scene = trimesh.load(template_info.glb_path, force="scene")
         
-        # Try to load descriptor, fall back to simple deformation if template not properly prepared
-        try:
-            descriptor = self.descriptor_loader.load(template_name, measurements=measurements, template_info=template_info)
-            ctx = DeformationContext(
-                template_info=template_info,
-                template_scene=scene,
-                descriptor=descriptor,
-                measurements=measurements,
-            )
-            rim_pull = self.library.rim_pull_strength(template_name)
-            deformer = MeshDeformer(scene, template_info.dimensions, rim_pull_strength=rim_pull)
-            deformed_ctx, quality = deformer.deform(ctx)
-            deformed = deformed_ctx.template_scene
-        except (ValueError, KeyError) as e:
-            # Fallback when the template has no usable descriptor. There is no
-            # separate "simple" deformer left in this codebase -- MeshDeformer
-            # is the only deformer, and its .deform() requires a
-            # DeformationContext, not a raw Measurements object, so calling it
-            # here would always raise AttributeError. Instead, do a uniform
-            # scale of the whole template toward the requested frame_width,
-            # which needs no descriptor at all.
-            import warnings
-            warnings.warn(f"Template {template_name} not properly prepared (descriptor error: {e}). Using uniform-scale fallback.")
-            deformed = self._uniform_scale_fallback(scene, template_info, measurements)
-        
+        descriptor = self.descriptor_loader.load(
+            template_name, measurements=measurements, template_info=template_info
+        )
+        self._inject_aliases_into_scene(scene, descriptor)
+        ctx = DeformationContext(
+            template_info=template_info,
+            template_scene=scene,
+            descriptor=descriptor,
+            measurements=measurements,
+        )
+        rim_pull = self.library.rim_pull_strength(template_name)
+        deformer = MeshDeformer(scene, template_info.dimensions, rim_pull_strength=rim_pull)
+        deformed_ctx, quality = deformer.deform(ctx)
+        self._require_quality(quality)
+        deformed = deformed_ctx.template_scene
         deformed = apply_materials(deformed, measurements)
 
         out = Path(output_path)
@@ -259,6 +252,8 @@ class DeformationPipeline:
             temple_length=measurements.temple_length,
             template_used=template_name,
             color=measurements.color,
+            scale_source=measurements.scale_source,
+            scale_calibrated=measurements.scale_calibrated,
         )
         self.exporter.export_metadata_json(metadata, anchors, meta_path)
 
@@ -266,6 +261,8 @@ class DeformationPipeline:
             "output_glb": str(out),
             "metadata_json": str(meta_path),
             "measurements": measurements.model_dump(),
+            "measurement_source": measurements.scale_source,
+            "scale_calibrated": measurements.scale_calibrated,
             "template": template_name,
             "features": features.model_dump(mode="json"),
             "template_selection": {
@@ -278,6 +275,7 @@ class DeformationPipeline:
                 ],
             },
             "scale_factors": self._scale_summary(measurements, template_info.dimensions),
+            "quality_report": quality.to_dict(),
         }
 
     def run_from_arrays(
@@ -294,6 +292,7 @@ class DeformationPipeline:
         s1 = report.add("YOLO Segmentation")
         t = s1.start()
         masks = self.segmenter.segment(front)
+        self._validate_glasses_mask(front, masks["front"])
         s1.finish(t, model=masks.get("model_type", "unknown"), detections=masks.get("detections", 0))
 
         s2 = report.add("Shape Classification")
@@ -331,6 +330,7 @@ class DeformationPipeline:
             temple=measurements.temple_length,
             rim_thickness=measurements.rim_thickness,
         )
+        self._require_calibrated_scale(measurements)
 
         s4 = report.add("Feature Extraction")
         t = s4.start()
@@ -368,6 +368,7 @@ class DeformationPipeline:
         rim_pull = self.library.rim_pull_strength(template_name)
         deformer = MeshDeformer(scene, template_info.dimensions, rim_pull_strength=rim_pull)
         deformed_ctx, quality = deformer.deform(ctx, lens_contour)
+        self._require_quality(quality)
         deformed = deformed_ctx.template_scene
         s6.finish(
             t,
@@ -412,6 +413,8 @@ class DeformationPipeline:
             temple_length=measurements.temple_length,
             template_used=template_name,
             color=measurements.color,
+            scale_source=measurements.scale_source,
+            scale_calibrated=measurements.scale_calibrated,
         )
         self.exporter.export_metadata_json(metadata, anchors, meta_path)
         s9.finish(t, output=str(out), size_kb=round(out.stat().st_size / 1024, 1))
@@ -420,6 +423,8 @@ class DeformationPipeline:
             "output_glb": str(out),
             "metadata_json": str(meta_path),
             "measurements": measurements.model_dump(),
+            "measurement_source": measurements.scale_source,
+            "scale_calibrated": measurements.scale_calibrated,
             "template": template_name,
             "features": features.model_dump(mode="json"),
             "template_selection": {
@@ -433,6 +438,7 @@ class DeformationPipeline:
             },
             "scale_factors": self._scale_summary(measurements, template_info.dimensions),
             "lens_contour": lens_contour.model_dump(),
+            "quality_report": quality.to_dict(),
             "pipeline": report.to_dict(),
         }
 
@@ -442,146 +448,179 @@ class DeformationPipeline:
         output_path: Path | str | None = None,
         color: str = "#d9a7a2",
         template_override: str | None = None,
+        manual_measurements: Measurements | None = None,
+        shape_override: FrameShape | None = None,
+        material_override: FrameMaterial | None = None,
     ) -> dict:
         """
-        Run the full pipeline on 4-6 images:
-        1. Read and segment all images.
-        2. Classify each view (front, side, top, perspective).
-        3. Extract measurements and contours from each view.
-        4. Fuse the measurements.
-        5. Detect lens opacity & dominant color from the front view's lens region.
-        6. Apply template deformation and material mapping using the fused measurements.
+        Process 4–5 product views. Photos provide segmentation, contour, style
+        and lens appearance; user/manufacturer dimensions provide physical scale.
         """
+        if not 4 <= len(image_paths) <= 5:
+            raise ValueError("Multi-view generation requires 4–5 product images.")
+
         report = PipelineReport()
         s1 = report.add("Multi-View Classification and Extraction")
-        t = s1.start()
-        
+        started = s1.start()
+
         view_classifier = ViewClassifier()
         fuser = MeasurementFuser()
         opacity_detector = OpacityDetector()
-        
-        extracted_views = []
-        front_image = None
-        front_lens_contour = None
-        
-        for path in image_paths:
-            img = self._imread(path)
-            if img is None:
+        extracted_views: list[tuple[str, Measurements]] = []
+        processed: list[dict] = []
+
+        for image_path in image_paths:
+            image = self._imread(image_path)
+            if image is None:
                 continue
-            
-            masks = self.segmenter.segment(img)
-            view_type = view_classifier.classify_view(img, masks["front"])
-            
-            style = self.classifier.classify_style(img, masks["front"])
-            measurements, lens_contour = self.measurer.extract_from_images(
-                img,
+
+            masks = self.segmenter.segment(image)
+            front_mask = masks["front"]
+            self._validate_glasses_mask(image, front_mask)
+            view_type = view_classifier.classify_view(image, front_mask)
+            style = self.classifier.classify_style(image, front_mask)
+            estimated, lens_contour = self.measurer.extract_from_images(
+                image,
                 side=None,
-                mask=masks["front"],
+                mask=front_mask,
                 shape=style.shape,
                 material=style.material,
                 nose_pads=style.nose_pads,
                 color=color,
             )
-            
-            extracted_views.append((view_type, measurements))
-            
-            if view_type == "front" and front_image is None:
-                front_image = img
-                front_lens_contour = lens_contour
-                
-        if not extracted_views:
-            raise ValueError("No valid images could be processed")
-            
-        # If no front view was classified, pick the first view as front fallback
-        if front_image is None:
-            first_view_type, first_ms = extracted_views[0]
-            front_image = self._imread(image_paths[0])
-            extracted_views[0] = ("front", first_ms)
-            masks = self.segmenter.segment(front_image)
-            front_lens_contour = self.measurer.extract_lens_contour(front_image, masks["front"])
-            
-        # Fuse measurements
-        fused_measurements = fuser.fuse(extracted_views)
-        
-        # Detect lens opacity and dominant color
+            extracted_views.append((view_type, estimated))
+            processed.append(
+                {
+                    "view_type": view_type,
+                    "image": image,
+                    "mask": front_mask,
+                    "style": style,
+                    "estimated": estimated,
+                    "lens_contour": lens_contour,
+                }
+            )
+
+        if len(processed) < 4:
+            raise ValueError(
+                f"Only {len(processed)} valid images could be processed; 4–5 valid views are required."
+            )
+
+        view_types = {record["view_type"] for record in processed}
+        if "front" not in view_types:
+            raise ValueError("At least one front-facing product image is required.")
+        if not ({"side", "perspective"} & view_types):
+            raise ValueError("Include at least one side or three-quarter product image.")
+        front_record = next(record for record in processed if record["view_type"] == "front")
+        front_image = front_record["image"]
+        front_mask = front_record["mask"]
+        front_style = front_record["style"].model_copy(deep=True)
+        front_lens_contour = front_record["lens_contour"]
+
+        if shape_override is not None:
+            front_style.shape = shape_override
+        if material_override is not None:
+            front_style.material = material_override
+
+        if shape_override is not None or material_override is not None:
+            aspect_ratio = (
+                manual_measurements.lens_width / max(manual_measurements.lens_height, 1e-6)
+                if manual_measurements is not None
+                else front_style.lens_aspect_ratio
+            )
+            front_style.nose_pads = (
+                front_style.material in {FrameMaterial.METAL, FrameMaterial.TITANIUM}
+                and front_style.shape != FrameShape.RIMLESS
+            )
+            front_style.frame_family = self.classifier._infer_family(front_style.shape, aspect_ratio)
+            front_style.rim_type = self.classifier._infer_rim_type(front_style.shape, front_style.material)
+            front_style.bridge_type = self.classifier._infer_bridge_type(
+                front_style.shape,
+                front_style.material,
+                front_style.nose_pads,
+                aspect_ratio,
+            )
+            front_style.lens_aspect_ratio = aspect_ratio
+            front_style.metrics = dict(front_style.metrics)
+            front_style.metrics["manual_style_override"] = True
+
+        if manual_measurements is not None:
+            fused_measurements = manual_measurements.model_copy(deep=True)
+            fused_measurements.shape = front_style.shape
+            fused_measurements.material = front_style.material
+            fused_measurements.nose_pads = front_style.nose_pads
+            fused_measurements.color = color
+            measurement_source = fused_measurements.scale_source
+        else:
+            fused_measurements = fuser.fuse(extracted_views)
+            measurement_source = fused_measurements.scale_source
+
+        self._require_calibrated_scale(fused_measurements)
         lens_opacity, lens_color = opacity_detector.detect(front_image, front_lens_contour)
         fused_measurements.lens_color = lens_color
         fused_measurements.lens_opacity = lens_opacity
-        
-        s1.finish(t, views=[v[0] for v in extracted_views])
-        
-        # Run template selection, deformation, material mapping, and export
+
+        s1.finish(
+            started,
+            views=[record["view_type"] for record in processed],
+            measurement_source=measurement_source,
+        )
+
         s2 = report.add("Template Scoring")
-        t = s2.start()
-        
-        style = self._style_from_measurements(fused_measurements)
-        features = self.feature_extractor.from_measurements(fused_measurements, style)
+        started = s2.start()
+        features = self.feature_extractor.extract(front_mask, fused_measurements, front_style)
         match = self.matcher.match(features, template_override)
         template_info = match.best.template
         template_name = template_info.name
         s2.finish(
-            t,
+            started,
             template=template_name,
             score=match.best.score,
             reason=match.best.reason,
-            breakdown=match.best.breakdown,
-            top_candidates=[
-                {"template": candidate.template.name, "score": candidate.score, "reason": candidate.reason}
-                for candidate in match.candidates[:3]
-            ],
         )
 
         s3 = report.add("Template Deformation")
-        t = s3.start()
+        started = s3.start()
         scene = trimesh.load(template_info.glb_path, force="scene")
-        descriptor = self.descriptor_loader.load(template_name, measurements=fused_measurements, template_info=template_info)
+        descriptor = self.descriptor_loader.load(
+            template_name,
+            measurements=fused_measurements,
+            template_info=template_info,
+        )
         self._inject_aliases_into_scene(scene, descriptor)
-        ctx = DeformationContext(
+        context = DeformationContext(
             template_info=template_info,
             template_scene=scene,
             descriptor=descriptor,
             measurements=fused_measurements,
+            feature_set=features,
         )
         rim_pull = self.library.rim_pull_strength(template_name)
         deformer = MeshDeformer(scene, template_info.dimensions, rim_pull_strength=rim_pull)
-        deformed_ctx, quality = deformer.deform(ctx, front_lens_contour)
-        deformed = deformed_ctx.template_scene
+        deformed_context, quality = deformer.deform(context, front_lens_contour)
+        self._require_quality(quality)
+        deformed = self._optimize_scene(
+            apply_materials(deformed_context.template_scene, fused_measurements)
+        )
         s3.finish(
-            t,
+            started,
             rim_pull_strength=rim_pull,
             deformation_mode="template_vertex_groups",
             scale_factors=self._scale_summary(fused_measurements, template_info.dimensions),
+            quality=quality.to_dict(),
         )
 
-        s4 = report.add("Texture Mapping")
-        t = s4.start()
-        deformed = apply_materials(deformed, fused_measurements)
-        frame_parts = [name for name in deformed.geometry if name not in {"LeftLens", "RightLens"}]
+        s4 = report.add("Texture and Material Mapping")
+        started = s4.start()
         s4.finish(
-            t,
+            started,
             material=fused_measurements.material.value,
-            color=fused_measurements.color,
-            lens_color=fused_measurements.lens_color,
             lens_opacity=fused_measurements.lens_opacity,
-            frame_parts=frame_parts,
-            lens_parts=["LeftLens", "RightLens"],
         )
 
-        s5 = report.add("Mesh Quality Optimization")
-        t = s5.start()
-        deformed = self._optimize_scene(deformed)
-        s5.finish(t, preserved_topology=True, preserved_materials=True)
-
-        s6 = report.add("GLB Export")
-        t = s6.start()
-        if output_path is None:
-            output_path = Path("output") / f"{template_name}_deformed.glb"
-        out = Path(output_path)
-
-        self.exporter.export(deformed, out, fused_measurements, template_name)
-        meta_path = out.with_suffix(".metadata.json")
-        anchors = self.exporter._compute_anchors(deformed, fused_measurements)
-
+        s5 = report.add("GLB Export and Validation")
+        started = s5.start()
+        out_path = Path(output_path) if output_path is not None else Path("output") / f"{uuid4().hex[:12]}.glb"
+        self.exporter.export(deformed, out_path, fused_measurements, template_name)
         metadata = ExportMetadata(
             shape=fused_measurements.shape.value,
             material=fused_measurements.material.value,
@@ -592,18 +631,50 @@ class DeformationPipeline:
             color=fused_measurements.color,
             lens_color=fused_measurements.lens_color,
             lens_opacity=fused_measurements.lens_opacity,
+            scale_source=fused_measurements.scale_source,
+            scale_calibrated=fused_measurements.scale_calibrated,
         )
-        self.exporter.export_metadata_json(metadata, anchors, meta_path)
-        s6.finish(t, output=str(out), size_kb=round(out.stat().st_size / 1024, 1))
+        metadata_path = out_path.with_suffix(".metadata.json")
+        anchors = self.exporter._compute_anchors(deformed, fused_measurements)
+        self.exporter.export_metadata_json(metadata, anchors, metadata_path)
+        s5.finish(
+            started,
+            output=str(out_path),
+            bytes=out_path.stat().st_size,
+            scale_source=measurement_source,
+            quality=quality.to_dict(),
+        )
 
         return {
-            "output_glb": str(out),
-            "metadata_json": str(meta_path),
+            "output_glb": str(out_path),
+            "metadata_json": str(metadata_path),
             "measurements": fused_measurements.model_dump(),
+            "measurement_source": measurement_source,
+            "image_estimates": [
+                {
+                    "view_type": view_type,
+                    "measurements": estimate.model_dump(),
+                }
+                for view_type, estimate in extracted_views
+            ],
             "template": template_name,
+            "template_selection": {
+                "reason": match.best.reason,
+                "score": match.best.score,
+                "breakdown": match.best.breakdown,
+                "top_candidates": [
+                    {
+                        "template": candidate.template.name,
+                        "score": candidate.score,
+                        "reason": candidate.reason,
+                    }
+                    for candidate in match.candidates[:3]
+                ],
+            },
             "features": features.model_dump(mode="json"),
             "scale_factors": self._scale_summary(fused_measurements, template_info.dimensions),
             "lens_contour": front_lens_contour.model_dump(),
+            "quality_report": quality.to_dict(),
             "pipeline": report.to_dict(),
         }
 

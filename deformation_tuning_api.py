@@ -24,9 +24,31 @@ logger = logging.getLogger(__name__)
 PROJECT_ROOT = Path(__file__).resolve().parent
 TEMPLATES_DIR = PROJECT_ROOT / "templates"
 DEFAULT_YOLO = PROJECT_ROOT / "runs" / "segment" / "eyewear_seg" / "weights" / "best.pt"
+MAX_TUNING_UPLOAD_BYTES = max(1, int(os.getenv("TUNING_API_MAX_UPLOAD_BYTES", 10 * 1024 * 1024)))
+
+if os.getenv("APP_ENV", "development").strip().lower() in {"production", "prod"}:
+    raise RuntimeError(
+        "The experimental tuning API is disabled in production. "
+        "Use the authenticated backend.api.main service for production operations."
+    )
+
+TUNING_ALLOWED_ORIGINS = [
+    origin.strip()
+    for origin in os.getenv(
+        "TUNING_API_ALLOWED_ORIGINS",
+        "http://localhost:8000,http://127.0.0.1:8000,http://localhost:8001,http://127.0.0.1:8001",
+    ).split(",")
+    if origin.strip()
+]
 
 app = FastAPI(title="Defirmation Deformation Tuning API", version="1.0.0")
-app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=TUNING_ALLOWED_ORIGINS,
+    allow_methods=["GET", "POST"],
+    allow_headers=["Accept", "Content-Type"],
+    allow_credentials=False,
+)
 
 
 class TuningState:
@@ -67,6 +89,13 @@ async def startup() -> None:
     global state
     state = _init_state()
     logger.info("Tuning API ready — templates dir: %s", TEMPLATES_DIR)
+
+
+@app.on_event("shutdown")
+async def cleanup_tuning_upload() -> None:
+    if state and state.current_image:
+        Path(state.current_image).unlink(missing_ok=True)
+        state.current_image = None
 
 
 @app.get("/api/health")
@@ -117,11 +146,18 @@ async def select_template(template_name: str):
 async def upload_calibration_image(file: UploadFile = File(...)):
     if not state or not state.current_template:
         raise HTTPException(status_code=400, detail="Select template first")
-    contents = await file.read()
+    contents = await file.read(MAX_TUNING_UPLOAD_BYTES + 1)
+    if not contents:
+        raise HTTPException(status_code=400, detail="Image upload is empty")
+    if len(contents) > MAX_TUNING_UPLOAD_BYTES:
+        raise HTTPException(status_code=413, detail="Image exceeds the tuning upload size limit")
+    previous_image = state.current_image
     with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg") as tmp:
         tmp.write(contents)
         state.current_image = tmp.name
-    return {"filename": file.filename, "size": len(contents), "stored_path": state.current_image}
+    if previous_image:
+        Path(previous_image).unlink(missing_ok=True)
+    return {"filename": file.filename, "size": len(contents)}
 
 
 @app.post("/api/calibration/detect-rim")
@@ -228,4 +264,4 @@ async def serve_ui():
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8001)
+    uvicorn.run(app, host="127.0.0.1", port=8001)
