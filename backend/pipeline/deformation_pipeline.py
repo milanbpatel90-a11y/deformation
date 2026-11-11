@@ -218,9 +218,16 @@ class DeformationPipeline:
 
         scene = trimesh.load(template_info.glb_path, force="scene")
         
-        # Try to load descriptor, fall back to simple deformation if template not properly prepared
+        # Production gate: do not silently replace part-aware deformation with
+        # uniform scaling. A GLB that exports successfully after this fallback
+        # can still have incorrect lens, bridge, and temple geometry. Fail with
+        # an actionable error so the template can be repaired and revalidated.
         try:
-            descriptor = self.descriptor_loader.load(template_name, measurements=measurements, template_info=template_info)
+            descriptor = self.descriptor_loader.load(
+                template_name,
+                measurements=measurements,
+                template_info=template_info,
+            )
             ctx = DeformationContext(
                 template_info=template_info,
                 template_scene=scene,
@@ -232,16 +239,12 @@ class DeformationPipeline:
             deformed_ctx, quality = deformer.deform(ctx)
             deformed = deformed_ctx.template_scene
         except (ValueError, KeyError) as e:
-            # Fallback when the template has no usable descriptor. There is no
-            # separate "simple" deformer left in this codebase -- MeshDeformer
-            # is the only deformer, and its .deform() requires a
-            # DeformationContext, not a raw Measurements object, so calling it
-            # here would always raise AttributeError. Instead, do a uniform
-            # scale of the whole template toward the requested frame_width,
-            # which needs no descriptor at all.
-            import warnings
-            warnings.warn(f"Template {template_name} not properly prepared (descriptor error: {e}). Using uniform-scale fallback.")
-            deformed = self._uniform_scale_fallback(scene, template_info, measurements)
+            raise RuntimeError(
+                f"Production deformation blocked for template '{template_name}': {e}. "
+                "Repair the template descriptor/mesh and rerun validation. "
+                "Uniform-scale fallback is intentionally disabled because it does "
+                "not satisfy product-specific geometry requirements."
+            ) from e
         
         deformed = apply_materials(deformed, measurements)
 

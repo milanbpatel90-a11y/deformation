@@ -15,6 +15,7 @@ Pillow>=10.2.0
 trimesh>=4.2.0
 pygltflib>=1.16.0
 shapely>=2.0.0
+mapbox-earcut>=1.0.1
 open3d>=0.18.0; python_version < "3.13"
 
 # Utilities
