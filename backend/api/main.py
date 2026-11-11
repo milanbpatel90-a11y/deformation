@@ -461,7 +461,7 @@ def download_output(
     user: dict = Depends(require_roles("owner", "editor", "operator", "viewer")),
 ):
     """Download a generated GLB only to its owner or the system owner."""
-    if not re.fullmatch(r"[0-9a-f]{12}\\.glb", filename):
+    if not re.fullmatch(r"[0-9a-f]{12}\.glb", filename):
         raise HTTPException(status_code=400, detail="Invalid filename")
     path = OUTPUT_DIR / filename
     if not path.is_file():
