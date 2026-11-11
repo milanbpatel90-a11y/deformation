@@ -11,6 +11,9 @@ import cv2
 import numpy as np
 import logging
 import os
+from io import BytesIO
+
+from PIL import Image
 from pathlib import Path
 from typing import Optional, Dict
 
@@ -26,12 +29,24 @@ async def _decode_upload(file: UploadFile) -> np.ndarray:
         raise HTTPException(status_code=400, detail="Image upload is empty.")
     if len(contents) > MAX_UPLOAD_BYTES:
         raise HTTPException(status_code=413, detail="Image exceeds the upload size limit.")
-    image = cv2.imdecode(np.frombuffer(contents, np.uint8), cv2.IMREAD_COLOR)
+    try:
+        with Image.open(BytesIO(contents)) as source:
+            if source.format not in {"JPEG", "PNG", "WEBP", "BMP"}:
+                raise HTTPException(status_code=400, detail="Use a JPEG, PNG, WebP, or BMP image.")
+            if source.width * source.height > MAX_IMAGE_PIXELS:
+                raise HTTPException(status_code=413, detail="Image dimensions exceed the processing limit.")
+            source.verify()
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="Uploaded file is not a valid supported image.") from exc
+
+    try:
+        image = cv2.imdecode(np.frombuffer(contents, np.uint8), cv2.IMREAD_COLOR)
+    except cv2.error as exc:
+        raise HTTPException(status_code=400, detail="Image decoding failed.") from exc
     if image is None:
         raise HTTPException(status_code=400, detail="Uploaded file is not a supported image.")
-    height, width = image.shape[:2]
-    if height * width > MAX_IMAGE_PIXELS:
-        raise HTTPException(status_code=413, detail="Image dimensions exceed the processing limit.")
     return image
 
 # Initialize router
@@ -225,10 +240,18 @@ class RimDetectionEngine:
         if total_length <= 1e-8:
             return np.repeat(points[:1].astype(np.int32), n, axis=0)
 
+        # Remove zero-length edges before interpolation; repeated abscissae can
+        # otherwise make contour resampling unstable.
+        keep = np.concatenate([[True], np.diff(cumulative) > 1e-8])
+        cumulative = cumulative[keep]
+        interpolation_points = closed[keep]
+        if len(cumulative) < 2:
+            return np.repeat(points[:1].astype(np.int32), n, axis=0)
+
         new_distances = np.linspace(0.0, total_length, n, endpoint=False)
         resampled = np.column_stack((
-            np.interp(new_distances, cumulative, closed[:, 0]),
-            np.interp(new_distances, cumulative, closed[:, 1]),
+            np.interp(new_distances, cumulative, interpolation_points[:, 0]),
+            np.interp(new_distances, cumulative, interpolation_points[:, 1]),
         ))
         return resampled.astype(np.int32)
     
