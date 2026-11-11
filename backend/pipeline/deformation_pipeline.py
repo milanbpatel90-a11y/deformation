@@ -280,6 +280,8 @@ class DeformationPipeline:
             temple_length=measurements.temple_length,
             template_used=template_name,
             color=measurements.color,
+            scale_source=measurements.scale_source,
+            scale_calibrated=measurements.scale_calibrated,
         )
         self.exporter.export_metadata_json(metadata, anchors, meta_path)
 
@@ -436,6 +438,8 @@ class DeformationPipeline:
             temple_length=measurements.temple_length,
             template_used=template_name,
             color=measurements.color,
+            scale_source=measurements.scale_source,
+            scale_calibrated=measurements.scale_calibrated,
         )
         self.exporter.export_metadata_json(metadata, anchors, meta_path)
         s9.finish(t, output=str(out), size_kb=round(out.stat().st_size / 1024, 1))
