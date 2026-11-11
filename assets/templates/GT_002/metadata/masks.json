@@ -1,0 +1,17 @@
+{
+  "version":"1.0",
+  "template_id":"GT_002",
+  "masks":{
+    "Frame":{"source_object":"Frame","indices":[]},
+    "Rim_L":{"source_object":"LeftRim","indices":[]},
+    "Rim_R":{"source_object":"RightRim","indices":[]},
+    "Bridge":{"source_object":"Bridge","indices":[]},
+    "Lens_L":{"source_object":"LeftLens","indices":[]},
+    "Lens_R":{"source_object":"RightLens","indices":[]},
+    "Temple_L":{"source_object":"LeftTemple","indices":[]},
+    "Temple_R":{"source_object":"RightTemple","indices":[]},
+    "Hinge_L":{"source_object":"LeftHinge","indices":[]},
+    "Hinge_R":{"source_object":"RightHinge","indices":[]}
+  },
+  "notes":"Populate vertex masks from the exported runtime topology."
+}

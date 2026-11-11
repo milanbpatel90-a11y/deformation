@@ -1,0 +1,12 @@
+{
+  "version":"1.0",
+  "template_id":"GT_002",
+  "regions":{
+    "front":["Frame","Rim_L","Rim_R","Bridge"],
+    "optics":["Lens_L","Lens_R"],
+    "temples":["Temple_L","Temple_R"],
+    "hinges":["Hinge_L","Hinge_R"]
+  },
+  "vertex_regions":{},
+  "notes":"Semantic regions are registered now; vertex indices are generated from runtime topology."
+}
