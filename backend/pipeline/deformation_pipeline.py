@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 from io import BytesIO
+import os
 from pathlib import Path
+from uuid import uuid4
 
 import cv2
 import numpy as np
@@ -15,7 +17,14 @@ from backend.deformer.engine import MeshDeformer
 from backend.exporter.glb_exporter import GLBExporter
 from backend.materials.pbr import apply_materials
 from backend.measurement.extractor import MeasurementExtractor
-from backend.models import ExportMetadata, Measurements, PipelineReport, StyleClassification
+from backend.models import (
+    ExportMetadata,
+    FrameMaterial,
+    FrameShape,
+    Measurements,
+    PipelineReport,
+    StyleClassification,
+)
 from backend.segmentation.segmenter import GlassesSegmenter
 from backend.template_library.loader import TemplateLibrary
 from backend.template_matching import FeatureExtractor, TemplateMatcher
@@ -41,6 +50,19 @@ class DeformationPipeline:
         self.matcher = TemplateMatcher(self.library)
         self.exporter = GLBExporter()
         self.descriptor_loader = DescriptorLoader(self.library.templates_dir)
+
+    @staticmethod
+    def _require_calibrated_scale(measurements: Measurements) -> None:
+        app_env = os.getenv("APP_ENV", "development").strip().lower()
+        allow_uncalibrated = os.getenv("ALLOW_UNCALIBRATED_GENERATION", "false").strip().lower() in {
+            "1", "true", "yes", "on"
+        }
+        if app_env in {"production", "prod"} and not measurements.scale_calibrated and not allow_uncalibrated:
+            raise ValueError(
+                "Production GLB generation requires calibrated physical measurements. "
+                "Provide user-measured or manufacturer-specified frame dimensions; "
+                "image-only millimetre estimates are not a reliable scale reference."
+            )
 
     @staticmethod
     def _require_quality(quality) -> None:
@@ -218,6 +240,7 @@ class DeformationPipeline:
         output_path: Path | str,
         template_name: str | None = None,
     ) -> dict:
+        self._require_calibrated_scale(measurements)
         style = self._style_from_measurements(measurements)
         features = self.feature_extractor.from_measurements(measurements, style)
         match = self.matcher.match(features, template_name)
@@ -330,6 +353,7 @@ class DeformationPipeline:
             temple=measurements.temple_length,
             rim_thickness=measurements.rim_thickness,
         )
+        self._require_calibrated_scale(measurements)
 
         s4 = report.add("Feature Extraction")
         t = s4.start()
