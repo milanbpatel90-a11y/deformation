@@ -490,10 +490,12 @@ class DeformationPipeline:
                 f"Only {len(processed)} valid images could be processed; 4–5 valid views are required."
             )
 
-        front_record = next(
-            (record for record in processed if record["view_type"] == "front"),
-            processed[0],
-        )
+        view_types = {record["view_type"] for record in processed}
+        if "front" not in view_types:
+            raise ValueError("At least one front-facing product image is required.")
+        if not ({"side", "perspective"} & view_types):
+            raise ValueError("Include at least one side or three-quarter product image.")
+        front_record = next(record for record in processed if record["view_type"] == "front")
         front_image = front_record["image"]
         front_mask = front_record["mask"]
         front_style = front_record["style"].model_copy(deep=True)
