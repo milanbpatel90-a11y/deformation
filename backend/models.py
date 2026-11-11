@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import time
 from enum import Enum
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -74,6 +74,8 @@ class Measurements(BaseModel):
     color: str = "#d9a7a2"
     lens_color: str | None = Field(default=None, description="Hex color code for the lenses")
     lens_opacity: float | None = Field(default=None, ge=0, le=1, allow_inf_nan=False, description="Opacity of the lenses (0.0 to 1.0)")
+    scale_source: Literal["image_estimate", "user_supplied", "manufacturer_spec"] = "image_estimate"
+    scale_calibrated: bool = False
 
 
 class TemplateDimensions(BaseModel):
@@ -166,6 +168,8 @@ class ExportMetadata(BaseModel):
     color: str
     lens_color: str | None = None
     lens_opacity: float | None = None
+    scale_source: Literal["image_estimate", "user_supplied", "manufacturer_spec"] = "image_estimate"
+    scale_calibrated: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         return self.model_dump()
