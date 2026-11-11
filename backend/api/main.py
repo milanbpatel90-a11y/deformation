@@ -2,9 +2,14 @@
 
 from __future__ import annotations
 
+import logging
 import os
+import re
 import uuid
+from io import BytesIO
 from pathlib import Path
+
+from PIL import Image
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
@@ -23,6 +28,40 @@ from backend.models import FrameMaterial, FrameShape, Measurements
 from backend.pipeline import DeformationPipeline
 from backend.template_library.loader import TemplateLibrary
 from backend.api import rim_detection_routes
+
+
+logger = logging.getLogger(__name__)
+MAX_IMAGE_BYTES = max(1, int(os.getenv("MAX_IMAGE_BYTES", 20 * 1024 * 1024)))
+MAX_IMAGE_PIXELS = max(1, int(os.getenv("MAX_IMAGE_PIXELS", 40_000_000)))
+MAX_MULTI_VIEW_TOTAL_BYTES = max(1, int(os.getenv("MAX_MULTI_VIEW_TOTAL_BYTES", 100 * 1024 * 1024)))
+
+
+async def _save_validated_image(upload: UploadFile, destination: Path) -> int:
+    """Read a bounded upload, validate its format and dimensions, then persist it."""
+    contents = await upload.read(MAX_IMAGE_BYTES + 1)
+    if not contents:
+        raise HTTPException(status_code=400, detail="An uploaded image is empty.")
+    if len(contents) > MAX_IMAGE_BYTES:
+        raise HTTPException(status_code=413, detail="An image exceeds the 20 MiB upload limit.")
+    try:
+        with Image.open(BytesIO(contents)) as image:
+            if image.width * image.height > MAX_IMAGE_PIXELS:
+                raise HTTPException(status_code=413, detail="Image dimensions exceed the processing limit.")
+            image.verify()
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="An uploaded file is not a valid supported image.") from exc
+    destination.write_bytes(contents)
+    return len(contents)
+
+
+def _remove_failed_output(output_path: Path) -> None:
+    for artifact in (output_path, output_path.with_suffix(".metadata.json")):
+        try:
+            artifact.unlink(missing_ok=True)
+        except OSError:
+            logger.exception("Could not remove partial generation artifact: %s", artifact)
 
 
 app = FastAPI(
@@ -144,6 +183,7 @@ def api_info():
     }
 
 
+@app.get("/api/ready")
 @app.get("/api/health")
 def health():
     """Liveness + basic readiness for production monitoring."""
@@ -155,7 +195,6 @@ def health():
         "templates_available": len(available),
         "active_template": active,
         "preferred_templates": [t for t in PREFERRED_TEMPLATES if t in available],
-        "output_dir": str(OUTPUT_DIR),
     }
 
 
@@ -179,33 +218,27 @@ async def deform_from_images(
     template: str | None = Form(None),
     user: dict = Depends(require_roles("owner", "editor", "operator")),
 ):
-    """Upload up to 3 images (front, side, top), detect measurements, deform template, export GLB."""
+    """Upload front/side/top images, validate them, deform a template, and export a GLB."""
     job_id = uuid.uuid4().hex[:12]
     work_dir = OUTPUT_DIR / f"_upload_{job_id}"
     work_dir.mkdir(parents=True, exist_ok=True)
+    out_path = OUTPUT_DIR / f"{job_id}.glb"
+    succeeded = False
 
     try:
         front_path = work_dir / "front.jpg"
-        front_bytes = await front.read()
-        if not front_bytes:
-            raise ValueError("Front image upload is empty — please re-select the file and try again.")
-        front_path.write_bytes(front_bytes)
+        await _save_validated_image(front, front_path)
 
         side_path = None
         if side and side.filename:
-            side_bytes = await side.read()
-            if side_bytes:
-                side_path = work_dir / "side.jpg"
-                side_path.write_bytes(side_bytes)
+            side_path = work_dir / "side.jpg"
+            await _save_validated_image(side, side_path)
 
         top_path = None
         if top and top.filename:
-            top_bytes = await top.read()
-            if top_bytes:
-                top_path = work_dir / "top.jpg"
-                top_path.write_bytes(top_bytes)
+            top_path = work_dir / "top.jpg"
+            await _save_validated_image(top, top_path)
 
-        out_path = OUTPUT_DIR / f"{job_id}.glb"
         result = pipeline.run_from_images(
             front_path,
             side_path,
@@ -217,58 +250,56 @@ async def deform_from_images(
         result["job_id"] = job_id
         result["download_url"] = f"/api/output/{job_id}.glb"
         result["created_by"] = user["username"]
+        succeeded = True
         return result
+    except HTTPException:
+        raise
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     except Exception as exc:
-        import traceback
-
-        tb = traceback.format_exc()
-        raise HTTPException(status_code=500, detail=f"{exc}\n\nTraceback:\n{tb}") from exc
+        logger.exception("Image deformation failed; job_id=%s", job_id)
+        raise HTTPException(status_code=500, detail=f"Generation failed. Reference job ID: {job_id}.") from exc
     finally:
-        import shutil as _shutil
+        import shutil
 
-        _shutil.rmtree(work_dir, ignore_errors=True)
+        shutil.rmtree(work_dir, ignore_errors=True)
+        if not succeeded:
+            _remove_failed_output(out_path)
 
 
 @app.post("/api/deform/multi-view")
 async def deform_from_multiple_images(
-    images: list[UploadFile] = File(..., description="List of 2–8 product images from multiple view angles"),
+    images: list[UploadFile] = File(..., description="4–5 product images from multiple view angles"),
     color: str = Form("#d9a7a2"),
     template: str | None = Form(None),
     user: dict = Depends(require_roles("owner", "editor", "operator")),
 ):
-    """Upload multiple product images, classify views, fuse measurements, deform template, and export GLB."""
+    """Fuse 4–5 validated product images, deform the best-fit template, and export a GLB."""
+    if not 4 <= len(images) <= 5:
+        raise HTTPException(status_code=400, detail="Multi-view generation requires 4–5 product images.")
+
     job_id = uuid.uuid4().hex[:12]
     work_dir = OUTPUT_DIR / f"_upload_multi_{job_id}"
     work_dir.mkdir(parents=True, exist_ok=True)
+    out_path = OUTPUT_DIR / f"{job_id}.glb"
+    succeeded = False
 
     try:
-        image_paths = []
-        for i, file in enumerate(images):
-            if not file.filename:
-                continue
-            file_bytes = await file.read()
-            if not file_bytes:
-                continue
-            suffix = Path(file.filename).suffix or ".jpg"
-            if suffix.lower() not in {".jpg", ".jpeg", ".png", ".webp", ".bmp"}:
+        image_paths: list[Path] = []
+        total_bytes = 0
+        allowed_suffixes = {".jpg", ".jpeg", ".png", ".webp", ".bmp"}
+        for index, upload in enumerate(images):
+            if not upload.filename:
+                raise HTTPException(status_code=400, detail="Every multi-view upload must include an image file.")
+            suffix = Path(upload.filename).suffix.lower()
+            if suffix not in allowed_suffixes:
                 suffix = ".jpg"
-            file_path = work_dir / f"image_{i}{suffix}"
-            file_path.write_bytes(file_bytes)
-            image_paths.append(file_path)
+            image_path = work_dir / f"image_{index}{suffix}"
+            total_bytes += await _save_validated_image(upload, image_path)
+            if total_bytes > MAX_MULTI_VIEW_TOTAL_BYTES:
+                raise HTTPException(status_code=413, detail="Combined multi-view uploads exceed the total size limit.")
+            image_paths.append(image_path)
 
-        if not image_paths:
-            raise ValueError("No non-empty images uploaded. Please select 4–5 product photos of the glasses.")
-        if len(image_paths) < 2:
-            raise ValueError(
-                f"Only {len(image_paths)} image received. Multi-view needs at least 2 images "
-                "(front + side or angle). For best results upload 4–5 views."
-            )
-        if len(image_paths) > 8:
-            raise ValueError("Maximum 8 images allowed per request.")
-
-        out_path = OUTPUT_DIR / f"{job_id}.glb"
         result = pipeline.run_from_multiple_images(
             image_paths,
             out_path,
@@ -279,18 +310,21 @@ async def deform_from_multiple_images(
         result["download_url"] = f"/api/output/{job_id}.glb"
         result["images_used"] = len(image_paths)
         result["created_by"] = user["username"]
+        succeeded = True
         return result
+    except HTTPException:
+        raise
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     except Exception as exc:
-        import traceback
-
-        tb = traceback.format_exc()
-        raise HTTPException(status_code=500, detail=f"{exc}\n\nTraceback:\n{tb}") from exc
+        logger.exception("Multi-view deformation failed; job_id=%s", job_id)
+        raise HTTPException(status_code=500, detail=f"Generation failed. Reference job ID: {job_id}.") from exc
     finally:
-        import shutil as _shutil
+        import shutil
 
-        _shutil.rmtree(work_dir, ignore_errors=True)
+        shutil.rmtree(work_dir, ignore_errors=True)
+        if not succeeded:
+            _remove_failed_output(out_path)
 
 
 @app.post("/api/deform/measurements")
@@ -309,7 +343,7 @@ async def deform_from_measurements(
     template: str = Form("rectangle_metal"),
     user: dict = Depends(require_roles("owner", "editor", "operator")),
 ):
-    """Deform template directly from known measurements (no images required)."""
+    """Deform a template from known physical measurements (no images required)."""
     try:
         measurements = Measurements(
             frame_width=frame_width,
@@ -329,15 +363,36 @@ async def deform_from_measurements(
 
     job_id = uuid.uuid4().hex[:12]
     out_path = OUTPUT_DIR / f"{job_id}.glb"
-
+    succeeded = False
     try:
         result = pipeline.run_from_measurements(measurements, out_path, template)
         result["job_id"] = job_id
         result["download_url"] = f"/api/output/{job_id}.glb"
         result["created_by"] = user["username"]
+        succeeded = True
         return result
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+        logger.exception("Measurement-based deformation failed; job_id=%s", job_id)
+        raise HTTPException(status_code=500, detail=f"Generation failed. Reference job ID: {job_id}.") from exc
+    finally:
+        if not succeeded:
+            _remove_failed_output(out_path)
+
+
+@app.get("/api/output/{filename}")
+def download_output(
+    filename: str,
+    user: dict = Depends(require_roles("owner", "editor", "operator", "viewer")),
+):
+    """Download only API-generated GLB artifacts addressed by opaque job IDs."""
+    if not re.fullmatch(r"[0-9a-f]{12}\.glb", filename):
+        raise HTTPException(status_code=400, detail="Invalid filename")
+    path = OUTPUT_DIR / filename
+    if not path.exists() or not path.is_file():
+        raise HTTPException(status_code=404, detail="File not found")
+    return FileResponse(path, media_type="model/gltf-binary", filename=filename)
 
 
 @app.get("/api/output/{filename}")
