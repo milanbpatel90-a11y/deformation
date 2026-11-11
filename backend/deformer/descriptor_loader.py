@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -108,6 +109,8 @@ class DescriptorLoader:
         descriptor_path: Path | None = None,
         metadata_path: Path | None = None,
     ) -> TemplateDescriptor:
+        if not isinstance(template_name, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,99}", template_name):
+            raise ValueError("Invalid template name; path separators and traversal are not allowed.")
         resolved_template = Path(template_path or self._resolve_template_path(template_name, template_info)).resolve()
         resolved_descriptor = Path(
             descriptor_path or self._resolve_descriptor_path(template_name, resolved_template.stem)
