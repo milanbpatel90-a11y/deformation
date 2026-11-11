@@ -129,10 +129,17 @@ def initialize_auth_database() -> None:
                 is_active INTEGER NOT NULL DEFAULT 1,
                 created_at INTEGER NOT NULL,
                 created_by TEXT,
-                last_login_at INTEGER
+                last_login_at INTEGER,
+                session_version INTEGER NOT NULL DEFAULT 0
             )
             """
         )
+        # Additive migration for databases created before session revocation support.
+        user_columns = {row["name"] for row in connection.execute("PRAGMA table_info(users)")}
+        if "session_version" not in user_columns:
+            connection.execute(
+                "ALTER TABLE users ADD COLUMN session_version INTEGER NOT NULL DEFAULT 0"
+            )
         connection.execute("CREATE INDEX IF NOT EXISTS idx_users_role ON users(role)")
         connection.execute(
             """
@@ -187,13 +194,14 @@ def _verify_password(password: str, encoded: str) -> bool:
         return False
 
 
-def _create_session_token(user_id: str) -> str:
+def _create_session_token(user_id: str, session_version: int = 0) -> str:
     now = int(time.time())
     payload = {
         "sub": user_id,
         "iat": now,
         "exp": now + SESSION_TTL_SECONDS,
         "jti": secrets.token_urlsafe(12),
+        "ver": int(session_version),
     }
     encoded_payload = _b64encode(
         json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8")
@@ -230,9 +238,14 @@ def _read_session_token(token: str | None) -> dict | None:
 
 
 def set_session_cookies(response: Response, user_id: str) -> None:
+    with _db() as connection:
+        row = connection.execute(
+            "SELECT session_version FROM users WHERE id = ?", (user_id,)
+        ).fetchone()
+    version = int(row["session_version"]) if row else 0
     response.set_cookie(
         SESSION_COOKIE_NAME,
-        _create_session_token(user_id),
+        _create_session_token(user_id, version),
         max_age=SESSION_TTL_SECONDS,
         httponly=True,
         secure=COOKIE_SECURE,
@@ -304,7 +317,11 @@ def get_current_user_optional(request: Request) -> dict | None:
             "SELECT * FROM users WHERE id = ? AND is_active = 1",
             (payload["sub"],),
         ).fetchone()
-    return dict(row) if row else None
+    if not row:
+        return None
+    if int(payload.get("ver", -1)) != int(row["session_version"]):
+        return None
+    return dict(row)
 
 
 def get_current_user(request: Request) -> dict:
@@ -511,6 +528,11 @@ def login(body: LoginRequest, response: Response, request: Request) -> dict:
 
 @auth_router.post("/logout")
 def logout(response: Response, user: dict = Depends(get_current_user)) -> dict:
+    with _db() as connection:
+        connection.execute(
+            "UPDATE users SET session_version = session_version + 1 WHERE id = ?",
+            (user["id"],),
+        )
     clear_session_cookies(response)
     return {"message": "Signed out successfully."}
 
@@ -526,6 +548,7 @@ def current_user_profile(user: dict = Depends(get_current_user)) -> dict:
 @auth_router.post("/change-password")
 def change_password(
     body: ChangePasswordRequest,
+    response: Response,
     user: dict = Depends(get_current_user),
 ) -> dict:
     _validate_password(body.new_password)
@@ -533,10 +556,11 @@ def change_password(
         raise HTTPException(status_code=400, detail="Current password is incorrect.")
     with _db() as connection:
         connection.execute(
-            "UPDATE users SET password_hash = ? WHERE id = ?",
+            "UPDATE users SET password_hash = ?, session_version = session_version + 1 WHERE id = ?",
             (_hash_password(body.new_password), user["id"]),
         )
-    return {"message": "Password changed. Your existing session remains active until it expires."}
+    set_session_cookies(response, user["id"])
+    return {"message": "Password changed. Other signed-in sessions have been revoked."}
 
 
 @admin_router.get("/users")
@@ -599,6 +623,7 @@ def update_user(user_id: str, body: UserUpdateRequest) -> dict:
         if changes.get("password"):
             _validate_password(changes["password"])
             fields.append("password_hash = ?")
+            fields.append("session_version = session_version + 1")
             values.append(_hash_password(changes["password"]))
         if not fields:
             raise HTTPException(status_code=400, detail="No valid changes were supplied.")
