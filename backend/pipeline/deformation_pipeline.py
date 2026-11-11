@@ -42,6 +42,14 @@ class DeformationPipeline:
         self.exporter = GLBExporter()
         self.descriptor_loader = DescriptorLoader(self.library.templates_dir)
 
+    @staticmethod
+    def _require_quality(quality) -> None:
+        if not quality.passed:
+            details = "; ".join(quality.warnings) or "Critical geometry checks failed."
+            raise ValueError(
+                f"Deformation quality gate failed ({quality.score:.1f}/100): {details}"
+            )
+
     def _style_from_measurements(self, measurements: Measurements) -> StyleClassification:
         aspect_ratio = measurements.lens_width / max(measurements.lens_height, 1e-6)
         return StyleClassification(
@@ -218,31 +226,21 @@ class DeformationPipeline:
 
         scene = trimesh.load(template_info.glb_path, force="scene")
         
-        # Try to load descriptor, fall back to simple deformation if template not properly prepared
-        try:
-            descriptor = self.descriptor_loader.load(template_name, measurements=measurements, template_info=template_info)
-            ctx = DeformationContext(
-                template_info=template_info,
-                template_scene=scene,
-                descriptor=descriptor,
-                measurements=measurements,
-            )
-            rim_pull = self.library.rim_pull_strength(template_name)
-            deformer = MeshDeformer(scene, template_info.dimensions, rim_pull_strength=rim_pull)
-            deformed_ctx, quality = deformer.deform(ctx)
-            deformed = deformed_ctx.template_scene
-        except (ValueError, KeyError) as e:
-            # Fallback when the template has no usable descriptor. There is no
-            # separate "simple" deformer left in this codebase -- MeshDeformer
-            # is the only deformer, and its .deform() requires a
-            # DeformationContext, not a raw Measurements object, so calling it
-            # here would always raise AttributeError. Instead, do a uniform
-            # scale of the whole template toward the requested frame_width,
-            # which needs no descriptor at all.
-            import warnings
-            warnings.warn(f"Template {template_name} not properly prepared (descriptor error: {e}). Using uniform-scale fallback.")
-            deformed = self._uniform_scale_fallback(scene, template_info, measurements)
-        
+        descriptor = self.descriptor_loader.load(
+            template_name, measurements=measurements, template_info=template_info
+        )
+        self._inject_aliases_into_scene(scene, descriptor)
+        ctx = DeformationContext(
+            template_info=template_info,
+            template_scene=scene,
+            descriptor=descriptor,
+            measurements=measurements,
+        )
+        rim_pull = self.library.rim_pull_strength(template_name)
+        deformer = MeshDeformer(scene, template_info.dimensions, rim_pull_strength=rim_pull)
+        deformed_ctx, quality = deformer.deform(ctx)
+        self._require_quality(quality)
+        deformed = deformed_ctx.template_scene
         deformed = apply_materials(deformed, measurements)
 
         out = Path(output_path)
@@ -278,6 +276,7 @@ class DeformationPipeline:
                 ],
             },
             "scale_factors": self._scale_summary(measurements, template_info.dimensions),
+            "quality_report": quality.to_dict(),
         }
 
     def run_from_arrays(
@@ -368,6 +367,7 @@ class DeformationPipeline:
         rim_pull = self.library.rim_pull_strength(template_name)
         deformer = MeshDeformer(scene, template_info.dimensions, rim_pull_strength=rim_pull)
         deformed_ctx, quality = deformer.deform(ctx, lens_contour)
+        self._require_quality(quality)
         deformed = deformed_ctx.template_scene
         s6.finish(
             t,
@@ -433,6 +433,7 @@ class DeformationPipeline:
             },
             "scale_factors": self._scale_summary(measurements, template_info.dimensions),
             "lens_contour": lens_contour.model_dump(),
+            "quality_report": quality.to_dict(),
             "pipeline": report.to_dict(),
         }
 
@@ -444,7 +445,7 @@ class DeformationPipeline:
         template_override: str | None = None,
     ) -> dict:
         """
-        Run the full pipeline on 4-6 images:
+        Run the full pipeline on 4-5 images:
         1. Read and segment all images.
         2. Classify each view (front, side, top, perspective).
         3. Extract measurements and contours from each view.
@@ -452,6 +453,9 @@ class DeformationPipeline:
         5. Detect lens opacity & dominant color from the front view's lens region.
         6. Apply template deformation and material mapping using the fused measurements.
         """
+        if not 4 <= len(image_paths) <= 5:
+            raise ValueError("Multi-view generation requires 4–5 product images.")
+
         report = PipelineReport()
         s1 = report.add("Multi-View Classification and Extraction")
         t = s1.start()
@@ -462,12 +466,15 @@ class DeformationPipeline:
         
         extracted_views = []
         front_image = None
+        first_valid_image = None
         front_lens_contour = None
         
         for path in image_paths:
             img = self._imread(path)
             if img is None:
                 continue
+            if first_valid_image is None:
+                first_valid_image = img
             
             masks = self.segmenter.segment(img)
             view_type = view_classifier.classify_view(img, masks["front"])
@@ -489,14 +496,17 @@ class DeformationPipeline:
                 front_image = img
                 front_lens_contour = lens_contour
                 
-        if not extracted_views:
-            raise ValueError("No valid images could be processed")
+        if len(extracted_views) < 4:
+            raise ValueError(
+                f"Only {len(extracted_views)} valid images could be processed; 4–5 valid images are required."
+            )
             
-        # If no front view was classified, pick the first view as front fallback
+        # If no front view was classified, use the first successfully decoded image.
         if front_image is None:
-            first_view_type, first_ms = extracted_views[0]
-            front_image = self._imread(image_paths[0])
-            extracted_views[0] = ("front", first_ms)
+            if first_valid_image is None:
+                raise ValueError("No valid images could be processed")
+            front_image = first_valid_image
+            extracted_views[0] = ("front", extracted_views[0][1])
             masks = self.segmenter.segment(front_image)
             front_lens_contour = self.measurer.extract_lens_contour(front_image, masks["front"])
             
@@ -545,6 +555,7 @@ class DeformationPipeline:
         rim_pull = self.library.rim_pull_strength(template_name)
         deformer = MeshDeformer(scene, template_info.dimensions, rim_pull_strength=rim_pull)
         deformed_ctx, quality = deformer.deform(ctx, front_lens_contour)
+        self._require_quality(quality)
         deformed = deformed_ctx.template_scene
         s3.finish(
             t,
@@ -604,6 +615,7 @@ class DeformationPipeline:
             "features": features.model_dump(mode="json"),
             "scale_factors": self._scale_summary(fused_measurements, template_info.dimensions),
             "lens_contour": front_lens_contour.model_dump(),
+            "quality_report": quality.to_dict(),
             "pipeline": report.to_dict(),
         }
 
