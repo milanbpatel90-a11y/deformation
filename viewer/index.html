@@ -141,9 +141,9 @@
     </div>
 
     <div class="img-card" id="card-multi" onclick="document.getElementById('input-multi').click()">
-      <input type="file" id="input-multi" accept="image/*" multiple />
-      <div class="label">Multi-View (4-5 images) <span class="badge optional">multi-fusion</span></div>
-      <div class="placeholder" id="ph-multi">Click to choose multiple files</div>
+      <input type="file" id="input-multi" accept=".jpg,.jpeg,.png,.webp,.bmp" multiple />
+      <div class="label">Production input (4–5 images) <span class="badge required">required</span></div>
+      <div class="placeholder" id="ph-multi">Select 4–5 product photos</div>
       <div id="multi-preview-list" style="display: flex; gap: 4px; flex-wrap: wrap; margin-top: 6px;"></div>
     </div>
   </div>
@@ -157,7 +157,23 @@
     <input type="text" id="template-input" placeholder="auto-detect" />
   </div>
 
-  <button id="generate-btn" disabled>Generate 3D Mesh</button>
+  <div class="section" id="physical-measurements">
+    <div class="section-title">Physical measurements (mm) — required for accurate scale</div>
+    <p style="font-size:12px;color:#9aa0b5;margin:0 0 10px;">Enter manufacturer specifications or measure the actual frame. Photos alone cannot establish millimetre scale.</p>
+    <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;">
+      <label class="field">Frame width<input id="measure-frame-width" type="number" min="80" max="220" step="0.1" placeholder="e.g. 140" /></label>
+      <label class="field">Lens width<input id="measure-lens-width" type="number" min="20" max="100" step="0.1" placeholder="e.g. 52" /></label>
+      <label class="field">Lens height<input id="measure-lens-height" type="number" min="15" max="100" step="0.1" placeholder="e.g. 42" /></label>
+      <label class="field">Bridge width<input id="measure-bridge-width" type="number" min="5" max="50" step="0.1" placeholder="e.g. 18" /></label>
+      <label class="field">Temple length<input id="measure-temple-length" type="number" min="80" max="220" step="0.1" placeholder="e.g. 140" /></label>
+      <label class="field">Rim thickness<input id="measure-rim-thickness" type="number" min="0" max="15" step="0.1" value="1.2" /></label>
+      <label class="field">Temple curve angle<input id="measure-temple-curve" type="number" min="0" max="90" step="0.1" value="28" /></label>
+      <label class="field">Frame shape<select id="measure-shape"><option value="">AI classify</option><option value="rectangle">Rectangle</option><option value="round">Round</option><option value="square">Square</option><option value="geometric">Geometric</option><option value="aviator">Aviator</option><option value="cat_eye">Cat eye</option><option value="browline">Browline</option><option value="rimless">Rimless</option></select></label>
+      <label class="field">Material<select id="measure-material"><option value="">AI classify</option><option value="metal">Metal</option><option value="acetate">Acetate</option><option value="plastic">Plastic</option><option value="titanium">Titanium</option><option value="mixed">Mixed</option></select></label>
+    </div>
+  </div>
+
+  <button id="generate-btn" disabled>Generate calibrated 3D GLB</button>
   <button id="tryon-btn" style="margin-top: 8px; width: 100%; padding: 10px; border-radius: 6px; border: none; background: #8be9fd; color: #1a1a2e; font-weight: 700; font-size: 14px; cursor: pointer; transition: background .2s;">Enable Webcam Try-On</button>
 
   <div id="status-box">Upload a front image to begin.</div>
@@ -450,11 +466,25 @@ inputMulti.addEventListener('change', (e) => {
 });
 
 function updateGenerateBtn() {
-  const hasFront = document.getElementById('input-front').files.length > 0;
   const multiCount = document.getElementById('input-multi').files.length;
   const hasValidMulti = multiCount >= 4 && multiCount <= 5;
-  document.getElementById('generate-btn').disabled = multiCount > 0 ? !hasValidMulti : !hasFront;
+  const requiredMeasurements = [
+    'measure-frame-width', 'measure-lens-width', 'measure-lens-height',
+    'measure-bridge-width', 'measure-temple-length'
+  ];
+  const hasMeasurements = requiredMeasurements.every((id) => {
+    const value = document.getElementById(id).value.trim();
+    return value !== '' && Number.isFinite(Number(value));
+  });
+  document.getElementById('generate-btn').disabled = !(hasValidMulti && hasMeasurements);
 }
+
+['measure-frame-width', 'measure-lens-width', 'measure-lens-height',
+ 'measure-bridge-width', 'measure-temple-length', 'measure-rim-thickness',
+ 'measure-temple-curve', 'measure-shape', 'measure-material'].forEach((id) => {
+  document.getElementById(id).addEventListener('input', updateGenerateBtn);
+  document.getElementById(id).addEventListener('change', updateGenerateBtn);
+});
 
 // ── Pipeline stages renderer ──────────────────────────────────────────────────
 function renderPipelineStages(stages) {
@@ -501,46 +531,63 @@ const statusBox = document.getElementById('status-box');
 const downloadBtn = document.getElementById('download-btn');
 
 document.getElementById('generate-btn').addEventListener('click', async () => {
-  const frontFile = document.getElementById('input-front').files[0];
   const multiFiles = document.getElementById('input-multi').files;
-  if (!frontFile && (!multiFiles || multiFiles.length === 0)) return;
-  if (multiFiles && multiFiles.length > 0 && (multiFiles.length < 4 || multiFiles.length > 5)) {
+  if (!multiFiles || multiFiles.length < 4 || multiFiles.length > 5) {
     statusBox.className = 'error';
-    statusBox.textContent = 'Select 4–5 images for multi-view generation.';
+    statusBox.textContent = 'Select exactly 4–5 product images.';
     return;
+  }
+
+  const requiredMeasurements = {
+    frame_width: 'measure-frame-width',
+    lens_width: 'measure-lens-width',
+    lens_height: 'measure-lens-height',
+    bridge_width: 'measure-bridge-width',
+    temple_length: 'measure-temple-length'
+  };
+  for (const [field, id] of Object.entries(requiredMeasurements)) {
+    const value = document.getElementById(id).value.trim();
+    if (!value || !Number.isFinite(Number(value))) {
+      statusBox.className = 'error';
+      statusBox.textContent = 'Enter all five physical measurements in millimetres before generating.';
+      document.getElementById(id).focus();
+      return;
+    }
   }
 
   const btn = document.getElementById('generate-btn');
   btn.disabled = true;
   btn.textContent = 'Generating…';
   statusBox.className = '';
-  statusBox.textContent = 'Running pipeline…';
+  statusBox.textContent = 'Validating images and calibrated measurements…';
   downloadBtn.style.display = 'none';
   document.getElementById('pipeline-stages').style.display = 'none';
 
   const form = new FormData();
   const API_BASE = window.location.origin;
-  let endpoint = `${API_BASE}/api/deform`;
+  const endpoint = `${API_BASE}/api/deform/multi-view`;
 
-  if (multiFiles && multiFiles.length > 0) {
-    endpoint = `${API_BASE}/api/deform/multi-view`;
-    for (let file of multiFiles) {
-      form.append('images', file);
-    }
-  } else {
-    form.append('front', frontFile);
-    const sideFile = document.getElementById('input-side').files[0];
-    if (sideFile) form.append('side', sideFile);
-    const topFile = document.getElementById('input-top').files[0];
-    if (topFile) form.append('top', topFile);
+  for (const file of multiFiles) form.append('images', file);
+  for (const [field, id] of Object.entries(requiredMeasurements)) {
+    form.append(field, document.getElementById(id).value);
   }
-
+  form.append('rim_thickness', document.getElementById('measure-rim-thickness').value || '1.2');
+  form.append('temple_curve_angle', document.getElementById('measure-temple-curve').value || '28');
+  const shape = document.getElementById('measure-shape').value;
+  const material = document.getElementById('measure-material').value;
+  if (shape) form.append('shape', shape);
+  if (material) form.append('material', material);
   form.append('color', document.getElementById('color-pick').value);
-  const tpl = document.getElementById('template-input').value.trim();
-  if (tpl) form.append('template', tpl);
+  const template = document.getElementById('template-input').value.trim();
+  if (template) form.append('template', template);
 
   try {
-    const resp = await fetch(endpoint, {\n      method: 'POST',\n      body: form,\n      credentials: 'same-origin',\n      headers: { 'X-CSRF-Token': readCookie('defirmation_csrf') }\n    });
+    const resp = await fetch(endpoint, {
+      method: 'POST',
+      body: form,
+      credentials: 'same-origin',
+      headers: { 'X-CSRF-Token': readCookie('defirmation_csrf') }
+    });
     const data = await resp.json();
 
     if (!resp.ok) {
@@ -551,26 +598,24 @@ document.getElementById('generate-btn').addEventListener('click', async () => {
 
     const m = data.measurements || {};
     statusBox.textContent =
-      `✓ Done  ·  Template: ${data.template}\n` +
-      `Frame ${m.frame_width}mm  ·  Lens ${m.lens_width}×${m.lens_height}mm\n` +
-      `Bridge ${m.bridge_width}mm  ·  Temple ${m.temple_length}mm  ·  Rim ${m.rim_thickness}mm`;
+      `✓ Done · Template: ${data.template} · Scale: ${data.measurement_source}\n` +
+      `Frame ${m.frame_width}mm · Lens ${m.lens_width}×${m.lens_height}mm\n` +
+      `Bridge ${m.bridge_width}mm · Temple ${m.temple_length}mm · Rim ${m.rim_thickness}mm`;
 
     renderPipelineStages(data.pipeline);
 
-    const fullDownloadUrl = data.download_url.startsWith('http') 
-      ? data.download_url 
+    const fullDownloadUrl = data.download_url.startsWith('http')
+      ? data.download_url
       : `${API_BASE}${data.download_url}`;
 
     downloadBtn.style.display = 'block';
     downloadBtn.onclick = () => { window.location.href = fullDownloadUrl; };
-
     loadGLB(fullDownloadUrl);
   } catch (err) {
     statusBox.className = 'error';
     statusBox.textContent = 'Network error: ' + err.message;
   } finally {
-    btn.disabled = false;
-    btn.textContent = 'Generate 3D Mesh';
+    btn.textContent = 'Generate calibrated 3D GLB';
     updateGenerateBtn();
   }
 });
