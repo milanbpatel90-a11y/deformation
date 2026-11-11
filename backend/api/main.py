@@ -421,18 +421,18 @@ async def deform_from_multiple_images(
 
 @app.post("/api/deform/measurements")
 async def deform_from_measurements(
-    frame_width: float = Form(145),
-    lens_width: float = Form(54),
-    lens_height: float = Form(50),
-    bridge_width: float = Form(18),
-    temple_length: float = Form(140),
+    frame_width: float = Form(...),
+    lens_width: float = Form(...),
+    lens_height: float = Form(...),
+    bridge_width: float = Form(...),
+    temple_length: float = Form(...),
     rim_thickness: float = Form(1.2),
     material: str = Form("metal"),
     shape: str = Form("rectangle"),
     nose_pads: bool = Form(True),
     temple_curve_angle: float = Form(28),
     color: str = Form("#d9a7a2"),
-    template: str = Form("rectangle_metal"),
+    template: str | None = Form(None),
     user: dict = Depends(require_roles("owner", "editor", "operator")),
 ):
     """Deform a template from known, user-supplied physical measurements."""
