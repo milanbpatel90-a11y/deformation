@@ -75,22 +75,26 @@ def test_descriptor_accepts_independent_required_parts():
     loader._validate_runtime_descriptor(**_runtime_descriptor_args(_independent_geometry()))
 
 
-def test_auto_inferred_aliases_are_persisted_for_runtime_sync():
+def test_generic_mesh_names_require_explicit_reviewed_aliases():
     geometry = {
         "large_frame": trimesh.creation.box(extents=[80, 30, 8]),
         "lens_pair": trimesh.creation.box(extents=[50, 25, 4]),
         "left_temple": trimesh.creation.box(extents=[8, 5, 60]),
         "right_temple": trimesh.creation.box(extents=[8, 5, 60]),
     }
-    geometry["left_temple"].vertices += [-30, 0, 0]
-    geometry["right_temple"].vertices += [30, 0, 0]
-    payload = {}
+    with pytest.raises(ValueError, match="automatic mesh guessing is disabled"):
+        DescriptorLoader._resolve_geometry_aliases(geometry, {})
+
+
+def test_explicit_mesh_aliases_resolve_each_logical_part():
+    geometry = {f"source_{name}": mesh for name, mesh in _independent_geometry().items()}
+    aliases = {name: f"source_{name}" for name in _independent_geometry()}
+    payload = {"mesh_aliases": aliases}
 
     resolved = DescriptorLoader._resolve_geometry_aliases(geometry, payload)
 
-    assert "Frame" in resolved
-    assert "mesh_aliases" in payload
-    assert payload["mesh_aliases"]["Frame"] == "large_frame"
+    assert all(resolved[name] is geometry[f"source_{name}"] for name in aliases)
+    assert payload["mesh_aliases"] == aliases
 
 
 def _make_context_with_world_alias():
