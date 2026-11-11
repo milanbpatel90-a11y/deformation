@@ -552,6 +552,11 @@ class DescriptorLoader:
                 for name in required:
                     aliases[name] = only
 
+        # Persist inferred aliases into the descriptor snapshot so the runtime
+        # pipeline can inject and later synchronize the same logical parts.
+        if aliases:
+            payload["mesh_aliases"] = dict(aliases)
+
         # Build resolved geometry: start with raw, then overlay logical names
         resolved = dict(raw_geometry)
         for logical_name, actual_name in aliases.items():
