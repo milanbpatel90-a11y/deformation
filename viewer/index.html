@@ -121,21 +121,21 @@
 
     <div class="img-card" id="card-front" onclick="document.getElementById('input-front').click()">
       <input type="file" id="input-front" accept="image/*" />
-      <div class="label">Front view <span class="badge required">required</span></div>
+      <div class="label">Front reference <span class="badge optional">preview only</span></div>
       <img class="preview" id="prev-front" />
       <div class="placeholder" id="ph-front">Click to choose</div>
     </div>
 
     <div class="img-card" id="card-side" onclick="document.getElementById('input-side').click()">
       <input type="file" id="input-side" accept="image/*" />
-      <div class="label">Side view <span class="badge optional">optional</span></div>
+      <div class="label">Side reference <span class="badge optional">preview only</span></div>
       <img class="preview" id="prev-side" />
       <div class="placeholder" id="ph-side">Click to choose</div>
     </div>
 
     <div class="img-card" id="card-top" onclick="document.getElementById('input-top').click()">
       <input type="file" id="input-top" accept="image/*" />
-      <div class="label">Top view <span class="badge optional">optional — rim thickness</span></div>
+      <div class="label">Top reference <span class="badge optional">preview only</span></div>
       <img class="preview" id="prev-top" />
       <div class="placeholder" id="ph-top">Click to choose</div>
     </div>
@@ -176,7 +176,7 @@
   <button id="generate-btn" disabled>Generate calibrated 3D GLB</button>
   <button id="tryon-btn" style="margin-top: 8px; width: 100%; padding: 10px; border-radius: 6px; border: none; background: #8be9fd; color: #1a1a2e; font-weight: 700; font-size: 14px; cursor: pointer; transition: background .2s;">Enable Webcam Try-On</button>
 
-  <div id="status-box">Upload a front image to begin.</div>
+  <div id="status-box">Select 4–5 product images and enter their physical measurements in millimetres.</div>
   <button id="download-btn">⬇ Download GLB</button>
 
   <!-- Pipeline stages appear here after generation -->
@@ -443,7 +443,7 @@ inputMulti.addEventListener('change', (e) => {
     status.textContent = 'Select 4–5 images for multi-view generation. You selected ' + files.length + '.';
   } else {
     status.className = '';
-    status.textContent = files.length + ' product images selected. Ready to generate.';
+    status.textContent = files.length + ' product images selected. Enter physical measurements below to enable generation.';
   }
   
   for (let file of files) {
