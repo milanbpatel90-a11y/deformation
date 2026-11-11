@@ -93,100 +93,59 @@ class DeformationPipeline:
 
     @staticmethod
     def _inject_aliases_into_scene(scene: trimesh.Scene, descriptor) -> None:
-        """Add logical mesh names into scene.geometry so DeformationContext can find them.
-
-        The descriptor_loader resolves aliases (e.g. 'LeftRim' -> 'Plane_glasses_mat_0')
-        but the scene itself only has the original GLB names. The DeformationContext builds
-        its meshes dict straight from scene.geometry, so logical names must be present there.
-        """
+        """Create independent world-space logical copies for descriptor aliases."""
         from copy import deepcopy
 
-        # Collect all unique actual→logical mappings from vertex_groups + descriptor parts
-        alias_map: dict[str, str] = {}  # logical_name -> actual_glb_name
-
-        # Pull from descriptor raw mesh_aliases if present
         raw_aliases = descriptor.raw.get("mesh_aliases", {})
-        if isinstance(raw_aliases, dict):
-            for logical, actual in raw_aliases.items():
-                if actual in scene.geometry and logical not in scene.geometry:
-                    alias_map[logical] = actual
+        if not isinstance(raw_aliases, dict):
+            raw_aliases = {}
 
-        # Also cover any logical names derived from vertex_groups that aren't in scene yet
+        node_geometry_names: set[str] = set()
+        geometry_transforms: dict[str, np.ndarray] = {}
+        for node_name in scene.graph.nodes_geometry:
+            transform, geometry_name = scene.graph[node_name]
+            node_geometry_names.add(geometry_name)
+            if geometry_name in geometry_transforms and not np.allclose(
+                geometry_transforms[geometry_name], transform
+            ):
+                raise ValueError(
+                    f"GLB geometry '{geometry_name}' has multiple node transforms; "
+                    "split the instances before deformation."
+                )
+            geometry_transforms[geometry_name] = transform
+
+        alias_map: dict[str, str] = {}
+        for logical_name, actual_name in raw_aliases.items():
+            if not isinstance(logical_name, str) or not isinstance(actual_name, str):
+                raise ValueError("Descriptor mesh_aliases must map string logical names to string GLB mesh names.")
+            if logical_name == actual_name:
+                continue
+            if actual_name not in scene.geometry:
+                raise ValueError(
+                    f"Descriptor alias '{logical_name}' references missing GLB mesh '{actual_name}'."
+                )
+            if logical_name in node_geometry_names:
+                raise ValueError(
+                    f"Logical mesh '{logical_name}' already has a GLB node but is aliased to "
+                    f"'{actual_name}'. Resolve the naming conflict in the descriptor."
+                )
+            alias_map[logical_name] = actual_name
+
         for group_parts in descriptor.vertex_groups.values():
             for logical_name in group_parts:
-                if logical_name not in scene.geometry:
-                    # Find the actual mesh this logical name maps to via raw_aliases
-                    actual = raw_aliases.get(logical_name)
-                    if actual and actual in scene.geometry:
-                        alias_map[logical_name] = actual
+                if logical_name not in scene.geometry and logical_name not in alias_map:
+                    raise ValueError(
+                        f"Descriptor requires logical mesh '{logical_name}', but the GLB has no "
+                        "matching mesh and no explicit mesh_aliases mapping."
+                    )
 
-        # Inject: add logical-named copies into scene.geometry, baked into WORLD
-        # space first.
-        #
-        # This MUST be an independent copy, not a shared reference. A degenerate/
-        # un-split template (confirmed on geometric_metal.glb, the repo's only
-        # pre-existing built-in template: its descriptor maps Frame, Bridge,
-        # LeftRim and RightRim all onto the single un-split mesh
-        # "Plane_glasses_mat_0") aliases several logical names to the same actual
-        # GLB mesh. `scene.geometry[logical] = scene.geometry[actual]` made every
-        # one of those logical names point at the literal same Trimesh instance,
-        # so BridgeDeformer mutating "Bridge".vertices silently mutated
-        # "LeftRim"/"RightRim"/"Frame" too (confirmed: running BridgeDeformer()
-        # alone moved LeftRim vertices by ~150mm even though it never touches
-        # LeftRim by name). deepcopy makes each logical part independently
-        # deformable, matching what every per-part deformer assumes.
-        #
-        # Baking the node transform in before the copy matters just as much as
-        # the independent-copy fix above: scene.geometry holds each mesh's LOCAL,
-        # untransformed vertex data, and on geometric_metal.glb the lens node's
-        # transform isn't just a translation -- it's a ~90 degree rotation that
-        # swaps the local Y and Z axes. Copying scene.geometry["Cube.002_glass_
-        # mat_0"] straight into "LeftLens"/"RightLens" (the previous behaviour)
-        # silently handed LensDeformer a mesh whose local Z axis was actually the
-        # lens's HEIGHT, not its depth -- LensDeformer._surface_indices splits
-        # front/back on Z, so it was splitting top-half vs bottom-half instead,
-        # which produced an undersized, badly-placed lens fit and tripped
-        # LensDeformer's own "valid" check (fit_error/inside_rim) regardless of
-        # measurements. Baking here, once, keeps every downstream consumer of
-        # the logical name correct without each deformer having to know about
-        # per-GLB node quirks.
-        geom_transforms: dict[str, np.ndarray] = {}
-        for node_name in scene.graph.nodes_geometry:
-            transform, geom_name = scene.graph[node_name]
-            if geom_name not in geom_transforms:
-                geom_transforms[geom_name] = transform
         for logical_name, actual_name in alias_map.items():
-            if logical_name not in scene.geometry:
-                copy = deepcopy(scene.geometry[actual_name])
-                transform = geom_transforms.get(actual_name)
-                if transform is not None and not np.allclose(transform, np.eye(4)):
-                    copy.apply_transform(transform)
-                scene.geometry[logical_name] = copy
-
-    @staticmethod
-    def _uniform_scale_fallback(scene: trimesh.Scene, template_info, measurements: Measurements) -> trimesh.Scene:
-        """Descriptor-free fallback: uniformly rescale every mesh in the scene so
-        the template's frame_width matches the requested measurements.frame_width.
-        Coarser than the descriptor-driven pipeline (no per-part reshaping), but
-        it is a real, working deformation rather than a crash -- used only when a
-        template is missing its descriptor.json or fails descriptor validation."""
-        from copy import deepcopy
-
-        out = deepcopy(scene)
-        template_width = float(getattr(template_info.dimensions, "frame_width", 0.0) or 0.0)
-        if template_width <= 0:
-            return out
-
-        scale = float(measurements.frame_width) / template_width
-        scale = float(np.clip(scale, 0.5, 2.0))
-
-        for node_name in out.graph.nodes_geometry:
-            transform, geom_name = out.graph[node_name]
-            new_transform = transform.copy()
-            new_transform[:3, :3] *= scale
-            new_transform[:3, 3] *= scale
-            out.graph.update(frame_to=node_name, matrix=new_transform)
-        return out
+            copy = deepcopy(scene.geometry[actual_name])
+            transform = geometry_transforms.get(actual_name)
+            if transform is not None and not np.allclose(transform, np.eye(4)):
+                copy.apply_transform(transform)
+            # Replace unreferenced stale aliases; never overwrite a graph node.
+            scene.geometry[logical_name] = copy
 
     @staticmethod
     def _optimize_scene(scene: trimesh.Scene) -> trimesh.Scene:
