@@ -60,6 +60,7 @@ class MeshDeformer:
                     context = stage.apply(context)
 
         self._refresh_normals(context)
+        context.sync_meshes_to_scene()
         quality = self.quality_checker.evaluate(context)
         return context, quality
 
