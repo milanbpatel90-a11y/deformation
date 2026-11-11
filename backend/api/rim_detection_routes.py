@@ -14,6 +14,7 @@ import os
 from io import BytesIO
 
 from PIL import Image
+from starlette.concurrency import run_in_threadpool
 from pathlib import Path
 from typing import Optional, Dict
 
@@ -353,19 +354,18 @@ async def detect_rim_from_image(
         h, w = image.shape[:2]
         
         # Get rim detection engine
-        engine = get_rim_engine()
+        engine = await run_in_threadpool(get_rim_engine)
         
-        # Get segmentation mask
-        mask = engine.get_glasses_mask(image)
-        
-        # Detect rim contour
-        result = engine.detect_rim_contour(mask, n_vertices=8)
+        # Get segmentation mask and contour without blocking the async server.
+        mask = await run_in_threadpool(engine.get_glasses_mask, image)
+        result = await run_in_threadpool(engine.detect_rim_contour, mask, n_vertices=8)
         
         if not result.get("success"):
             raise HTTPException(status_code=400, detail=result.get("error", "Detection failed"))
         
         # Estimate rim pull strength
-        rim_pull = engine.estimate_rim_pull_strength(
+        rim_pull = await run_in_threadpool(
+            engine.estimate_rim_pull_strength,
             result["edge_confidence"],
             result["fit_error"],
         )
@@ -405,14 +405,15 @@ async def apply_rim_detection_to_template(
     
     try:
         image = await _decode_upload(file)
-        engine = get_rim_engine()
-        mask = engine.get_glasses_mask(image)
-        result = engine.detect_rim_contour(mask)
+        engine = await run_in_threadpool(get_rim_engine)
+        mask = await run_in_threadpool(engine.get_glasses_mask, image)
+        result = await run_in_threadpool(engine.detect_rim_contour, mask)
         
         if not result.get("success"):
             raise HTTPException(status_code=400, detail="Rim detection failed")
         
-        rim_pull = engine.estimate_rim_pull_strength(
+        rim_pull = await run_in_threadpool(
+            engine.estimate_rim_pull_strength,
             result["edge_confidence"],
             result["fit_error"],
         )
@@ -438,7 +439,7 @@ async def apply_rim_detection_to_template(
 async def get_rim_detection_status() -> JSONResponse:
     """Check status of rim detection engine"""
     
-    engine = get_rim_engine()
+    engine = await run_in_threadpool(get_rim_engine)
     
     return JSONResponse({
         "engine_ready": True,
