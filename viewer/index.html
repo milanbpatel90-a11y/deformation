@@ -322,6 +322,7 @@ fill.position.set(-60, -20, 50);
 scene.add(fill);
 
 let currentModel = null;
+let currentModelBaseWidth = 0;
 let isTryOnActive = false;
 let tryOnCamera = null;
 let tryOnVideo = null;
@@ -352,6 +353,14 @@ function loadGLB(url) {
     if (currentModel) scene.remove(currentModel);
     currentModel = gltf.scene;
     scene.add(currentModel);
+    currentModel.updateMatrixWorld(true);
+    const modelBounds = new THREE.Box3().setFromObject(currentModel);
+    currentModelBaseWidth = modelBounds.getSize(new THREE.Vector3()).x;
+    if (!Number.isFinite(currentModelBaseWidth) || currentModelBaseWidth <= 1e-8) {
+      currentModelBaseWidth = 0;
+      overlayStatus.textContent = 'Error: GLB has no measurable frame width';
+      return;
+    }
     if (!isTryOnActive) {
       fitCamera(currentModel);
     }
@@ -612,9 +621,11 @@ function onResults(results) {
       // Offset slightly forward along the look direction so glasses sit on the nose
       currentModel.position.addScaledVector(v_dir, face_width * 0.15);
       
-      // 2. Scale the model dynamically based on face width
-      const base_scale = face_width * 0.72;
-      currentModel.scale.set(base_scale, base_scale, base_scale);
+      // 2. Scale by the measured GLB frame width, not by face width alone.
+      // This keeps the model-to-face ratio stable regardless of GLB coordinate units.
+      const desiredFrameWidth = face_width * 0.72;
+      const baseScale = desiredFrameWidth / currentModelBaseWidth;
+      currentModel.scale.setScalar(baseScale);
       
       overlayStatus.textContent = 'Webcam Try-On active · Face tracked';
     }
