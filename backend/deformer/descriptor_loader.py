@@ -413,9 +413,34 @@ class DescriptorLoader:
         lens_planes: dict[str, LensPlaneDescriptor],
         vertex_groups: dict[str, list[str]],
     ) -> None:
-        missing_groups = {"frame", "left_rim", "right_rim", "left_temple", "right_temple"}.difference(vertex_groups)
+        required_groups = {
+            "frame", "bridge", "left_rim", "right_rim",
+            "left_lens", "right_lens", "left_temple", "right_temple",
+        }
+        missing_groups = required_groups.difference(vertex_groups)
         if missing_groups:
             raise ValueError(f"Descriptor for {template_path} missing required vertex groups: {sorted(missing_groups)}")
+
+        # The deformation stages mutate these parts independently. If two logical
+        # parts resolve to the same source mesh, copying aliases later only creates
+        # overlapping duplicates; it does not create a physically separated frame.
+        independent_parts = (
+            "Frame", "Bridge", "LeftRim", "RightRim",
+            "LeftLens", "RightLens", "LeftTemple", "RightTemple",
+        )
+        source_by_identity: dict[int, str] = {}
+        for part in independent_parts:
+            mesh = geometry.get(part)
+            if mesh is None:
+                raise ValueError(f"Descriptor for {template_path} is missing independent mesh '{part}'")
+            previous = source_by_identity.get(id(mesh))
+            if previous is not None:
+                raise ValueError(
+                    f"Template {template_path} maps '{previous}' and '{part}' to the same source mesh. "
+                    "Production deformation requires independently addressable frame components."
+                )
+            source_by_identity[id(mesh)] = part
+
         for side in ("left", "right"):
             if side not in hinges:
                 raise ValueError(f"Descriptor for {template_path} missing hinge '{side}'")
