@@ -178,6 +178,21 @@ def test_failed_deformation_quality_is_rejected_before_export():
         DeformationPipeline._require_quality(failed)
 
 
+def test_segmentation_mask_validation_rejects_empty_and_full_frame_masks():
+    image = np.zeros((200, 300, 3), dtype=np.uint8)
+    with pytest.raises(ValueError, match="implausible"):
+        DeformationPipeline._validate_glasses_mask(image, np.zeros((200, 300), dtype=np.uint8))
+    with pytest.raises(ValueError, match="implausible"):
+        DeformationPipeline._validate_glasses_mask(image, np.full((200, 300), 255, dtype=np.uint8))
+
+
+def test_segmentation_mask_validation_accepts_reasonable_glasses_region():
+    image = np.zeros((200, 300, 3), dtype=np.uint8)
+    mask = np.zeros((200, 300), dtype=np.uint8)
+    mask[80:120, 50:250] = 255
+    DeformationPipeline._validate_glasses_mask(image, mask)
+
+
 def test_multi_view_requires_four_or_five_images():
     pipeline = object.__new__(DeformationPipeline)
     with pytest.raises(ValueError, match="4–5"):
