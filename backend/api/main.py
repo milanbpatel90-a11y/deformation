@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
 import os
 import re
@@ -10,6 +12,7 @@ from io import BytesIO
 from pathlib import Path
 
 from PIL import Image
+from starlette.concurrency import run_in_threadpool
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
@@ -56,6 +59,17 @@ async def _save_validated_image(upload: UploadFile, destination: Path) -> int:
         raise HTTPException(status_code=400, detail="An uploaded file is not a valid supported image.") from exc
     destination.write_bytes(contents)
     return len(contents)
+
+
+def _record_output_owner(metadata_path: Path, user: dict) -> None:
+    if not metadata_path.is_file():
+        raise RuntimeError("Generation metadata is missing; refusing to publish an unowned GLB.")
+    payload = json.loads(metadata_path.read_text(encoding="utf-8"))
+    payload["created_by_user_id"] = user["id"]
+    payload["created_by_username"] = user["username"]
+    temporary_path = metadata_path.with_suffix(metadata_path.suffix + ".tmp")
+    temporary_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    os.replace(temporary_path, metadata_path)
 
 
 def _remove_failed_output(output_path: Path) -> None:
@@ -211,16 +225,26 @@ def list_templates(user: dict = Depends(get_current_user)):
     }
 
 
-@app.post("/api/deform")
+@app.post("/api/deform", deprecated=True)
 async def deform_from_images(
-    front: UploadFile = File(..., description="Front product image"),
+    front: UploadFile = File(..., description="Front product image (legacy, uncalibrated path)"),
     side: UploadFile | None = File(None, description="Side product image"),
     top: UploadFile | None = File(None, description="Top product image"),
     color: str = Form("#d9a7a2"),
     template: str | None = Form(None),
     user: dict = Depends(require_roles("owner", "editor", "operator")),
 ):
-    """Upload front/side/top images, validate them, deform a template, and export a GLB."""
+    """Legacy image-only path. Production deployments reject uncalibrated scale."""
+    app_env = os.getenv("APP_ENV", "development").strip().lower()
+    allow_uncalibrated = os.getenv("ALLOW_UNCALIBRATED_GENERATION", "false").strip().lower() in {
+        "1", "true", "yes", "on"
+    }
+    if app_env in {"production", "prod"} and not allow_uncalibrated:
+        raise HTTPException(
+            status_code=422,
+            detail="Image-only generation cannot establish millimetre scale. Use 4–5 product images with physical measurements.",
+        )
+
     job_id = uuid.uuid4().hex[:12]
     work_dir = OUTPUT_DIR / f"_upload_{job_id}"
     work_dir.mkdir(parents=True, exist_ok=True)
@@ -241,7 +265,8 @@ async def deform_from_images(
             top_path = work_dir / "top.jpg"
             await _save_validated_image(top, top_path)
 
-        result = pipeline.run_from_images(
+        result = await run_in_threadpool(
+            pipeline.run_from_images,
             front_path,
             side_path,
             out_path,
@@ -249,6 +274,7 @@ async def deform_from_images(
             template_override=template,
             top_path=top_path,
         )
+        _record_output_owner(Path(result["metadata_json"]), user)
         result["job_id"] = job_id
         result["download_url"] = f"/api/output/{job_id}.glb"
         result["created_by"] = user["username"]
@@ -271,14 +297,41 @@ async def deform_from_images(
 
 @app.post("/api/deform/multi-view")
 async def deform_from_multiple_images(
-    images: list[UploadFile] = File(..., description="4–5 product images from multiple view angles"),
+    images: list[UploadFile] = File(..., description="Exactly 4–5 product images from multiple view angles"),
+    frame_width: float = Form(...),
+    lens_width: float = Form(...),
+    lens_height: float = Form(...),
+    bridge_width: float = Form(...),
+    temple_length: float = Form(...),
+    rim_thickness: float = Form(1.2),
+    temple_curve_angle: float = Form(28.0),
     color: str = Form("#d9a7a2"),
+    shape: str | None = Form(None),
+    material: str | None = Form(None),
     template: str | None = Form(None),
     user: dict = Depends(require_roles("owner", "editor", "operator")),
 ):
-    """Fuse 4–5 validated product images, deform the best-fit template, and export a GLB."""
+    """Production multi-view reconstruction with user-supplied physical dimensions."""
     if not 4 <= len(images) <= 5:
-        raise HTTPException(status_code=400, detail="Multi-view generation requires 4–5 product images.")
+        raise HTTPException(status_code=400, detail="Upload exactly 4 or 5 product images.")
+
+    try:
+        shape_override = FrameShape(shape) if shape else None
+        material_override = FrameMaterial(material) if material else None
+        manual_measurements = Measurements(
+            frame_width=frame_width,
+            lens_width=lens_width,
+            lens_height=lens_height,
+            bridge_width=bridge_width,
+            temple_length=temple_length,
+            rim_thickness=rim_thickness,
+            temple_curve_angle=temple_curve_angle,
+            color=color,
+            scale_source="user_supplied",
+            scale_calibrated=True,
+        )
+    except (ValueError, TypeError) as exc:
+        raise HTTPException(status_code=422, detail=f"Invalid physical measurements: {exc}") from exc
 
     job_id = uuid.uuid4().hex[:12]
     work_dir = OUTPUT_DIR / f"_upload_multi_{job_id}"
@@ -288,26 +341,37 @@ async def deform_from_multiple_images(
 
     try:
         image_paths: list[Path] = []
+        seen_hashes: set[str] = set()
         total_bytes = 0
         allowed_suffixes = {".jpg", ".jpeg", ".png", ".webp", ".bmp"}
         for index, upload in enumerate(images):
             if not upload.filename:
-                raise HTTPException(status_code=400, detail="Every multi-view upload must include an image file.")
+                raise HTTPException(status_code=400, detail=f"Image {index + 1} is missing a filename.")
             suffix = Path(upload.filename).suffix.lower()
             if suffix not in allowed_suffixes:
                 suffix = ".jpg"
             image_path = work_dir / f"image_{index}{suffix}"
-            total_bytes += await _save_validated_image(upload, image_path)
+            file_size = await _save_validated_image(upload, image_path)
+            total_bytes += file_size
             if total_bytes > MAX_MULTI_VIEW_TOTAL_BYTES:
                 raise HTTPException(status_code=413, detail="Combined multi-view uploads exceed the total size limit.")
+            digest = hashlib.sha256(image_path.read_bytes()).hexdigest()
+            if digest in seen_hashes:
+                raise HTTPException(status_code=400, detail=f"Image {index + 1} duplicates another uploaded image.")
+            seen_hashes.add(digest)
             image_paths.append(image_path)
 
-        result = pipeline.run_from_multiple_images(
+        result = await run_in_threadpool(
+            pipeline.run_from_multiple_images,
             image_paths,
             out_path,
-            color=color,
-            template_override=template,
+            color,
+            template,
+            manual_measurements,
+            shape_override,
+            material_override,
         )
+        _record_output_owner(Path(result["metadata_json"]), user)
         result["job_id"] = job_id
         result["download_url"] = f"/api/output/{job_id}.glb"
         result["images_used"] = len(image_paths)
@@ -345,7 +409,7 @@ async def deform_from_measurements(
     template: str = Form("rectangle_metal"),
     user: dict = Depends(require_roles("owner", "editor", "operator")),
 ):
-    """Deform a template from known physical measurements (no images required)."""
+    """Deform a template from known, user-supplied physical measurements."""
     try:
         measurements = Measurements(
             frame_width=frame_width,
@@ -359,15 +423,23 @@ async def deform_from_measurements(
             nose_pads=nose_pads,
             temple_curve_angle=temple_curve_angle,
             color=color,
+            scale_source="user_supplied",
+            scale_calibrated=True,
         )
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except (ValueError, TypeError) as exc:
+        raise HTTPException(status_code=422, detail=f"Invalid physical measurements: {exc}") from exc
 
     job_id = uuid.uuid4().hex[:12]
     out_path = OUTPUT_DIR / f"{job_id}.glb"
     succeeded = False
     try:
-        result = pipeline.run_from_measurements(measurements, out_path, template)
+        result = await run_in_threadpool(
+            pipeline.run_from_measurements,
+            measurements,
+            out_path,
+            template,
+        )
+        _record_output_owner(Path(result["metadata_json"]), user)
         result["job_id"] = job_id
         result["download_url"] = f"/api/output/{job_id}.glb"
         result["created_by"] = user["username"]
