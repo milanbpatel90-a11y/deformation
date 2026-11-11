@@ -248,6 +248,8 @@ class DeformationPipeline:
             "output_glb": str(out),
             "metadata_json": str(meta_path),
             "measurements": measurements.model_dump(),
+            "measurement_source": measurements.scale_source,
+            "scale_calibrated": measurements.scale_calibrated,
             "template": template_name,
             "features": features.model_dump(mode="json"),
             "template_selection": {
@@ -407,6 +409,8 @@ class DeformationPipeline:
             "output_glb": str(out),
             "metadata_json": str(meta_path),
             "measurements": measurements.model_dump(),
+            "measurement_source": measurements.scale_source,
+            "scale_calibrated": measurements.scale_calibrated,
             "template": template_name,
             "features": features.model_dump(mode="json"),
             "template_selection": {
