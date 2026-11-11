@@ -59,6 +59,11 @@
       background: #1e1e3a; color: #eee; font-size: 13px;
     }
     input[type=text]:focus, input[type=color]:focus { outline: none; border-color: #8be9fd; box-shadow: 0 0 4px rgba(139, 233, 253, 0.2); }
+    input[type=number], select {
+      width: 100%; padding: 7px 8px; border-radius: 4px; border: 1px solid #3a3a5a;
+      background: #1e1e3a; color: #eee; font-size: 12px; min-width: 0;
+    }
+    input[type=number]:focus, select:focus { outline: none; border-color: #8be9fd; }
 
     /* ── Generate button ── */
     #generate-btn {
