@@ -15,6 +15,7 @@ from backend.deformer.quality_checker import QualityReport
 from backend.exporter.glb_exporter import GLBExporter
 from backend.models import FrameMaterial, FrameShape, Measurements
 from backend.pipeline import DeformationPipeline
+from backend.template_library.loader import TemplateLibrary
 from backend.api.rim_detection_routes import RimDetectionEngine
 from backend.auth import _create_session_token, _read_session_token
 
@@ -179,6 +180,33 @@ def test_rim_polygon_resampling_returns_exact_count_and_closes_perimeter():
     assert len(np.unique(points, axis=0)) >= 4
     assert np.max(points[:, 0]) <= 10
     assert np.max(points[:, 1]) <= 10
+
+
+def test_uncalibrated_image_estimates_are_blocked_in_production(monkeypatch):
+    monkeypatch.setenv("APP_ENV", "production")
+    monkeypatch.delenv("ALLOW_UNCALIBRATED_GENERATION", raising=False)
+    with pytest.raises(ValueError, match="calibrated physical measurements"):
+        DeformationPipeline._require_calibrated_scale(_measurements())
+
+
+def test_user_supplied_calibrated_measurements_pass_production_gate(monkeypatch):
+    monkeypatch.setenv("APP_ENV", "production")
+    monkeypatch.delenv("ALLOW_UNCALIBRATED_GENERATION", raising=False)
+    measurements = _measurements().model_copy(
+        update={"scale_source": "user_supplied", "scale_calibrated": True}
+    )
+    DeformationPipeline._require_calibrated_scale(measurements)
+
+
+def test_template_names_cannot_escape_template_directory():
+    with pytest.raises(ValueError, match="Invalid template name"):
+        TemplateLibrary._validate_template_name("../secrets")
+
+
+def test_descriptor_loader_rejects_path_traversal_before_reading():
+    loader = DescriptorLoader(Path("templates"))
+    with pytest.raises(ValueError, match="Invalid template name"):
+        loader.load("../secrets")
 
 
 def test_measurements_reject_impossible_physical_dimensions():
