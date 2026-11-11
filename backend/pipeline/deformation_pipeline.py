@@ -52,6 +52,19 @@ class DeformationPipeline:
         self.descriptor_loader = DescriptorLoader(self.library.templates_dir)
 
     @staticmethod
+    def _validate_glasses_mask(image: np.ndarray, mask: np.ndarray) -> None:
+        mask_array = np.asarray(mask)
+        if mask_array.ndim != 2 or mask_array.shape != image.shape[:2]:
+            raise ValueError("Segmentation mask dimensions do not match the source image.")
+        image_area = int(image.shape[0] * image.shape[1])
+        mask_ratio = float(np.count_nonzero(mask_array)) / max(image_area, 1)
+        if mask_ratio < 0.001 or mask_ratio > 0.75:
+            raise ValueError(
+                f"Glasses segmentation mask is implausible ({mask_ratio:.3%} of image); "
+                "check image quality and the segmentation model."
+            )
+
+    @staticmethod
     def _require_calibrated_scale(measurements: Measurements) -> None:
         app_env = os.getenv("APP_ENV", "development").strip().lower()
         allow_uncalibrated = os.getenv("ALLOW_UNCALIBRATED_GENERATION", "false").strip().lower() in {
@@ -279,6 +292,7 @@ class DeformationPipeline:
         s1 = report.add("YOLO Segmentation")
         t = s1.start()
         masks = self.segmenter.segment(front)
+        self._validate_glasses_mask(front, masks["front"])
         s1.finish(t, model=masks.get("model_type", "unknown"), detections=masks.get("detections", 0))
 
         s2 = report.add("Shape Classification")
@@ -462,6 +476,7 @@ class DeformationPipeline:
 
             masks = self.segmenter.segment(image)
             front_mask = masks["front"]
+            self._validate_glasses_mask(image, front_mask)
             view_type = view_classifier.classify_view(image, front_mask)
             style = self.classifier.classify_style(image, front_mask)
             estimated, lens_contour = self.measurer.extract_from_images(
