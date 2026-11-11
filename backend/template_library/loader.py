@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 from backend.models import (
@@ -46,7 +47,13 @@ class TemplateLibrary:
             names.append(path.stem)
         return sorted(names)
 
+    @staticmethod
+    def _validate_template_name(name: str) -> None:
+        if not isinstance(name, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,99}", name):
+            raise ValueError("Invalid template name; use only letters, numbers, dots, underscores, and hyphens.")
+
     def load(self, name: str) -> TemplateInfo:
+        self._validate_template_name(name)
         if name in self._cache:
             return self._cache[name]
 
