@@ -42,9 +42,11 @@ async def _save_validated_image(upload: UploadFile, destination: Path) -> int:
     if not contents:
         raise HTTPException(status_code=400, detail="An uploaded image is empty.")
     if len(contents) > MAX_IMAGE_BYTES:
-        raise HTTPException(status_code=413, detail="An image exceeds the 20 MiB upload limit.")
+        raise HTTPException(status_code=413, detail="An image exceeds the configured upload size limit.")
     try:
         with Image.open(BytesIO(contents)) as image:
+            if image.format not in {"JPEG", "PNG", "WEBP", "BMP"}:
+                raise HTTPException(status_code=400, detail="Use a JPEG, PNG, WebP, or BMP image.")
             if image.width * image.height > MAX_IMAGE_PIXELS:
                 raise HTTPException(status_code=413, detail="Image dimensions exceed the processing limit.")
             image.verify()
