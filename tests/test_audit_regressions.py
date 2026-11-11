@@ -1,6 +1,8 @@
 """Regression tests for the production-safety fixes in the audit branch."""
 
 from pathlib import Path
+import json
+import struct
 import time
 from types import SimpleNamespace
 
@@ -160,6 +162,12 @@ def test_glb_export_converts_mm_to_m_and_drops_alias_duplicate(tmp_path):
     assert len(loaded.geometry) == 1
     assert np.isclose(loaded.bounds[1, 0] - loaded.bounds[0, 0], 0.14, atol=1e-5)
     assert np.isclose(loaded.bounds[:, 0].mean(), 0.105, atol=1e-5)
+    raw = output.read_bytes()
+    json_length, _ = struct.unpack("<II", raw[12:20])
+    gltf_json = json.loads(raw[20:20 + json_length])
+    scene_extras = gltf_json["scenes"][gltf_json.get("scene", 0)]["extras"]["extras"]
+    assert scene_extras["units"]["geometry"] == "m"
+    assert len(scene_extras["anchors"]["NoseBridge"]) == 3
     # Export must not scale or mutate the source scene in place.
     assert np.isclose(scene.bounds[1, 0] - scene.bounds[0, 0], 140.0, atol=1e-5)
 
