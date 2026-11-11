@@ -71,8 +71,8 @@ class Measurements(BaseModel):
     nose_pad_distance: float | None = Field(default=None, ge=0, le=80, allow_inf_nan=False)
     nose_pad_angle: float | None = Field(default=None, ge=0, le=90, allow_inf_nan=False)
     nose_pad_height: float | None = Field(default=None, ge=0, le=25, allow_inf_nan=False)
-    color: str = "#d9a7a2"
-    lens_color: str | None = Field(default=None, description="Hex color code for the lenses")
+    color: str = Field(default="#d9a7a2", pattern=r"^#[0-9a-fA-F]{6}$")
+    lens_color: str | None = Field(default=None, pattern=r"^#[0-9a-fA-F]{6}$", description="Hex color code for the lenses")
     lens_opacity: float | None = Field(default=None, ge=0, le=1, allow_inf_nan=False, description="Opacity of the lenses (0.0 to 1.0)")
     scale_source: Literal["image_estimate", "user_supplied", "manufacturer_spec"] = "image_estimate"
     scale_calibrated: bool = False
