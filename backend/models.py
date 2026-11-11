@@ -56,22 +56,24 @@ class BridgeType(str, Enum):
 
 
 class Measurements(BaseModel):
-    frame_width: float = Field(..., description="Total frame width in mm")
-    lens_width: float = Field(..., description="Single lens width in mm")
-    lens_height: float = Field(..., description="Single lens height in mm")
-    bridge_width: float = Field(..., description="Bridge width in mm")
-    temple_length: float = Field(..., description="Temple arm length in mm")
-    rim_thickness: float = Field(default=1.2, description="Rim thickness in mm")
+    # Broad physical bounds reject malformed values without over-constraining
+    # uncommon adult eyewear sizes. All dimensions are millimetres.
+    frame_width: float = Field(..., gt=80, le=220, allow_inf_nan=False, description="Total frame width in mm")
+    lens_width: float = Field(..., gt=20, le=100, allow_inf_nan=False, description="Single lens width in mm")
+    lens_height: float = Field(..., gt=15, le=100, allow_inf_nan=False, description="Single lens height in mm")
+    bridge_width: float = Field(..., gt=5, le=50, allow_inf_nan=False, description="Bridge width in mm")
+    temple_length: float = Field(..., gt=80, le=220, allow_inf_nan=False, description="Temple arm length in mm")
+    rim_thickness: float = Field(default=1.2, gt=0, le=15, allow_inf_nan=False, description="Rim thickness in mm")
     material: FrameMaterial = FrameMaterial.METAL
     shape: FrameShape = FrameShape.GEOMETRIC
     nose_pads: bool = True
-    temple_curve_angle: float = Field(default=28.0, description="Temple curve in degrees")
-    nose_pad_distance: float | None = None
-    nose_pad_angle: float | None = None
-    nose_pad_height: float | None = None
+    temple_curve_angle: float = Field(default=28.0, ge=0, le=90, allow_inf_nan=False, description="Temple curve in degrees")
+    nose_pad_distance: float | None = Field(default=None, ge=0, le=80, allow_inf_nan=False)
+    nose_pad_angle: float | None = Field(default=None, ge=0, le=90, allow_inf_nan=False)
+    nose_pad_height: float | None = Field(default=None, ge=0, le=25, allow_inf_nan=False)
     color: str = "#d9a7a2"
     lens_color: str | None = Field(default=None, description="Hex color code for the lenses")
-    lens_opacity: float | None = Field(default=None, description="Opacity of the lenses (0.0 to 1.0)")
+    lens_opacity: float | None = Field(default=None, ge=0, le=1, allow_inf_nan=False, description="Opacity of the lenses (0.0 to 1.0)")
 
 
 class TemplateDimensions(BaseModel):
