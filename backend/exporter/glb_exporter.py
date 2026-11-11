@@ -48,6 +48,7 @@ class GLBExporter:
             self._compute_anchors(export_scene, measurements)
         )
         self._attach_metadata(export_scene, metadata, anchors_m)
+        self._remove_unreferenced_geometry(export_scene)
         self._scale_scene_to_meters(export_scene)
 
         export_scene.export(str(output_path), file_type="glb")
@@ -115,6 +116,17 @@ class GLBExporter:
             name: (np.asarray(point, dtype=np.float64) * MM_TO_METERS).tolist()
             for name, point in anchors_mm.items()
         }
+
+    @staticmethod
+    def _remove_unreferenced_geometry(scene: trimesh.Scene) -> None:
+        """Drop alias-only copies so GLB export cannot duplicate rendered parts."""
+        referenced = {
+            scene.graph[node_name][1]
+            for node_name in scene.graph.nodes_geometry
+        }
+        for geometry_name in list(scene.geometry):
+            if geometry_name not in referenced:
+                scene.geometry.pop(geometry_name, None)
 
     @staticmethod
     def _scale_scene_to_meters(scene: trimesh.Scene) -> None:
