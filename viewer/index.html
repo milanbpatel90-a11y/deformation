@@ -237,7 +237,7 @@ logoutButton.addEventListener('click', async () => {
     credentials: 'same-origin',
     headers: { 'X-CSRF-Token': readCookie('defirmation_csrf') }
   });
-  if (result.ok) window.location.replace('/login');
+  if (result.ok) window.location.replace('/login?signed_out=1');
   else alert('Unable to sign out. Refresh the page and try again.');
 });
 accountActions.append(logoutButton);
