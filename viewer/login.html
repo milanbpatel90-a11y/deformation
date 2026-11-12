@@ -18,18 +18,15 @@
     .eyebrow{margin:0 0 7px;color:#8be9fd;font-size:10px;letter-spacing:.16em;text-transform:uppercase;font-weight:800}
     h2{margin:0 0 8px;font-size:21px;letter-spacing:-.025em}
     .hint{margin:0 0 23px;color:#a6aac8;font-size:13px;line-height:1.55}
-    label{display:block;margin:15px 0 7px;color:#c8cbe0;font-size:12px;font-weight:650}
-    input{width:100%;height:44px;padding:0 13px;border:1px solid #3a3d5f;border-radius:9px;background:#11142b;color:#fff;font-size:14px;outline:none}
-    input:focus{border-color:#8be9fd;box-shadow:0 0 0 3px #8be9fd20}
-    button{width:100%;height:46px;margin-top:22px;border:0;border-radius:9px;background:#8be9fd;color:#101226;font-size:14px;font-weight:800;cursor:pointer}
+    button{width:100%;height:48px;margin-top:8px;border:0;border-radius:9px;background:#fff;color:#202124;font-size:14px;font-weight:750;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:12px}
     button:disabled{opacity:.55;cursor:wait}
+    .google-mark{width:18px;height:18px}
     .message{display:none;margin-top:15px;padding:11px 12px;border:1px solid #6a394d;border-radius:8px;background:#351e2c;color:#ffb4c9;font-size:12px;line-height:1.5}
-    .message.ok{border-color:#285c54;background:#17342f;color:#a6f4d6}
     .foot{margin:17px 0 0;text-align:center;color:#737895;font-size:11px;line-height:1.6}
     .foot strong{color:#aeb4d3}
-    .hidden{display:none!important}
     @media(max-width:480px){.panel{padding:24px 20px}}
   </style>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
 <body>
   <main class="shell">
@@ -38,130 +35,106 @@
       <h1>Defirmation</h1>
       <p>Eyewear 3D generation · Virtual try-on workspace</p>
     </header>
-
     <section class="panel">
       <p class="eyebrow">Secure workspace</p>
-      <div id="login-view">
-        <h2>Welcome back</h2>
-        <p class="hint">Sign in to access your eyewear generation workspace.</p>
-        <form id="login-form">
-          <label for="login-username">Username</label>
-          <input id="login-username" name="username" autocomplete="username" required>
-          <label for="login-password">Password</label>
-          <input id="login-password" name="password" type="password" autocomplete="current-password" required>
-          <button id="login-button" type="submit">Sign in</button>
-        </form>
-      </div>
-
-      <div id="setup-view" class="hidden">
-        <h2>Create the Owner account</h2>
-        <p class="hint">This is a one-time setup. The Owner has full control and is the only account allowed to manage other users.</p>
-        <form id="setup-form">
-          <label for="setup-username">Owner username</label>
-          <input id="setup-username" name="username" value="milanbpatel90-a11y" autocomplete="username" required>
-          <label for="setup-name">Display name</label>
-          <input id="setup-name" name="display_name" value="Milan" required>
-          <label for="setup-token">One-time setup token</label>
-          <input id="setup-token" name="bootstrap_token" type="password" autocomplete="off" required>
-          <label for="setup-password">Create password (12+ characters)</label>
-          <input id="setup-password" name="password" type="password" minlength="12" autocomplete="new-password" required>
-          <label for="setup-confirm">Confirm password</label>
-          <input id="setup-confirm" type="password" minlength="12" autocomplete="new-password" required>
-          <button id="setup-button" type="submit">Create Owner account</button>
-        </form>
-      </div>
-
+      <h2>Continue with Google</h2>
+      <p class="hint">Sign in with your Google account to upload eyewear images, generate 3D models, and use the virtual try-on workspace.</p>
+      <button id="google-login" type="button">
+        <svg class="google-mark" viewBox="0 0 48 48" aria-hidden="true"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.76 7.18l7.73 6C44.42 37.99 46.98 31.88 46.98 24.55z"/><path fill="#FBBC05" d="M10.53 28.59A14.4 14.4 0 0 1 9.75 24c0-1.59.27-3.13.76-4.59l-7.98-6.19A23.9 23.9 0 0 0 0 24c0 3.87.93 7.53 2.56 10.78l7.97-6.19z"/><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.91-5.8l-7.73-6c-2.15 1.45-4.9 2.3-8.18 2.3-6.26 0-11.57-4.22-13.46-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/></svg>
+        Continue with Google
+      </button>
       <div id="message" class="message" role="alert" aria-live="polite"></div>
     </section>
-    <p class="foot">Access is managed by the workspace Owner.<br><strong>No public registration is available.</strong></p>
+    <p class="foot">Authentication secured by <strong>Supabase</strong>.<br>Access is available to Google accounts approved by your workspace policy.</p>
   </main>
-
   <script>
-    const loginView = document.getElementById('login-view');
-    const setupView = document.getElementById('setup-view');
+    const button = document.getElementById('google-login');
     const messageBox = document.getElementById('message');
+    let client;
 
-    function showMessage(message, success = false) {
+    function showMessage(message) {
       messageBox.textContent = message;
-      messageBox.className = success ? 'message ok' : 'message';
       messageBox.style.display = 'block';
     }
 
-    async function requestJson(url, body) {
-      const response = await fetch(url, {
+    async function syncBackendSession(session) {
+      const response = await fetch('/api/auth/session', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'same-origin',
-        body: JSON.stringify(body)
+        body: JSON.stringify({
+          access_token: session.access_token,
+          refresh_token: session.refresh_token
+        })
       });
       const data = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(data.detail || 'Request failed.');
-      return data;
+      if (!response.ok) throw new Error(data.detail || 'Unable to establish application session.');
+      window.location.replace('/viewer/');
     }
 
     async function initialize() {
-      const existing = await fetch('/api/auth/me', { credentials: 'same-origin' });
-      if (existing.ok) {
-        window.location.replace('/viewer/');
+      const configResponse = await fetch('/api/auth/config', { credentials: 'same-origin' });
+      const config = await configResponse.json();
+      if (!config.configured) {
+        button.disabled = true;
+        showMessage('Supabase is not configured. Add SUPABASE_URL and SUPABASE_PUBLISHABLE_KEY to the backend environment.');
         return;
       }
+      if (!window.supabase || !window.supabase.createClient) {
+        button.disabled = true;
+        showMessage('Unable to load the Supabase authentication client. Please refresh.');
+        return;
+      }
+      client = window.supabase.createClient(config.supabase_url, config.supabase_key, {
+        auth: { flowType: 'pkce', persistSession: true, autoRefreshToken: true, detectSessionInUrl: false }
+      });
 
-      const statusResponse = await fetch('/api/auth/status', { credentials: 'same-origin' });
-      const status = await statusResponse.json();
-      if (status.setup_required) {
-        loginView.classList.add('hidden');
-        setupView.classList.remove('hidden');
-        if (!status.bootstrap_configured) {
-          const token = document.getElementById('setup-token');
-          token.disabled = true;
-          document.getElementById('setup-button').disabled = true;
-          showMessage('Owner setup is locked until the server owner configures AUTH_BOOTSTRAP_TOKEN and restarts the application. Do not place this token in source code.');
+      const url = new URL(window.location.href);
+      if (url.searchParams.has('error')) {
+        showMessage(url.searchParams.get('error_description') || url.searchParams.get('error'));
+        return;
+      }
+      if (url.searchParams.has('code')) {
+        button.disabled = true;
+        try {
+          const { data, error } = await client.auth.exchangeCodeForSession(window.location.href);
+          if (error) throw error;
+          if (!data.session) throw new Error('Google sign-in did not return a session.');
+          await syncBackendSession(data.session);
+          return;
+        } catch (error) {
+          showMessage(error.message || 'Google sign-in failed.');
+          button.disabled = false;
+          return;
         }
+      }
+
+      const { data } = await client.auth.getSession();
+      if (data.session) {
+        try { await syncBackendSession(data.session); }
+        catch (error) { await client.auth.signOut(); }
       }
     }
 
-    document.getElementById('login-form').addEventListener('submit', async (event) => {
-      event.preventDefault();
-      const button = document.getElementById('login-button');
+    button.addEventListener('click', async () => {
+      if (!client) return;
       button.disabled = true;
       try {
-        await requestJson('/api/auth/login', {
-          username: document.getElementById('login-username').value,
-          password: document.getElementById('login-password').value
+        const { error } = await client.auth.signInWithOAuth({
+          provider: 'google',
+          options: {
+            redirectTo: window.location.origin + '/login',
+            queryParams: { prompt: 'select_account' }
+          }
         });
-        window.location.replace('/viewer/');
+        if (error) throw error;
       } catch (error) {
-        showMessage(error.message);
-      } finally {
+        showMessage(error.message || 'Could not start Google sign-in.');
         button.disabled = false;
       }
     });
 
-    document.getElementById('setup-form').addEventListener('submit', async (event) => {
-      event.preventDefault();
-      const password = document.getElementById('setup-password').value;
-      if (password !== document.getElementById('setup-confirm').value) {
-        showMessage('The passwords do not match.');
-        return;
-      }
-      const button = document.getElementById('setup-button');
-      button.disabled = true;
-      try {
-        await requestJson('/api/auth/setup', {
-          username: document.getElementById('setup-username').value,
-          display_name: document.getElementById('setup-name').value,
-          bootstrap_token: document.getElementById('setup-token').value,
-          password
-        });
-        window.location.replace('/viewer/');
-      } catch (error) {
-        showMessage(error.message);
-      } finally {
-        button.disabled = false;
-      }
-    });
-
-    initialize().catch(error => showMessage('Unable to check sign-in status: ' + error.message));
+    initialize().catch(error => showMessage('Authentication initialization failed: ' + error.message));
   </script>
 </body>
 </html>
