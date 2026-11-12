@@ -10,11 +10,18 @@ from __future__ import annotations
 import os
 import secrets
 import hmac
+from pathlib import Path
 from typing import Callable
 
 import requests
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel, Field
+
+try:
+    from dotenv import load_dotenv
+    load_dotenv(Path(__file__).resolve().parents[1] / ".env", override=False)
+except ImportError:
+    pass
 
 SUPABASE_URL = os.getenv("SUPABASE_URL", "").strip().rstrip("/")
 SUPABASE_KEY = (
