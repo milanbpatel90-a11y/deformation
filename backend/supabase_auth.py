@@ -88,7 +88,7 @@ def _refresh_session(refresh_token: str) -> dict | None:
         return None
 
 
-def _set_cookies(response: Response, access_token: str, refresh_token: str) -> None:
+def set_session_cookies(response: Response, access_token: str, refresh_token: str) -> None:
     response.set_cookie(
         SESSION_COOKIE_NAME, access_token, max_age=COOKIE_MAX_AGE,
         httponly=True, secure=COOKIE_SECURE, samesite="lax", path="/",
@@ -191,7 +191,7 @@ def create_session(body: SessionRequest, response: Response) -> dict:
     user = _get_supabase_user(body.access_token)
     if not user:
         raise HTTPException(status_code=401, detail="Supabase could not verify this Google session.")
-    _set_cookies(response, body.access_token, body.refresh_token)
+    set_session_cookies(response, body.access_token, body.refresh_token)
     email = str(user.get("email", "")).strip().lower()
     return {"user": {"id": user["id"], "email": email}, "message": "Signed in."}
 
@@ -206,7 +206,7 @@ def logout(response: Response) -> dict:
 def current_user_profile(request: Request, response: Response, user: dict = Depends(get_current_user)) -> dict:
     refreshed = getattr(request.state, "supabase_refreshed_session", None)
     if refreshed:
-        _set_cookies(response, refreshed["access_token"], refreshed["refresh_token"])
+        set_session_cookies(response, refreshed["access_token"], refreshed["refresh_token"])
     permissions = ["view_models", "generate_models", "rim_calibration"]
     if user["role"] == "owner":
         permissions.extend(["download_glb", "user_management", "settings"])
