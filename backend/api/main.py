@@ -43,7 +43,7 @@ if allowed_origins:
         CORSMiddleware,
         allow_origins=allowed_origins,
         allow_credentials=True,
-        allow_methods=["GET", "POST", "PATCH", "OPTIONS"],
+        allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
         allow_headers=["Content-Type", "X-CSRF-Token"],
     )
 
@@ -166,7 +166,11 @@ def api_info():
             "deform_from_multi_view": "POST /api/deform/multi-view",
             "deform_from_measurements": "POST /api/deform/measurements",
             "templates": "GET /api/templates",
-            "download": "GET /api/output/{filename}",
+            "download": "GET /api/output/{filename} (Owner only)",
+            "products": "GET/POST /api/products; PATCH/DELETE /api/products/{id}",
+            "product_model": "GET /api/products/{id}/model (owner account or admin)",
+            "product_download": "GET /api/products/{id}/download (Owner only)",
+            "dashboard": "GET /dashboard",
             "rim_detection": "/api/rim-detection/* (Owner/Editor)",
             "viewer": "GET /viewer/",
         },
