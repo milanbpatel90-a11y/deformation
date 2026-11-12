@@ -4,17 +4,25 @@ All requests use the signed-in user's JWT, so Supabase RLS is the security bound
 No service-role key is required.
 """
 from __future__ import annotations
+import os
 import re
 import uuid
 from pathlib import Path
 from typing import Any
 import requests
+import boto3
+from botocore.config import Config
+from botocore.exceptions import ClientError, BotoCoreError
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field
 from backend.supabase_auth import SESSION_COOKIE_NAME, SUPABASE_KEY, SUPABASE_URL, get_current_user
 
 router = APIRouter(prefix="/api/products", tags=["products"])
-BUCKET = "eyewear-products"
+WASABI_BUCKET = os.getenv("WASABI_BUCKET", "").strip()
+WASABI_REGION = os.getenv("WASABI_REGION", "").strip()
+WASABI_ENDPOINT_URL = os.getenv("WASABI_ENDPOINT_URL", "").strip().rstrip("/")
+WASABI_ACCESS_KEY_ID = os.getenv("WASABI_ACCESS_KEY_ID", "").strip()
+WASABI_SECRET_ACCESS_KEY = os.getenv("WASABI_SECRET_ACCESS_KEY", "").strip()
 OUTPUT_DIR = Path(__file__).resolve().parents[2] / "output"
 MODEL_NAME = re.compile(r"^[a-f0-9]{12}\.glb$", re.IGNORECASE)
 
@@ -81,18 +89,48 @@ def _db(request: Request, method: str, path: str, json: Any = None, prefer: str 
     _check(r)
     return r.json() if r.content else None
 
-def _storage(request: Request, method: str, path: str, data: bytes | None = None):
-    h = _headers(_token(request))
-    h.pop("Content-Type", None)
-    if method == "POST":
-        h["Content-Type"] = "model/gltf-binary"
-        h["x-upsert"] = "false"
+def _wasabi_configured() -> bool:
+    return all((WASABI_BUCKET, WASABI_REGION, WASABI_ENDPOINT_URL, WASABI_ACCESS_KEY_ID, WASABI_SECRET_ACCESS_KEY))
+
+def _wasabi_client():
+    if not _wasabi_configured():
+        raise HTTPException(status_code=503, detail="Wasabi storage is not configured on the backend.")
+    return boto3.client("s3", endpoint_url=WASABI_ENDPOINT_URL, region_name=WASABI_REGION,
+        aws_access_key_id=WASABI_ACCESS_KEY_ID, aws_secret_access_key=WASABI_SECRET_ACCESS_KEY,
+        config=Config(signature_version="s3v4", connect_timeout=10, read_timeout=60, retries={"max_attempts": 3}))
+
+def _object_key(row: dict, user: dict) -> str:
+    key = str(row.get("glb_path", ""))
+    expected_prefix = f"{row.get('user_id')}/"
+    if not key or key.startswith("/") or ".." in key.split("/") or not key.startswith(expected_prefix):
+        raise HTTPException(status_code=404, detail="Product model not found.")
+    if user["role"] != "owner" and str(row.get("user_id")) != str(user["id"]):
+        raise HTTPException(status_code=404, detail="Product not found.")
+    return key
+
+def _wasabi_put(key: str, data: bytes) -> None:
     try:
-        r = requests.request(method, f"{SUPABASE_URL}/storage/v1/object/{BUCKET}/{path}", headers=h, data=data, timeout=60)
-    except requests.RequestException as exc:
-        raise HTTPException(status_code=502, detail="Could not reach private model storage.") from exc
-    _check(r)
-    return r
+        _wasabi_client().put_object(Bucket=WASABI_BUCKET, Key=key, Body=data, ContentType="model/gltf-binary")
+    except (BotoCoreError, ClientError) as exc:
+        raise HTTPException(status_code=502, detail="Could not save the GLB to Wasabi storage.") from exc
+
+def _wasabi_get(key: str) -> bytes:
+    try:
+        result = _wasabi_client().get_object(Bucket=WASABI_BUCKET, Key=key)
+        return result["Body"].read()
+    except ClientError as exc:
+        code = str(exc.response.get("Error", {}).get("Code", ""))
+        if code in {"NoSuchKey", "NoSuchBucket", "404", "NotFound"}:
+            raise HTTPException(status_code=404, detail="Stored GLB was not found in Wasabi.") from exc
+        raise HTTPException(status_code=502, detail="Could not retrieve the GLB from Wasabi storage.") from exc
+    except BotoCoreError as exc:
+        raise HTTPException(status_code=502, detail="Could not retrieve the GLB from Wasabi storage.") from exc
+
+def _wasabi_delete(key: str) -> None:
+    try:
+        _wasabi_client().delete_object(Bucket=WASABI_BUCKET, Key=key)
+    except (BotoCoreError, ClientError) as exc:
+        raise HTTPException(status_code=502, detail="Could not delete the GLB from Wasabi storage.") from exc
 
 def _allowed(row: dict, user: dict) -> bool:
     return user["role"] == "owner" or str(row.get("user_id")) == str(user["id"])
@@ -124,7 +162,7 @@ def create_product(body: ProductInput, request: Request, user: dict = Depends(ge
         raise HTTPException(status_code=403, detail="You can only save a model generated in your own account.")
     product_id = str(uuid.uuid4())
     object_path = f"{user['id']}/{product_id}.glb"
-    _storage(request, "POST", object_path, source.read_bytes())
+    _wasabi_put(object_path, source.read_bytes())
     record = body.model_dump(exclude={"glb_filename"})
     record.update({"id": product_id, "user_id": user["id"], "owner_email": user["email"], "glb_path": object_path})
     try:
@@ -133,7 +171,7 @@ def create_product(body: ProductInput, request: Request, user: dict = Depends(ge
             raise HTTPException(status_code=502, detail="Product row was not returned by Supabase.")
     except Exception:
         try:
-            _storage(request, "DELETE", object_path)
+            _wasabi_delete(object_path)
         except Exception:
             pass
         raise
@@ -157,7 +195,7 @@ def delete_product(product_id: str, request: Request, user: dict = Depends(get_c
     if not rows or not _allowed(rows[0], user):
         raise HTTPException(status_code=404, detail="Product not found.")
     _db(request, "DELETE", f"eyewear_products?id=eq.{product_id}", prefer="return=minimal")
-    _storage(request, "DELETE", rows[0]["glb_path"])
+    _wasabi_delete(_object_key(rows[0], user))
     return None
 
 @router.get("/{product_id}/model")
@@ -167,8 +205,8 @@ def view_product_model(product_id: str, request: Request, user: dict = Depends(g
     if not rows or not _allowed(rows[0], user):
         raise HTTPException(status_code=404, detail="Product not found.")
     from fastapi.responses import Response
-    r = _storage(request, "GET", rows[0]["glb_path"])
-    return Response(content=r.content, media_type="model/gltf-binary", headers={"Content-Disposition": "inline", "Cache-Control": "private, no-store"})
+    _wasabi_content = _wasabi_get(_object_key(rows[0], user))
+    return Response(content=_wasabi_content, media_type="model/gltf-binary", headers={"Content-Disposition": "inline", "Cache-Control": "private, no-store"})
 
 @router.get("/{product_id}/download")
 def download_product_model(product_id: str, request: Request, user: dict = Depends(get_current_user)):
