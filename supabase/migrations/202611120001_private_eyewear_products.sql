@@ -12,7 +12,7 @@ create table if not exists public.eyewear_products (
  weight_grams numeric(10,2) check (weight_grams is null or weight_grams >= 0),
  size text, model text, style text, colour text, logo_url text, brand text, frame_material text,
  status text not null default 'draft' check (status in ('draft','active','inactive')),
- glb_path text not null unique,
+ glb_path text not null unique check (split_part(glb_path, '/', 1) = user_id::text),
  created_at timestamptz not null default now(),
  updated_at timestamptz not null default now()
 );
@@ -25,7 +25,7 @@ using (auth.uid() = user_id or lower(coalesce(auth.jwt()->>'email','')) in ('mil
 
 drop policy if exists "Users create own eyewear products" on public.eyewear_products;
 create policy "Users create own eyewear products" on public.eyewear_products for insert to authenticated
-with check (auth.uid() = user_id);
+with check (auth.uid() = user_id and lower(owner_email) = lower(auth.jwt()->>'email'));
 
 drop policy if exists "Users update own eyewear products" on public.eyewear_products;
 create policy "Users update own eyewear products" on public.eyewear_products for update to authenticated
