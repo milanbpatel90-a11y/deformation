@@ -10,19 +10,19 @@ from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, Upload
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 
-from backend.auth import (
+from backend.supabase_auth import (
     SESSION_COOKIE_NAME,
-    admin_router,
     auth_router,
     csrf_token_is_valid,
     get_current_user,
     get_current_user_optional,
     require_roles,
+    set_session_cookies,
 )
 from backend.models import FrameMaterial, FrameShape, Measurements
 from backend.pipeline import DeformationPipeline
 from backend.template_library.loader import TemplateLibrary
-from backend.api import rim_detection_routes
+from backend.api import rim_detection_routes, product_routes
 
 
 app = FastAPI(
@@ -43,7 +43,7 @@ if allowed_origins:
         CORSMiddleware,
         allow_origins=allowed_origins,
         allow_credentials=True,
-        allow_methods=["GET", "POST", "PATCH", "OPTIONS"],
+        allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
         allow_headers=["Content-Type", "X-CSRF-Token"],
     )
 
@@ -52,7 +52,7 @@ if allowed_origins:
 async def csrf_protection(request: Request, call_next):
     """Require the double-submit CSRF token on authenticated state changes."""
     safe_methods = {"GET", "HEAD", "OPTIONS"}
-    exempt_paths = {"/api/auth/login", "/api/auth/setup"}
+    exempt_paths = {"/api/auth/session"}
     if (
         request.method not in safe_methods
         and request.url.path not in exempt_paths
@@ -63,7 +63,11 @@ async def csrf_protection(request: Request, call_next):
             status_code=403,
             content={"detail": "CSRF validation failed. Refresh the page and try again."},
         )
-    return await call_next(request)
+    response = await call_next(request)
+    refreshed = getattr(request.state, "supabase_refreshed_session", None)
+    if refreshed:
+        set_session_cookies(response, refreshed["access_token"], refreshed["refresh_token"])
+    return response
 
 
 OUTPUT_DIR = Path(__file__).resolve().parents[2] / "output"
@@ -82,9 +86,35 @@ pipeline = DeformationPipeline()
 library = TemplateLibrary()
 viewer_dir = Path(__file__).resolve().parents[2] / "viewer"
 
+
+def _record_model_owner(job_id: str, user: dict) -> None:
+    """Persist the authenticated owner beside each generated GLB."""
+    import json
+    manifest = OUTPUT_DIR / f"{job_id}.ownership.json"
+    manifest.write_text(json.dumps({"user_id": user["id"], "email": user["email"]}), encoding="utf-8")
+
+
+def _assert_model_access(filename: str, user: dict) -> Path:
+    safe_name = Path(filename).name
+    if safe_name != filename or ".." in filename or not safe_name.lower().endswith(".glb"):
+        raise HTTPException(status_code=400, detail="Invalid model filename")
+    path = OUTPUT_DIR / safe_name
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="Model not found")
+    if user["role"] != "owner":
+        import json
+        manifest = OUTPUT_DIR / f"{path.stem}.ownership.json"
+        try:
+            ownership = json.loads(manifest.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            raise HTTPException(status_code=404, detail="Model not found")
+        if ownership.get("user_id") != user["id"]:
+            raise HTTPException(status_code=404, detail="Model not found")
+    return path
+
 app.include_router(auth_router)
-app.include_router(admin_router)
 app.include_router(rim_detection_routes.router)
+app.include_router(product_routes.router)
 
 
 def _pick_active_template(available: list[str]) -> str | None:
@@ -108,16 +138,15 @@ def login_page():
     return FileResponse(viewer_dir / "login.html")
 
 
+@app.get("/dashboard", include_in_schema=False)
+def product_dashboard(user: dict = Depends(get_current_user)):
+    return FileResponse(viewer_dir / "dashboard.html")
+
+
 @app.get("/viewer", include_in_schema=False)
 @app.get("/viewer/", include_in_schema=False)
 def viewer_page(user: dict = Depends(get_current_user)):
     return FileResponse(viewer_dir / "index.html")
-
-
-@app.get("/admin", include_in_schema=False)
-@app.get("/admin/", include_in_schema=False)
-def admin_page(user: dict = Depends(require_roles("owner"))):
-    return FileResponse(viewer_dir / "admin.html")
 
 
 @app.get("/api")
@@ -125,7 +154,7 @@ def api_info():
     return {
         "service": "defirmation",
         "version": "1.2.0",
-        "authentication": "session-cookie",
+        "authentication": "Supabase Google OAuth",
         "endpoints": {
             "health": "GET /api/health",
             "auth_status": "GET /api/auth/status",
@@ -137,7 +166,11 @@ def api_info():
             "deform_from_multi_view": "POST /api/deform/multi-view",
             "deform_from_measurements": "POST /api/deform/measurements",
             "templates": "GET /api/templates",
-            "download": "GET /api/output/{filename}",
+            "download": "GET /api/output/{filename} (Owner only)",
+            "products": "GET/POST /api/products; PATCH/DELETE /api/products/{id}",
+            "product_model": "GET /api/products/{id}/model (owner account or admin)",
+            "product_download": "GET /api/products/{id}/download (Owner only)",
+            "dashboard": "GET /dashboard",
             "rim_detection": "/api/rim-detection/* (Owner/Editor)",
             "viewer": "GET /viewer/",
         },
@@ -214,8 +247,9 @@ async def deform_from_images(
             template_override=template,
             top_path=top_path,
         )
+        _record_model_owner(job_id, user)
         result["job_id"] = job_id
-        result["download_url"] = f"/api/output/{job_id}.glb"
+        result["download_url"] = f"/api/model/{job_id}.glb"
         result["created_by"] = user["username"]
         return result
     except ValueError as exc:
@@ -275,8 +309,9 @@ async def deform_from_multiple_images(
             color=color,
             template_override=template,
         )
+        _record_model_owner(job_id, user)
         result["job_id"] = job_id
-        result["download_url"] = f"/api/output/{job_id}.glb"
+        result["download_url"] = f"/api/model/{job_id}.glb"
         result["images_used"] = len(image_paths)
         result["created_by"] = user["username"]
         return result
@@ -332,8 +367,9 @@ async def deform_from_measurements(
 
     try:
         result = pipeline.run_from_measurements(measurements, out_path, template)
+        _record_model_owner(job_id, user)
         result["job_id"] = job_id
-        result["download_url"] = f"/api/output/{job_id}.glb"
+        result["download_url"] = f"/api/model/{job_id}.glb"
         result["created_by"] = user["username"]
         return result
     except Exception as exc:
@@ -343,13 +379,18 @@ async def deform_from_measurements(
 @app.get("/api/output/{filename}")
 def download_output(
     filename: str,
+    user: dict = Depends(require_roles("owner")),
+):
+    path = _assert_model_access(filename, user)
+    safe_name = path.name
+    return FileResponse(path, media_type="model/gltf-binary", filename=safe_name)
+
+
+@app.get("/api/model/{filename}")
+def stream_model_for_viewer(
+    filename: str,
     user: dict = Depends(require_roles("owner", "editor", "operator", "viewer")),
 ):
-    # Prevent path traversal
-    safe_name = Path(filename).name
-    if safe_name != filename or ".." in filename:
-        raise HTTPException(status_code=400, detail="Invalid filename")
-    path = OUTPUT_DIR / safe_name
-    if not path.exists() or not path.is_file():
-        raise HTTPException(status_code=404, detail="File not found")
-    return FileResponse(path, media_type="model/gltf-binary", filename=safe_name)
+    """Serve a model inline for the authenticated in-browser viewer, not as a download."""
+    path = _assert_model_access(filename, user)
+    return FileResponse(path, media_type="model/gltf-binary", headers={"Content-Disposition": "inline", "Cache-Control": "private, no-store"})

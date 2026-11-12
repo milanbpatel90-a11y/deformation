@@ -84,6 +84,8 @@
     }
     #download-btn:hover { background: #3a9a6a; }
 
+    #save-product-btn { display:none; width:100%; padding:9px; border:0; border-radius:6px; background:#7887f5; color:#101226; font-size:13px; font-weight:700; cursor:pointer; margin-top:7px; }
+
     /* ── Manual GLB load section ── */
     .divider { border: none; border-top: 1px solid #2a2a4a; margin: 8px 0; }
     #glb-url { width: 100%; padding: 7px 10px; border-radius: 4px; border: 1px solid #3a3a5a; background: #1e1e3a; color: #eee; font-size: 12px; }
@@ -114,6 +116,7 @@
 
 <div id="sidebar">
   <h2>Defirmation VTO</h2>
+  <a href="/dashboard" style="display:block;text-align:center;padding:8px;border-radius:6px;background:#292d4c;color:#eef;text-decoration:none;font-size:13px;font-weight:600">My Product Dashboard</a>
 
   <!-- Image uploads -->
   <div class="section">
@@ -176,7 +179,7 @@
   <hr class="divider" />
   <div class="section">
     <div class="section-title">Or load existing GLB</div>
-    <input type="text" id="glb-url" placeholder="/api/output/job.glb" />
+    <input type="text" id="glb-url" placeholder="/api/model/job.glb" />
     <input type="file" id="glb-file" accept=".glb" />
     <button id="load-btn">Load Model</button>
   </div>
@@ -227,13 +230,6 @@ accountRole.style.cssText = 'font-size:10px;color:#8be9fd;overflow:hidden;text-o
 accountIdentity.append(accountName, accountRole);
 const accountActions = document.createElement('div');
 accountActions.style.cssText = 'display:flex;flex-direction:column;gap:5px;flex-shrink:0;';
-if (currentUser.role === 'owner') {
-  const adminLink = document.createElement('a');
-  adminLink.href = '/admin/';
-  adminLink.textContent = 'Manage users';
-  adminLink.style.cssText = 'font-size:10px;color:#8be9fd;text-decoration:none;text-align:center;';
-  accountActions.appendChild(adminLink);
-}
 const logoutButton = document.createElement('button');
 logoutButton.type = 'button';
 logoutButton.textContent = 'Sign out';
@@ -244,41 +240,10 @@ logoutButton.addEventListener('click', async () => {
     credentials: 'same-origin',
     headers: { 'X-CSRF-Token': readCookie('defirmation_csrf') }
   });
-  if (result.ok) window.location.replace('/login');
+  if (result.ok) window.location.replace('/login?signed_out=1');
   else alert('Unable to sign out. Refresh the page and try again.');
 });
-const changePasswordButton = document.createElement('button');
-changePasswordButton.type = 'button';
-changePasswordButton.textContent = 'Change password';
-changePasswordButton.style.cssText = 'font-size:10px;padding:5px 8px;border:1px solid #555;border-radius:5px;background:#292944;color:#eee;cursor:pointer;';
-changePasswordButton.addEventListener('click', async () => {
-  const currentPassword = window.prompt('Enter your current password:');
-  if (currentPassword === null) return;
-  const newPassword = window.prompt('Enter a new password (at least 12 characters):');
-  if (newPassword === null) return;
-  const confirmation = window.prompt('Confirm your new password:');
-  if (newPassword !== confirmation) {
-    alert('The new passwords do not match.');
-    return;
-  }
-  try {
-    const response = await fetch('/api/auth/change-password', {
-      method: 'POST',
-      credentials: 'same-origin',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-CSRF-Token': readCookie('defirmation_csrf')
-      },
-      body: JSON.stringify({ current_password: currentPassword, new_password: newPassword })
-    });
-    const data = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(data.detail || 'Password change failed.');
-    alert('Password changed successfully.');
-  } catch (error) {
-    alert(error.message);
-  }
-});
-accountActions.append(changePasswordButton, logoutButton);
+accountActions.append(logoutButton);
 accountBar.append(accountIdentity, accountActions);
 document.getElementById('sidebar').insertBefore(accountBar, document.getElementById('sidebar').firstChild);
 
@@ -480,6 +445,14 @@ function renderPipelineStages(stages) {
 // ── Generate 3D mesh ──────────────────────────────────────────────────────────
 const statusBox = document.getElementById('status-box');
 const downloadBtn = document.getElementById('download-btn');
+const saveProductBtn = document.createElement('button');
+saveProductBtn.id = 'save-product-btn';
+saveProductBtn.type = 'button';
+saveProductBtn.textContent = 'Add Product to Dashboard';
+downloadBtn.insertAdjacentElement('afterend', saveProductBtn);
+saveProductBtn.addEventListener('click', () => {
+  if (window.latestGeneratedGlb) window.location.href = '/dashboard?save_glb=' + encodeURIComponent(window.latestGeneratedGlb);
+});
 
 document.getElementById('generate-btn').addEventListener('click', async () => {
   const frontFile = document.getElementById('input-front').files[0];
@@ -492,6 +465,8 @@ document.getElementById('generate-btn').addEventListener('click', async () => {
   statusBox.className = '';
   statusBox.textContent = 'Running pipeline…';
   downloadBtn.style.display = 'none';
+  saveProductBtn.style.display = 'none';
+  window.latestGeneratedGlb = null;
   document.getElementById('pipeline-stages').style.display = 'none';
 
   const form = new FormData();
@@ -537,8 +512,16 @@ document.getElementById('generate-btn').addEventListener('click', async () => {
       ? data.download_url 
       : `${API_BASE}${data.download_url}`;
 
-    downloadBtn.style.display = 'block';
-    downloadBtn.onclick = () => { window.location.href = fullDownloadUrl; };
+    window.latestGeneratedGlb = data.job_id + '.glb';
+    saveProductBtn.style.display = 'block';
+
+    if (currentUser.role === 'owner') {
+      downloadBtn.style.display = 'block';
+      const adminDownloadUrl = fullDownloadUrl.replace('/api/model/', '/api/output/');
+      downloadBtn.onclick = () => { window.location.href = adminDownloadUrl; };
+    } else {
+      downloadBtn.style.display = 'none';
+    }
 
     loadGLB(fullDownloadUrl);
   } catch (err) {

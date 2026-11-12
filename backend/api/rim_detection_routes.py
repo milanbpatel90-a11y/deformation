@@ -5,7 +5,7 @@ Add these to backend.api.main or create backend.api.rim_detection_routes.py
 """
 
 from fastapi import APIRouter, UploadFile, File, HTTPException, BackgroundTasks, Depends
-from backend.auth import require_roles
+from backend.supabase_auth import require_roles
 from fastapi.responses import JSONResponse
 import cv2
 import numpy as np
