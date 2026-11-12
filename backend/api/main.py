@@ -10,14 +10,14 @@ from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, Upload
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 
-from backend.auth import (
+from backend.supabase_auth import (
     SESSION_COOKIE_NAME,
-    admin_router,
     auth_router,
     csrf_token_is_valid,
     get_current_user,
     get_current_user_optional,
     require_roles,
+    set_session_cookies,
 )
 from backend.models import FrameMaterial, FrameShape, Measurements
 from backend.pipeline import DeformationPipeline
@@ -52,7 +52,7 @@ if allowed_origins:
 async def csrf_protection(request: Request, call_next):
     """Require the double-submit CSRF token on authenticated state changes."""
     safe_methods = {"GET", "HEAD", "OPTIONS"}
-    exempt_paths = {"/api/auth/login", "/api/auth/setup"}
+    exempt_paths = {"/api/auth/session"}
     if (
         request.method not in safe_methods
         and request.url.path not in exempt_paths
@@ -63,7 +63,11 @@ async def csrf_protection(request: Request, call_next):
             status_code=403,
             content={"detail": "CSRF validation failed. Refresh the page and try again."},
         )
-    return await call_next(request)
+    response = await call_next(request)
+    refreshed = getattr(request.state, "supabase_refreshed_session", None)
+    if refreshed:
+        set_session_cookies(response, refreshed["access_token"], refreshed["refresh_token"])
+    return response
 
 
 OUTPUT_DIR = Path(__file__).resolve().parents[2] / "output"
@@ -83,7 +87,6 @@ library = TemplateLibrary()
 viewer_dir = Path(__file__).resolve().parents[2] / "viewer"
 
 app.include_router(auth_router)
-app.include_router(admin_router)
 app.include_router(rim_detection_routes.router)
 
 
@@ -114,18 +117,12 @@ def viewer_page(user: dict = Depends(get_current_user)):
     return FileResponse(viewer_dir / "index.html")
 
 
-@app.get("/admin", include_in_schema=False)
-@app.get("/admin/", include_in_schema=False)
-def admin_page(user: dict = Depends(require_roles("owner"))):
-    return FileResponse(viewer_dir / "admin.html")
-
-
 @app.get("/api")
 def api_info():
     return {
         "service": "defirmation",
         "version": "1.2.0",
-        "authentication": "session-cookie",
+        "authentication": "Supabase Google OAuth",
         "endpoints": {
             "health": "GET /api/health",
             "auth_status": "GET /api/auth/status",
@@ -215,7 +212,7 @@ async def deform_from_images(
             top_path=top_path,
         )
         result["job_id"] = job_id
-        result["download_url"] = f"/api/output/{job_id}.glb"
+        result["download_url"] = f"/api/model/{job_id}.glb"
         result["created_by"] = user["username"]
         return result
     except ValueError as exc:
@@ -343,7 +340,7 @@ async def deform_from_measurements(
 @app.get("/api/output/{filename}")
 def download_output(
     filename: str,
-    user: dict = Depends(require_roles("owner", "editor", "operator", "viewer")),
+    user: dict = Depends(require_roles("owner")),
 ):
     # Prevent path traversal
     safe_name = Path(filename).name
@@ -353,3 +350,18 @@ def download_output(
     if not path.exists() or not path.is_file():
         raise HTTPException(status_code=404, detail="File not found")
     return FileResponse(path, media_type="model/gltf-binary", filename=safe_name)
+
+
+@app.get("/api/model/{filename}")
+def stream_model_for_viewer(
+    filename: str,
+    user: dict = Depends(require_roles("owner", "editor", "operator", "viewer")),
+):
+    """Serve a model inline for the authenticated in-browser viewer, not as a download."""
+    safe_name = Path(filename).name
+    if safe_name != filename or ".." in filename:
+        raise HTTPException(status_code=400, detail="Invalid filename")
+    path = OUTPUT_DIR / safe_name
+    if not path.exists() or not path.is_file() or path.suffix.lower() != ".glb":
+        raise HTTPException(status_code=404, detail="Model not found")
+    return FileResponse(path, media_type="model/gltf-binary", headers={"Content-Disposition": "inline"})
