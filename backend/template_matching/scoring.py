@@ -22,17 +22,19 @@ class ScoredTemplate:
 class WeightedTemplateScorer:
     """Compare extracted features against a template profile using weighted similarity."""
 
+    # Adjusted weights (2024-11-10) to better balance categorical and dimensional features
+    # This prevents poor template selection when measurements are slightly off
     WEIGHTS = {
-        "frame_family": 0.30,
-        "lens_aspect_ratio": 0.20,
-        "rim_type": 0.15,
-        "bridge_type": 0.10,
-        "material": 0.10,
-        "frame_width": 0.07,
-        "frame_height": 0.04,
-        "temple_length": 0.02,
-        "wrap_angle": 0.02,
-        "confidence": 0.05,
+        "frame_family": 0.22,        # Reduced from 0.30
+        "lens_aspect_ratio": 0.18,   # Reduced from 0.20
+        "rim_type": 0.15,            # Kept same
+        "bridge_type": 0.08,         # Reduced from 0.10
+        "material": 0.08,            # Reduced from 0.10
+        "frame_width": 0.12,         # Increased from 0.07
+        "frame_height": 0.08,        # Increased from 0.04
+        "temple_length": 0.04,       # Increased from 0.02
+        "wrap_angle": 0.02,          # Kept same
+        "confidence": 0.03,          # Reduced from 0.05
     }
 
     def score(self, features: EyewearFeatureSet, template: TemplateInfo) -> ScoredTemplate:

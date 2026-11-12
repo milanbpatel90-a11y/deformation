@@ -20,3 +20,4 @@ open3d>=0.18.0; python_version < "3.13"
 # Utilities
 python-dotenv>=1.0.0
 requests>=2.31.0
+mapbox-earcut>=1.0.1

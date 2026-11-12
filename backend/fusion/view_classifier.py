@@ -38,11 +38,19 @@ class ViewClassifier:
         symmetry = min(left_area, right_area) / max_area
         
         # Classify based on aspect ratio, size, and symmetry
-        if aspect_ratio >= 4.0:
+        # Fixed thresholds (2024-11-10) to improve classification accuracy
+        # - Side view: more lenient (2.5 instead of 4.0)
+        # - Top view: much stricter (0.95 instead of 1.3)
+        # - Front view: explicit detection range
+        # - Perspective: based on asymmetry
+        
+        if aspect_ratio >= 2.5:
             return "side"
-        elif aspect_ratio < 1.3:
+        elif aspect_ratio < 0.95:
             return "top"
-        elif symmetry < 0.65:
+        elif 1.5 <= aspect_ratio < 2.5 and symmetry >= 0.72:
+            return "front"
+        elif symmetry < 0.68:
             return "perspective"
         else:
-            return "front"
+            return "front"  # safe default

@@ -516,7 +516,12 @@ document.getElementById('generate-btn').addEventListener('click', async () => {
   if (tpl) form.append('template', tpl);
 
   try {
-    const resp = await fetch(endpoint, {\n      method: 'POST',\n      body: form,\n      credentials: 'same-origin',\n      headers: { 'X-CSRF-Token': readCookie('defirmation_csrf') }\n    });
+    const resp = await fetch(endpoint, {
+      method: 'POST',
+      body: form,
+      credentials: 'same-origin',
+      headers: { 'X-CSRF-Token': readCookie('defirmation_csrf') }
+    });
     const data = await resp.json();
 
     if (!resp.ok) {

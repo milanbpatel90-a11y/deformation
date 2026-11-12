@@ -15,8 +15,8 @@
     "shape": "rectangle",
     "material": "plastic",
     "family": "rectangle",
-    "priority": 20,
-    "description": "Plastic rectangular full-rim (production calibrated)",
+    "priority": 90,
+    "description": "Plastic rectangular full-rim (BROKEN - cube placeholder, use as last resort)",
     "glb_file": "rectangle_plastic.glb",
     "rim_pull_strength": 0.45,
     "has_descriptor": true
@@ -48,8 +48,8 @@
     "shape": "rectangle",
     "material": "metal",
     "family": "rectangle",
-    "priority": 30,
-    "description": "Narrow rectangular metal with large nose pads",
+    "priority": 15,
+    "description": "Narrow rectangular metal with large nose pads (PREFERRED DEFAULT)",
     "glb_file": "rectangle_metal.glb",
     "rim_pull_strength": 0.2,
     "has_descriptor": true
@@ -70,8 +70,8 @@
     "shape": "rectangle",
     "material": "metal",
     "family": "rectangle",
-    "priority": 30,
-    "description": "Slim narrow rectangular steel frame",
+    "priority": 18,
+    "description": "Slim narrow rectangular steel frame (good for rimless-style)",
     "glb_file": "slim_rectangle_steel.glb",
     "rim_pull_strength": 0.45,
     "has_descriptor": true
