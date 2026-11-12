@@ -69,3 +69,43 @@ The viewer hides the Download GLB control for regular users, but the FastAPI end
 6. Test with three accounts: both listed admin accounts should see Download GLB; another Google account should not see the button, should still generate and view models, and should receive HTTP 403 from `/api/output/{filename}`.
 
 No database migration is required for this Supabase Auth integration; Supabase manages Google identities and sessions.
+
+
+## 5. Private product dashboards and GLB storage
+
+Apply `supabase/migrations/202611120001_private_eyewear_products.sql` in the Supabase SQL Editor. It creates:
+
+- `public.eyewear_products` with product name, price/currency, description, weight, size, model/SKU, style, colour, brand, frame material, logo URL, status, owner and private GLB object path.
+- A **private** Storage bucket named `eyewear-products` with per-user folder policies.
+- Row Level Security (RLS) policies: normal accounts can read/update/delete only their own products; the two configured admin emails can view and manage all product rows and read/delete all saved GLBs.
+- An index and updated-at trigger.
+
+### User experience
+
+1. Generate a GLB in the viewer.
+2. Click **Add Product to Dashboard**.
+3. Enter product details and save. The API verifies that the generated GLB belongs to the signed-in user, copies it to private Supabase Storage, and saves the product row.
+4. Open `/dashboard` to manage saved products. Normal accounts see only their own products.
+5. Admin accounts see all users' saved products, can edit/delete them, and have a server-authorized **Download GLB** action.
+
+The viewer also has a **My Product Dashboard** link. Saved product model viewing is authenticated; saved GLB downloads are restricted by the backend to the two allowlisted admin emails.
+
+### Security and deployment notes
+
+- Do not make the `eyewear-products` bucket public.
+- The backend uses the user's Supabase access token for PostgREST and Storage. Do not add a service-role key to Vercel, the browser, or this repository.
+- New generated GLBs receive a local ownership manifest. Product creation rejects a model if the manifest does not match the signed-in Supabase user.
+- Generated files on Railway's local filesystem are temporary working artifacts. Saving a product copies the GLB into persistent Supabase Storage; do not rely on the local output directory as permanent product storage.
+- The migration currently contains the same two admin email addresses as `SUPABASE_ADMIN_EMAILS`. If that allowlist changes, update the SQL RLS policies to match and review the resulting access before deploying.
+- The dashboard currently lists all products and their owner email to admins; it does not enumerate Supabase Auth accounts that have never created a product. A separate privileged user-directory feature would require a carefully scoped server-side admin credential and is intentionally not part of this change.
+
+### Verification checklist
+
+After applying the migration and setting the existing Supabase/Railway auth variables, test with:
+- Admin account `milanbpatel90@gmail.com`: can see all product rows and download saved GLBs.
+- Admin account `milan.patel90@yahoo.com`: same permissions.
+- Normal account A: can create/read/update/delete its own product; cannot see account B's product or download any saved GLB.
+- Normal account B: same private-only behavior; cannot see account A's product or download any saved GLB.
+- Verify direct API calls, not just hidden buttons: normal accounts must receive HTTP 403 from the product download endpoint, and RLS must prevent cross-account reads/writes.
+
+The repository unit tests cover filename validation and the owner-vs-user access helper. The four-account end-to-end checks require your live Supabase project, configured Google OAuth provider, and deployed backend; they cannot be honestly marked passed from repository-only testing.
