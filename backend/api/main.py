@@ -273,7 +273,7 @@ async def deform_from_multiple_images(
             template_override=template,
         )
         result["job_id"] = job_id
-        result["download_url"] = f"/api/output/{job_id}.glb"
+        result["download_url"] = f"/api/model/{job_id}.glb"
         result["images_used"] = len(image_paths)
         result["created_by"] = user["username"]
         return result
@@ -330,7 +330,7 @@ async def deform_from_measurements(
     try:
         result = pipeline.run_from_measurements(measurements, out_path, template)
         result["job_id"] = job_id
-        result["download_url"] = f"/api/output/{job_id}.glb"
+        result["download_url"] = f"/api/model/{job_id}.glb"
         result["created_by"] = user["username"]
         return result
     except Exception as exc:
@@ -364,4 +364,4 @@ def stream_model_for_viewer(
     path = OUTPUT_DIR / safe_name
     if not path.exists() or not path.is_file() or path.suffix.lower() != ".glb":
         raise HTTPException(status_code=404, detail="Model not found")
-    return FileResponse(path, media_type="model/gltf-binary", headers={"Content-Disposition": "inline"})
+    return FileResponse(path, media_type="model/gltf-binary", headers={"Content-Disposition": "inline", "Cache-Control": "private, no-store"})
