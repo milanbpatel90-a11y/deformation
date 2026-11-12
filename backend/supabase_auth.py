@@ -28,7 +28,11 @@ SUPABASE_KEY = (
     os.getenv("SUPABASE_PUBLISHABLE_KEY", "").strip()
     or os.getenv("SUPABASE_ANON_KEY", "").strip()
 )
-ADMIN_EMAILS = {\n    email.strip().lower()\n    for email in os.getenv("SUPABASE_ADMIN_EMAILS", os.getenv("SUPABASE_ADMIN_EMAIL", "")).split(",")\n    if email.strip()\n}
+ADMIN_EMAILS = {
+    email.strip().lower()
+    for email in os.getenv("SUPABASE_ADMIN_EMAILS", os.getenv("SUPABASE_ADMIN_EMAIL", "")).split(",")
+    if email.strip()
+}
 SESSION_COOKIE_NAME = "defirmation_supabase_access"
 REFRESH_COOKIE_NAME = "defirmation_supabase_refresh"
 CSRF_COOKIE_NAME = "defirmation_csrf"
