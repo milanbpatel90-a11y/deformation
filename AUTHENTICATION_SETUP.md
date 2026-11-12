@@ -76,15 +76,15 @@ No database migration is required for this Supabase Auth integration; Supabase m
 Apply `supabase/migrations/202611120001_private_eyewear_products.sql` in the Supabase SQL Editor. It creates:
 
 - `public.eyewear_products` with product name, price/currency, description, weight, size, model/SKU, style, colour, brand, frame material, logo URL, status, owner and private GLB object path.
-- A **private** Storage bucket named `eyewear-products` with per-user folder policies.
-- Row Level Security (RLS) policies: normal accounts can read/update/delete only their own products; the two configured admin emails can view and manage all product rows and read/delete all saved GLBs.
+- A Supabase Postgres product table with Row Level Security (RLS): normal accounts can read/update/delete only their own product rows; the two configured admin emails can view and manage all product rows.
+- GLB binaries are stored in a separate **private Wasabi bucket**, accessed only by the FastAPI backend.
 - An index and updated-at trigger.
 
 ### User experience
 
 1. Generate a GLB in the viewer.
 2. Click **Add Product to Dashboard**.
-3. Enter product details and save. The API verifies that the generated GLB belongs to the signed-in user, copies it to private Supabase Storage, and saves the product row.
+3. Enter product details and save. The API verifies that the generated GLB belongs to the signed-in user, uploads it to the private Wasabi bucket, and saves the product row in Supabase.
 4. Open `/dashboard` to manage saved products. Normal accounts see only their own products.
 5. Admin accounts see all users' saved products, can edit/delete them, and have a server-authorized **Download GLB** action.
 
@@ -92,10 +92,10 @@ The viewer also has a **My Product Dashboard** link. Saved product model viewing
 
 ### Security and deployment notes
 
-- Do not make the `eyewear-products` bucket public.
-- The backend uses the user's Supabase access token for PostgREST and Storage. Do not add a service-role key to Vercel, the browser, or this repository.
+- Keep the Wasabi bucket private. Wasabi credentials are server-side Railway variables and must never be exposed to the browser or committed to Git.
+- Supabase access tokens continue to authorize product metadata through PostgREST and RLS. Wasabi object access is performed by FastAPI after checking the product owner/admin role.
 - New generated GLBs receive a local ownership manifest. Product creation rejects a model if the manifest does not match the signed-in Supabase user.
-- Generated files on Railway's local filesystem are temporary working artifacts. Saving a product copies the GLB into persistent Supabase Storage; do not rely on the local output directory as permanent product storage.
+- Generated files on Railway's local filesystem are temporary working artifacts. Saving a product copies the GLB into persistent Wasabi object storage; do not rely on the local output directory as permanent product storage.
 - The migration currently contains the same two admin email addresses as `SUPABASE_ADMIN_EMAILS`. If that allowlist changes, update the SQL RLS policies to match and review the resulting access before deploying.
 - The dashboard currently lists all products and their owner email to admins; it does not enumerate Supabase Auth accounts that have never created a product. A separate privileged user-directory feature would require a carefully scoped server-side admin credential and is intentionally not part of this change.
 
@@ -109,3 +109,36 @@ After applying the migration and setting the existing Supabase/Railway auth vari
 - Verify direct API calls, not just hidden buttons: normal accounts must receive HTTP 403 from the product download endpoint, and RLS must prevent cross-account reads/writes.
 
 The repository unit tests cover filename validation and the owner-vs-user access helper. The four-account end-to-end checks require your live Supabase project, configured Google OAuth provider, and deployed backend; they cannot be honestly marked passed from repository-only testing.
+
+
+## 6. Wasabi private object storage setup
+
+The product database remains in Supabase Postgres. **All newly saved GLB files are stored in Wasabi**, not Supabase Storage.
+
+1. In the Wasabi Console, create a bucket dedicated to the application (for example `defirmation-private-models`). Keep **Bucket Access: Private** and do not enable public access.
+2. Create a Wasabi access key for the backend. Prefer a dedicated user/key with access restricted to this bucket and these object actions only: `s3:PutObject`, `s3:GetObject`, and `s3:DeleteObject` on `arn:aws:s3:::YOUR_BUCKET_NAME/*`. Do not use root account credentials.
+3. In the bucket's region details, copy the exact S3 endpoint shown by Wasabi. Endpoint formats differ by region; do not guess the endpoint.
+4. Add the following variables to the **Railway backend service**. Use the exact region and endpoint shown in your Wasabi console:
+
+| Variable | Example / value |
+| --- | --- |
+| `WASABI_BUCKET` | `defirmation-private-models` |
+| `WASABI_REGION` | Your bucket region, e.g. `ap-southeast-1` |
+| `WASABI_ENDPOINT_URL` | Exact regional endpoint, e.g. `https://s3.ap-southeast-1.wasabisys.com` |
+| `WASABI_ACCESS_KEY_ID` | Wasabi access key |
+| `WASABI_SECRET_ACCESS_KEY` | Wasabi secret key |
+
+5. Redeploy/restart the Railway backend so it installs `boto3` and reads the new variables.
+6. Test create, view, admin download, and delete using real accounts.
+
+### Wasabi security model
+
+- Bucket is private; no browser-side Wasabi credentials and no public object URLs.
+- Product object keys are namespaced as `{supabase_user_id}/{product_uuid}.glb`.
+- FastAPI checks the authenticated user against the Supabase product row before reading, deleting, or downloading the object.
+- Only the two admin accounts can use the product download endpoint. Normal users can view their own saved model through the authenticated viewer route.
+- The application does not create presigned public links; model bytes are streamed through the authenticated FastAPI backend.
+
+### Existing Supabase Storage objects
+
+If the previous Supabase Storage migration was already applied, its old private bucket and policies may remain in that Supabase project, but this updated backend no longer writes new product GLBs there. Existing saved GLBs are not automatically copied to Wasabi; migrate them separately before removing any old bucket or data.
