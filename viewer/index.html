@@ -84,6 +84,8 @@
     }
     #download-btn:hover { background: #3a9a6a; }
 
+    #save-product-btn { display:none; width:100%; padding:9px; border:0; border-radius:6px; background:#7887f5; color:#101226; font-size:13px; font-weight:700; cursor:pointer; margin-top:7px; }
+
     /* ── Manual GLB load section ── */
     .divider { border: none; border-top: 1px solid #2a2a4a; margin: 8px 0; }
     #glb-url { width: 100%; padding: 7px 10px; border-radius: 4px; border: 1px solid #3a3a5a; background: #1e1e3a; color: #eee; font-size: 12px; }
@@ -114,6 +116,7 @@
 
 <div id="sidebar">
   <h2>Defirmation VTO</h2>
+  <a href="/dashboard" style="display:block;text-align:center;padding:8px;border-radius:6px;background:#292d4c;color:#eef;text-decoration:none;font-size:13px;font-weight:600">My Product Dashboard</a>
 
   <!-- Image uploads -->
   <div class="section">
@@ -442,6 +445,14 @@ function renderPipelineStages(stages) {
 // ── Generate 3D mesh ──────────────────────────────────────────────────────────
 const statusBox = document.getElementById('status-box');
 const downloadBtn = document.getElementById('download-btn');
+const saveProductBtn = document.createElement('button');
+saveProductBtn.id = 'save-product-btn';
+saveProductBtn.type = 'button';
+saveProductBtn.textContent = 'Add Product to Dashboard';
+downloadBtn.insertAdjacentElement('afterend', saveProductBtn);
+saveProductBtn.addEventListener('click', () => {
+  if (window.latestGeneratedGlb) window.location.href = '/dashboard?save_glb=' + encodeURIComponent(window.latestGeneratedGlb);
+});
 
 document.getElementById('generate-btn').addEventListener('click', async () => {
   const frontFile = document.getElementById('input-front').files[0];
@@ -498,6 +509,9 @@ document.getElementById('generate-btn').addEventListener('click', async () => {
     const fullDownloadUrl = data.download_url.startsWith('http') 
       ? data.download_url 
       : `${API_BASE}${data.download_url}`;
+
+    window.latestGeneratedGlb = data.job_id + '.glb';
+    saveProductBtn.style.display = 'block';
 
     if (currentUser.role === 'owner') {
       downloadBtn.style.display = 'block';
