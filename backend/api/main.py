@@ -244,6 +244,7 @@ async def deform_from_images(
             top_path=top_path,
         )
         _record_model_owner(job_id, user)
+        _record_model_owner(job_id, user)
         result["job_id"] = job_id
         result["download_url"] = f"/api/model/{job_id}.glb"
         result["created_by"] = user["username"]
@@ -305,6 +306,7 @@ async def deform_from_multiple_images(
             color=color,
             template_override=template,
         )
+        _record_model_owner(job_id, user)
         result["job_id"] = job_id
         result["download_url"] = f"/api/model/{job_id}.glb"
         result["images_used"] = len(image_paths)
@@ -362,6 +364,7 @@ async def deform_from_measurements(
 
     try:
         result = pipeline.run_from_measurements(measurements, out_path, template)
+        _record_model_owner(job_id, user)
         result["job_id"] = job_id
         result["download_url"] = f"/api/model/{job_id}.glb"
         result["created_by"] = user["username"]
