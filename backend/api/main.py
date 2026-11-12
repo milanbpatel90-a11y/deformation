@@ -22,7 +22,7 @@ from backend.supabase_auth import (
 from backend.models import FrameMaterial, FrameShape, Measurements
 from backend.pipeline import DeformationPipeline
 from backend.template_library.loader import TemplateLibrary
-from backend.api import rim_detection_routes
+from backend.api import rim_detection_routes, product_routes
 
 
 app = FastAPI(
@@ -86,8 +86,35 @@ pipeline = DeformationPipeline()
 library = TemplateLibrary()
 viewer_dir = Path(__file__).resolve().parents[2] / "viewer"
 
+
+def _record_model_owner(job_id: str, user: dict) -> None:
+    """Persist the authenticated owner beside each generated GLB."""
+    import json
+    manifest = OUTPUT_DIR / f"{job_id}.ownership.json"
+    manifest.write_text(json.dumps({"user_id": user["id"], "email": user["email"]}), encoding="utf-8")
+
+
+def _assert_model_access(filename: str, user: dict) -> Path:
+    safe_name = Path(filename).name
+    if safe_name != filename or ".." in filename or not safe_name.lower().endswith(".glb"):
+        raise HTTPException(status_code=400, detail="Invalid model filename")
+    path = OUTPUT_DIR / safe_name
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="Model not found")
+    if user["role"] != "owner":
+        import json
+        manifest = OUTPUT_DIR / f"{path.stem}.ownership.json"
+        try:
+            ownership = json.loads(manifest.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            raise HTTPException(status_code=404, detail="Model not found")
+        if ownership.get("user_id") != user["id"]:
+            raise HTTPException(status_code=404, detail="Model not found")
+    return path
+
 app.include_router(auth_router)
 app.include_router(rim_detection_routes.router)
+app.include_router(product_routes.router)
 
 
 def _pick_active_template(available: list[str]) -> str | None:
@@ -109,6 +136,11 @@ def root(request: Request):
 @app.get("/login", include_in_schema=False)
 def login_page():
     return FileResponse(viewer_dir / "login.html")
+
+
+@app.get("/dashboard", include_in_schema=False)
+def product_dashboard(user: dict = Depends(get_current_user)):
+    return FileResponse(viewer_dir / "dashboard.html")
 
 
 @app.get("/viewer", include_in_schema=False)
@@ -211,6 +243,7 @@ async def deform_from_images(
             template_override=template,
             top_path=top_path,
         )
+        _record_model_owner(job_id, user)
         result["job_id"] = job_id
         result["download_url"] = f"/api/model/{job_id}.glb"
         result["created_by"] = user["username"]
@@ -342,13 +375,8 @@ def download_output(
     filename: str,
     user: dict = Depends(require_roles("owner")),
 ):
-    # Prevent path traversal
-    safe_name = Path(filename).name
-    if safe_name != filename or ".." in filename:
-        raise HTTPException(status_code=400, detail="Invalid filename")
-    path = OUTPUT_DIR / safe_name
-    if not path.exists() or not path.is_file():
-        raise HTTPException(status_code=404, detail="File not found")
+    path = _assert_model_access(filename, user)
+    safe_name = path.name
     return FileResponse(path, media_type="model/gltf-binary", filename=safe_name)
 
 
@@ -358,10 +386,5 @@ def stream_model_for_viewer(
     user: dict = Depends(require_roles("owner", "editor", "operator", "viewer")),
 ):
     """Serve a model inline for the authenticated in-browser viewer, not as a download."""
-    safe_name = Path(filename).name
-    if safe_name != filename or ".." in filename:
-        raise HTTPException(status_code=400, detail="Invalid filename")
-    path = OUTPUT_DIR / safe_name
-    if not path.exists() or not path.is_file() or path.suffix.lower() != ".glb":
-        raise HTTPException(status_code=404, detail="Model not found")
+    path = _assert_model_access(filename, user)
     return FileResponse(path, media_type="model/gltf-binary", headers={"Content-Disposition": "inline", "Cache-Control": "private, no-store"})
