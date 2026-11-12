@@ -52,7 +52,8 @@ class ProductUpdate(BaseModel):
     status: str | None = Field(default=None, pattern="^(draft|active|inactive)$")
 
 def _token(request: Request) -> str:
-    token = request.cookies.get(SESSION_COOKIE_NAME, "")
+    refreshed = getattr(request.state, "supabase_refreshed_session", None)
+    token = (refreshed or {}).get("access_token") or request.cookies.get(SESSION_COOKIE_NAME, "")
     if not token:
         raise HTTPException(status_code=401, detail="Sign in again to manage products.")
     return token
