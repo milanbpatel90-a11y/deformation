@@ -4,7 +4,7 @@ The application uses Supabase Auth with Google OAuth. FastAPI verifies each brow
 
 ## Access policy
 
-| Capability | Owner (configured admin email) | Google user |
+| Capability | Owner (two configured admin emails) | Google user |
 | --- | --- | --- |
 | Sign in with Google | Yes | Yes |
 | Upload eyewear photos | Yes | Yes |
@@ -15,7 +15,7 @@ The application uses Supabase Auth with Google OAuth. FastAPI verifies each brow
 | Load a model in the browser | Yes | Yes |
 | Download GLB using the download endpoint | Yes | **No** |
 
-Every authenticated non-owner is assigned the `editor` role, which permits the generation and rim-calibration workflows. The one exact email configured in `SUPABASE_ADMIN_EMAIL` is assigned `owner` and is the only role allowed to call `GET /api/output/{filename}`.
+Every authenticated non-owner is assigned the `editor` role, which permits the generation and rim-calibration workflows. Only the two exact emails listed in `SUPABASE_ADMIN_EMAILS` are assigned `owner` and allowed to call `GET /api/output/{filename}`. All other Google accounts receive the `editor` role and do not see the Download GLB button.
 
 ## 1. Configure Supabase
 
@@ -39,7 +39,7 @@ Set these variables in Railway (or your local `.env`):
 | --- | --- |
 | `SUPABASE_URL` | Project URL from Supabase Project Settings -> API |
 | `SUPABASE_PUBLISHABLE_KEY` | Supabase publishable key from Project Settings -> API |
-| `SUPABASE_ADMIN_EMAIL` | The exact Google email address for the Owner/admin |
+| `SUPABASE_ADMIN_EMAILS` | Comma-separated allowlist: `milanbpatel90@gmail.com,milan.patel90@yahoo.com` |
 | `AUTH_COOKIE_SECURE` | `true` in production over HTTPS; `false` only for local HTTP |
 
 A legacy `SUPABASE_ANON_KEY` can be used instead of `SUPABASE_PUBLISHABLE_KEY`. Never place a Supabase secret/service-role key in frontend code or commit it to Git.
@@ -64,8 +64,8 @@ The viewer hides the Download GLB control for regular users, but the FastAPI end
 1. Set all four environment variables in Railway.
 2. Ensure Railway serves the application over HTTPS and `AUTH_COOKIE_SECURE=true`.
 3. Add the production `/login` URL to Supabase's redirect allowlist.
-4. Confirm the configured admin email matches the Google account used by the Owner.
+4. Confirm the two configured admin emails match the Google accounts that should have GLB download access.
 5. Restart/redeploy the backend after changing environment variables.
-6. Test with two accounts: the configured admin account should see Download GLB; another Google account should be able to generate and view models but receive HTTP 403 from `/api/output/{filename}`.
+6. Test with three accounts: both listed admin accounts should see Download GLB; another Google account should not see the button, should still generate and view models, and should receive HTTP 403 from `/api/output/{filename}`.
 
 No database migration is required for this Supabase Auth integration; Supabase manages Google identities and sessions.
