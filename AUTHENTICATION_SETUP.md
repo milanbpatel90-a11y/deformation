@@ -14,7 +14,6 @@ The application uses Supabase Auth with Google OAuth. FastAPI verifies each brow
 | View and try on generated models | Yes | Yes |
 | Load a model in the browser | Yes | Yes |
 | Download GLB using the download endpoint | Yes | **No** |
-| Owner-only administration | Yes | No |
 
 Every authenticated non-owner is assigned the `editor` role, which permits the generation and rim-calibration workflows. The one exact email configured in `SUPABASE_ADMIN_EMAIL` is assigned `owner` and is the only role allowed to call `GET /api/output/{filename}`.
 
