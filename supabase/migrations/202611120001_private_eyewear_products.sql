@@ -1,5 +1,5 @@
 -- Apply in Supabase SQL Editor before enabling the product dashboard.
--- The API uses each signed-in user's JWT; no service-role key is required.
+-- Product metadata stays in Supabase Postgres. GLB binaries are stored in Wasabi.
 
 create table if not exists public.eyewear_products (
  id uuid primary key,
@@ -36,21 +36,8 @@ drop policy if exists "Users delete own eyewear products" on public.eyewear_prod
 create policy "Users delete own eyewear products" on public.eyewear_products for delete to authenticated
 using (auth.uid() = user_id or lower(coalesce(auth.jwt()->>'email','')) in ('milanbpatel90@gmail.com','milan.patel90@yahoo.com'));
 
-insert into storage.buckets (id,name,public,file_size_limit,allowed_mime_types)
-values ('eyewear-products','eyewear-products',false,52428800,array['model/gltf-binary','application/octet-stream'])
-on conflict (id) do update set public=false,file_size_limit=52428800;
-
-drop policy if exists "Users read own eyewear GLBs" on storage.objects;
-create policy "Users read own eyewear GLBs" on storage.objects for select to authenticated
-using (bucket_id='eyewear-products' and ((storage.foldername(name))[1]=auth.uid()::text or lower(coalesce(auth.jwt()->>'email','')) in ('milanbpatel90@gmail.com','milan.patel90@yahoo.com')));
-
-drop policy if exists "Users upload own eyewear GLBs" on storage.objects;
-create policy "Users upload own eyewear GLBs" on storage.objects for insert to authenticated
-with check (bucket_id='eyewear-products' and (storage.foldername(name))[1]=auth.uid()::text);
-
-drop policy if exists "Users delete own eyewear GLBs" on storage.objects;
-create policy "Users delete own eyewear GLBs" on storage.objects for delete to authenticated
-using (bucket_id='eyewear-products' and ((storage.foldername(name))[1]=auth.uid()::text or lower(coalesce(auth.jwt()->>'email','')) in ('milanbpatel90@gmail.com','milan.patel90@yahoo.com')));
+-- GLB binaries are stored in a private Wasabi bucket, not Supabase Storage.
+-- The FastAPI backend accesses Wasabi with server-side S3 credentials and enforces product ownership.
 
 create or replace function public.set_eyewear_products_updated_at() returns trigger language plpgsql as $$
 begin new.updated_at=now(); return new; end;
