@@ -217,6 +217,6 @@ def download_product_model(product_id: str, request: Request, user: dict = Depen
     if not rows:
         raise HTTPException(status_code=404, detail="Product not found.")
     from fastapi.responses import Response
-    r = _storage(request, "GET", rows[0]["glb_path"])
+    _wasabi_content = _wasabi_get(_object_key(rows[0], user))
     filename = re.sub(r"[^A-Za-z0-9._-]+", "-", rows[0]["item_name"]).strip("-") or "eyewear"
-    return Response(content=r.content, media_type="model/gltf-binary", headers={"Content-Disposition": f'attachment; filename="{filename}.glb"', "Cache-Control": "private, no-store"})
+    return Response(content=_wasabi_content, media_type="model/gltf-binary", headers={"Content-Disposition": f'attachment; filename="{filename}.glb"', "Cache-Control": "private, no-store"})
