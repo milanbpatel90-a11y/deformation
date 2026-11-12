@@ -213,7 +213,7 @@ def download_product_model(product_id: str, request: Request, user: dict = Depen
     product_id = _valid_product_id(product_id)
     if user["role"] != "owner":
         raise HTTPException(status_code=403, detail="Only administrators can download saved GLB files.")
-    rows = _db(request, "GET", f"eyewear_products?id=eq.{product_id}&select=id,glb_path,item_name")
+    rows = _db(request, "GET", f"eyewear_products?id=eq.{product_id}&select=id,user_id,glb_path,item_name")
     if not rows:
         raise HTTPException(status_code=404, detail="Product not found.")
     from fastapi.responses import Response
