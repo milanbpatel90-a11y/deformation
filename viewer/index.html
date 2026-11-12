@@ -465,6 +465,8 @@ document.getElementById('generate-btn').addEventListener('click', async () => {
   statusBox.className = '';
   statusBox.textContent = 'Running pipeline…';
   downloadBtn.style.display = 'none';
+  saveProductBtn.style.display = 'none';
+  window.latestGeneratedGlb = null;
   document.getElementById('pipeline-stages').style.display = 'none';
 
   const form = new FormData();
