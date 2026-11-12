@@ -1,7 +1,6 @@
-"""Private eyewear product catalogue backed by Supabase Postgres and Storage.
+"""Private eyewear product catalogue: Supabase Postgres metadata + private Wasabi GLB objects.
 
-All requests use the signed-in user's JWT, so Supabase RLS is the security boundary.
-No service-role key is required.
+Supabase RLS protects product metadata. FastAPI enforces ownership before accessing private Wasabi objects.
 """
 from __future__ import annotations
 import os
