@@ -3,7 +3,7 @@
 Required environment:
   SUPABASE_URL
   SUPABASE_ANON_KEY (or SUPABASE_PUBLISHABLE_KEY)
-  SUPABASE_ADMIN_EMAIL (the one Google account allowed to download GLBs)
+  SUPABASE_ADMIN_EMAILS (comma-separated Google accounts allowed to download GLBs)
 """
 from __future__ import annotations
 
@@ -28,7 +28,7 @@ SUPABASE_KEY = (
     os.getenv("SUPABASE_PUBLISHABLE_KEY", "").strip()
     or os.getenv("SUPABASE_ANON_KEY", "").strip()
 )
-ADMIN_EMAIL = os.getenv("SUPABASE_ADMIN_EMAIL", "").strip().lower()
+ADMIN_EMAILS = {\n    email.strip().lower()\n    for email in os.getenv("SUPABASE_ADMIN_EMAILS", os.getenv("SUPABASE_ADMIN_EMAIL", "")).split(",")\n    if email.strip()\n}
 SESSION_COOKIE_NAME = "defirmation_supabase_access"
 REFRESH_COOKIE_NAME = "defirmation_supabase_refresh"
 CSRF_COOKIE_NAME = "defirmation_csrf"
@@ -132,7 +132,7 @@ def get_current_user_optional(request: Request) -> dict | None:
         request.state.supabase_refreshed_session = refreshed
 
     email = str(raw_user.get("email", "")).strip().lower()
-    role = "owner" if ADMIN_EMAIL and email == ADMIN_EMAIL else "editor"
+    role = "owner" if email in ADMIN_EMAILS else "editor"
     metadata = raw_user.get("user_metadata") or {}
     display_name = (
         metadata.get("full_name") or metadata.get("name")
