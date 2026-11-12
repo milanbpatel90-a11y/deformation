@@ -97,6 +97,12 @@ def _storage(request: Request, method: str, path: str, data: bytes | None = None
 def _allowed(row: dict, user: dict) -> bool:
     return user["role"] == "owner" or str(row.get("user_id")) == str(user["id"])
 
+def _valid_product_id(product_id: str) -> str:
+    try:
+        return str(uuid.UUID(product_id))
+    except (ValueError, TypeError, AttributeError):
+        raise HTTPException(status_code=404, detail="Product not found.")
+
 @router.get("")
 def list_products(request: Request, user: dict = Depends(get_current_user)):
     return {"products": _db(request, "GET", "eyewear_products?select=*&order=created_at.desc") or []}
@@ -135,6 +141,7 @@ def create_product(body: ProductInput, request: Request, user: dict = Depends(ge
 
 @router.patch("/{product_id}")
 def update_product(product_id: str, body: ProductUpdate, request: Request, user: dict = Depends(get_current_user)):
+    product_id = _valid_product_id(product_id)
     changes = body.model_dump(exclude_unset=True)
     if not changes:
         raise HTTPException(status_code=400, detail="No product fields supplied.")
@@ -145,6 +152,7 @@ def update_product(product_id: str, body: ProductUpdate, request: Request, user:
 
 @router.delete("/{product_id}", status_code=204)
 def delete_product(product_id: str, request: Request, user: dict = Depends(get_current_user)):
+    product_id = _valid_product_id(product_id)
     rows = _db(request, "GET", f"eyewear_products?id=eq.{product_id}&select=id,user_id,glb_path")
     if not rows or not _allowed(rows[0], user):
         raise HTTPException(status_code=404, detail="Product not found.")
@@ -154,6 +162,7 @@ def delete_product(product_id: str, request: Request, user: dict = Depends(get_c
 
 @router.get("/{product_id}/model")
 def view_product_model(product_id: str, request: Request, user: dict = Depends(get_current_user)):
+    product_id = _valid_product_id(product_id)
     rows = _db(request, "GET", f"eyewear_products?id=eq.{product_id}&select=id,user_id,glb_path")
     if not rows or not _allowed(rows[0], user):
         raise HTTPException(status_code=404, detail="Product not found.")
@@ -163,6 +172,7 @@ def view_product_model(product_id: str, request: Request, user: dict = Depends(g
 
 @router.get("/{product_id}/download")
 def download_product_model(product_id: str, request: Request, user: dict = Depends(get_current_user)):
+    product_id = _valid_product_id(product_id)
     if user["role"] != "owner":
         raise HTTPException(status_code=403, detail="Only administrators can download saved GLB files.")
     rows = _db(request, "GET", f"eyewear_products?id=eq.{product_id}&select=id,glb_path,item_name")
