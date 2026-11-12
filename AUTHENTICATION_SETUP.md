@@ -1,77 +1,72 @@
-# Authentication and user access setup
+# Supabase Google authentication and access policy
 
-This application uses server-side role checks for the FastAPI endpoints and the browser viewer. It does not allow public registration.
+The application uses Supabase Auth with Google OAuth. FastAPI verifies each browser session against the Supabase Auth user endpoint and enforces access rules on the server.
 
-## Roles
+## Access policy
 
-| Role | Access |
+| Capability | Owner (configured admin email) | Google user |
+| --- | --- | --- |
+| Sign in with Google | Yes | Yes |
+| Upload eyewear photos | Yes | Yes |
+| Generate 3D models | Yes | Yes |
+| Use deformation pipeline | Yes | Yes |
+| Rim detection and calibration | Yes | Yes |
+| View and try on generated models | Yes | Yes |
+| Load a model in the browser | Yes | Yes |
+| Download GLB using the download endpoint | Yes | **No** |
+| Owner-only administration | Yes | No |
+
+Every authenticated non-owner is assigned the `editor` role, which permits the generation and rim-calibration workflows. The one exact email configured in `SUPABASE_ADMIN_EMAIL` is assigned `owner` and is the only role allowed to call `GET /api/output/{filename}`.
+
+## 1. Configure Supabase
+
+1. Create or select a project at https://supabase.com/dashboard.
+2. Open **Authentication -> Sign In / Providers -> Google** and enable Google.
+3. In Google Cloud Console, create a **Web application** OAuth client.
+4. Add the app's origin (for example `https://YOUR-APP-DOMAIN`) to Google Authorized JavaScript origins.
+5. Add the Supabase callback URL shown on the Google provider settings page (normally `https://YOUR_PROJECT_REF.supabase.co/auth/v1/callback`) to Google Authorized redirect URIs.
+6. Paste the Google OAuth Client ID and Client Secret into Supabase's Google provider settings and save.
+7. In **Authentication -> URL Configuration**, set the Site URL to the app's public origin and add these Redirect URLs:
+   - `https://YOUR-APP-DOMAIN/login`
+   - `http://localhost:8000/login` (local development only)
+
+The application uses the PKCE OAuth flow and exchanges the callback code in the browser. The resulting access and refresh tokens are posted to FastAPI, validated against Supabase, and stored in HttpOnly cookies.
+
+## 2. Configure backend environment
+
+Set these variables in Railway (or your local `.env`):
+
+| Variable | Value |
 | --- | --- |
-| **Owner** | One protected full-access account. Can generate models, use rim calibration, and create/manage all other accounts. |
-| **Editor** | Can upload images, generate models, and use rim-detection/calibration endpoints. Cannot manage accounts. |
-| **Operator** | Can upload images, generate models, and use the 3D viewer. Cannot manage accounts or use rim calibration. |
-| **Viewer** | Read-only access to the 3D viewer and GLB outputs. Cannot submit generation jobs. |
+| `SUPABASE_URL` | Project URL from Supabase Project Settings -> API |
+| `SUPABASE_PUBLISHABLE_KEY` | Supabase publishable key from Project Settings -> API |
+| `SUPABASE_ADMIN_EMAIL` | The exact Google email address for the Owner/admin |
+| `AUTH_COOKIE_SECURE` | `true` in production over HTTPS; `false` only for local HTTP |
 
-The Owner role is created once during initial setup. The user-management API does not permit an Owner to be demoted, disabled, or replaced through the UI. Only the Owner can create, change, or deactivate other accounts.
+A legacy `SUPABASE_ANON_KEY` can be used instead of `SUPABASE_PUBLISHABLE_KEY`. Never place a Supabase secret/service-role key in frontend code or commit it to Git.
 
-## Local setup
+Copy `.env.example` to `.env` for local development. Do not commit `.env`.
 
-1. Copy `.env.example` to `.env` in the repository root.
-2. Generate a one-time setup token:
+## 3. Server-side routes and enforcement
 
-   ```powershell
-   python -c "import secrets; print(secrets.token_urlsafe(32))"
-   ```
+- `GET /api/auth/config` returns only the public Supabase URL and publishable key needed by the Google login page.
+- `POST /api/auth/session` verifies the Supabase access token before issuing HttpOnly application cookies.
+- `GET /api/auth/me` validates the session and returns the user's role and permissions.
+- `POST /api/auth/logout` clears application session cookies.
+- `GET /api/model/{filename}` serves an authenticated GLB inline for Three.js so users can view and try it on.
+- `GET /api/output/{filename}` is the explicit download endpoint and is Owner-only.
 
-3. Put the generated value in `.env` as `AUTH_BOOTSTRAP_TOKEN=<generated-value>`. Do not commit `.env`.
-4. Start the API:
+The viewer hides the Download GLB control for regular users, but the FastAPI endpoint also rejects non-owner downloads. UI hiding is not the security boundary.
 
-   ```powershell
-   uvicorn backend.api.main:app --host 127.0.0.1 --port 8000
-   ```
+**Model confidentiality limitation:** browser-based 3D viewing requires the browser to receive the GLB data. A user with browser developer tools may be able to capture the inline model response. This implementation blocks the explicit download endpoint and UI control; it is not DRM and cannot make a model impossible to extract after it has been rendered in the browser.
 
-5. Open `http://127.0.0.1:8000/login`. The first-run screen should offer to create the Owner account. The username is prefilled as `milanbpatel90-a11y`; change it if you prefer. Set a strong password of at least 12 characters and enter the one-time setup token.
-6. After setup, the Owner is signed in and redirected to the 3D workspace. Open **Manage users** in the workspace header to create Editor, Operator, and Viewer accounts.
+## 4. Deployment checklist
 
-The application creates a local `.auth_secret` automatically for development and stores user accounts in `data/auth.sqlite3`. Both are excluded from Git. Keep the database and signing secret backed up and private.
+1. Set all four environment variables in Railway.
+2. Ensure Railway serves the application over HTTPS and `AUTH_COOKIE_SECURE=true`.
+3. Add the production `/login` URL to Supabase's redirect allowlist.
+4. Confirm the configured admin email matches the Google account used by the Owner.
+5. Restart/redeploy the backend after changing environment variables.
+6. Test with two accounts: the configured admin account should see Download GLB; another Google account should be able to generate and view models but receive HTTP 403 from `/api/output/{filename}`.
 
-## Production deployment
-
-Set these server-side environment variables before starting the application:
-
-- `APP_ENV=production`
-- `AUTH_SECRET_KEY`: a unique random secret with at least 32 characters. Generate with `python -c "import secrets; print(secrets.token_urlsafe(48))"`.
-- `AUTH_BOOTSTRAP_TOKEN`: a separate, random one-time setup token. Remove it from the deployment environment after the Owner account has been created.
-- `AUTH_COOKIE_SECURE=true`: required when the application is served over HTTPS.
-- `AUTH_DB_PATH`: point this to a persistent writable volume, for example `/var/data/auth.sqlite3` if the host mounts a persistent disk at `/var/data`.
-
-**Important:** the user database must live on persistent storage. Do not use an ephemeral container filesystem for production accounts; a redeploy or restart that discards the SQLite file would discard all user accounts. Back up the database regularly. For multiple independent application instances, use a shared production database such as PostgreSQL rather than separate local SQLite files.
-
-Use HTTPS in production. Do not expose `.env`, `.auth_secret`, or the SQLite database through static file hosting. Do not put the Owner password, signing secret, or bootstrap token in source code, GitHub Actions logs, screenshots, or client-side JavaScript.
-
-## Session and security behavior
-
-- Passwords are stored as salted PBKDF2-HMAC-SHA256 hashes (not plaintext).
-- Sessions use a signed, HttpOnly cookie with an eight-hour lifetime.
-- Cookies use `SameSite=Strict`; production cookies also use the Secure flag.
-- Authenticated state-changing requests require the CSRF token header.
-- Deformation, measurement, template, output, and rim-detection endpoints enforce access on the server. Hiding a UI control is not treated as authorization.
-- `GET /api/health` remains public for deployment health checks. The login status endpoint is public so the login page can determine whether first-run setup is required.
-- There is no self-service public sign-up. The Owner creates accounts from `/admin/`.
-- Users can change their own password from the workspace header after signing in.
-
-## Main routes
-
-| Route | Access |
-| --- | --- |
-| `/`, `/login` | Public login entry |
-| `/viewer/` | Any signed-in user |
-| `/admin/` | Owner only |
-| `GET /api/auth/status` | Public setup status |
-| `POST /api/auth/setup` | One-time Owner setup; requires bootstrap token |
-| `POST /api/auth/login`, `POST /api/auth/logout` | Authentication |
-| `GET /api/auth/me` | Any signed-in user |
-| `GET/POST/PATCH /api/admin/users` | Owner only |
-| `POST /api/deform*` | Owner, Editor, Operator |
-| `/api/rim-detection/*` | Owner, Editor |
-| `GET /api/templates`, `GET /api/output/{filename}` | Any signed-in user |
-
+No database migration is required for this Supabase Auth integration; Supabase manages Google identities and sessions.
