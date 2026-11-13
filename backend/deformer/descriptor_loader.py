@@ -351,7 +351,10 @@ class DescriptorLoader:
         if isinstance(hinges, dict):
             for side, target_key in (("left", "left_temple"), ("right", "right_temple")):
                 hinge_part = hinges.get(side, {}).get("part")
-                if isinstance(hinge_part, str) and hinge_part in geometry and hinge_part not in result[target_key]:
+                expected_temple = "LeftTemple" if side == "left" else "RightTemple"
+                # Separate hinge hardware is a pivot reference, not part of the
+                # temple arm deformation group.
+                if hinge_part == expected_temple and hinge_part in geometry and hinge_part not in result[target_key]:
                     result[target_key].insert(0, hinge_part)
 
         rim_loops = payload.get("rim_loops", {})
