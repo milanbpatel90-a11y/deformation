@@ -351,6 +351,12 @@ function loadGLB(url) {
   loader.load(url, (gltf) => {
     if (currentModel) scene.remove(currentModel);
     currentModel = gltf.scene;
+    // Backend deformation templates use millimetres. Normalize once to metres
+    // for browser rendering and face-tracking alignment.
+    currentModel.scale.setScalar(0.001);
+    currentModel.updateMatrixWorld(true);
+    const modelBox = new THREE.Box3().setFromObject(currentModel);
+    currentModel.userData.modelWidthMeters = modelBox.getSize(new THREE.Vector3()).x;
     scene.add(currentModel);
     if (!isTryOnActive) {
       fitCamera(currentModel);
@@ -603,8 +609,9 @@ function onResults(results) {
       currentModel.position.addScaledVector(v_dir, face_width * 0.15);
       
       // 2. Scale the model dynamically based on face width
-      const base_scale = face_width * 0.72;
-      currentModel.scale.set(base_scale, base_scale, base_scale);
+      const modelWidthMeters = currentModel.userData.modelWidthMeters || 0.14;
+      const base_scale = (face_width * 0.72) / Math.max(modelWidthMeters, 1e-6);
+      currentModel.scale.setScalar(base_scale);
       
       overlayStatus.textContent = 'Webcam Try-On active · Face tracked';
     }

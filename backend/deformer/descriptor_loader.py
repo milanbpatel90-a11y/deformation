@@ -351,7 +351,10 @@ class DescriptorLoader:
         if isinstance(hinges, dict):
             for side, target_key in (("left", "left_temple"), ("right", "right_temple")):
                 hinge_part = hinges.get(side, {}).get("part")
-                if isinstance(hinge_part, str) and hinge_part in geometry and hinge_part not in result[target_key]:
+                expected_temple = "LeftTemple" if side == "left" else "RightTemple"
+                # Separate hinge hardware is a pivot reference, not part of the
+                # temple arm deformation group.
+                if hinge_part == expected_temple and hinge_part in geometry and hinge_part not in result[target_key]:
                     result[target_key].insert(0, hinge_part)
 
         rim_loops = payload.get("rim_loops", {})
@@ -377,8 +380,23 @@ class DescriptorLoader:
         template_info: TemplateInfo | None,
     ) -> dict[str, Any]:
         dims = self._resolve_dimensions(template_name, template_info)
-        frame_mesh = self._get_geometry(geometry, "Frame", "frame_constraints")
-        frame_bounds = frame_mesh.bounds
+        # Aggregate Frame is optional: templates may store the brow bar,
+        # bridge and rims as independent meshes to avoid overlapping duplicate
+        # geometry. Build a conservative envelope from the available frame parts.
+        frame_mesh = geometry.get("Frame")
+        if frame_mesh is not None:
+            frame_bounds = frame_mesh.bounds
+        else:
+            envelope_parts = [
+                geometry[name] for name in ("LeftRim", "RightRim", "Bridge")
+                if name in geometry
+            ]
+            if not envelope_parts:
+                raise ValueError(f"Template '{template_name}' has no frame geometry for constraints")
+            frame_bounds = np.array([
+                np.min([mesh.bounds[0] for mesh in envelope_parts], axis=0),
+                np.max([mesh.bounds[1] for mesh in envelope_parts], axis=0),
+            ], dtype=np.float64)
         base = {
             "frame_width": {"min": round(dims.frame_width * 0.75, 2), "max": round(dims.frame_width * 1.35, 2)},
             "lens_width": {"min": round(dims.lens_width * 0.65, 2), "max": round(dims.lens_width * 1.45, 2)},
@@ -413,7 +431,9 @@ class DescriptorLoader:
         lens_planes: dict[str, LensPlaneDescriptor],
         vertex_groups: dict[str, list[str]],
     ) -> None:
-        missing_groups = {"frame", "left_rim", "right_rim", "left_temple", "right_temple"}.difference(vertex_groups)
+        # "frame" is optional when a template intentionally stores separate
+        # component meshes and has no aggregate Frame geometry.
+        missing_groups = {"left_rim", "right_rim", "left_temple", "right_temple"}.difference(vertex_groups)
         if missing_groups:
             raise ValueError(f"Descriptor for {template_path} missing required vertex groups: {sorted(missing_groups)}")
         for side in ("left", "right"):

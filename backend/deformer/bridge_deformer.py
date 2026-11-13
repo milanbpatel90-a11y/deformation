@@ -42,13 +42,13 @@ class BridgeDeformer(BaseDeformer):
     def _collect_bridge_vertices(self, context: DeformationContext) -> BridgeVertexSelection:
         bridge_mesh = context.vertex_group_meshes("bridge")
         frame_mesh = context.vertex_group_meshes("frame")
-        if not bridge_mesh or not frame_mesh:
-            raise ValueError("Bridge deformation requires both bridge and frame meshes in the descriptor.")
+        if not bridge_mesh:
+            raise ValueError("Bridge deformation requires a Bridge mesh in the descriptor.")
 
         bridge = bridge_mesh[0]
-        frame = frame_mesh[0]
+        frame = frame_mesh[0] if frame_mesh else None
         bridge_bounds = bridge.bounds.astype(np.float64)
-        frame_vertices = frame.vertices.copy()
+        frame_vertices = frame.vertices.copy() if frame is not None else np.empty((0, 3), dtype=np.float64)
         x_margin = self.falloff_margin
         y_margin = self.falloff_margin * 1.2
 
@@ -163,7 +163,10 @@ class BridgeDeformer(BaseDeformer):
         selection: BridgeVertexSelection,
         target: dict[str, Any],
     ) -> None:
-        frame_mesh = context.vertex_group_meshes("frame")[0]
+        frame_meshes = context.vertex_group_meshes("frame")
+        if not frame_meshes:
+            return
+        frame_mesh = frame_meshes[0]
         bridge_mesh = context.vertex_group_meshes("bridge")[0]
         frame_vertices = frame_mesh.vertices.copy()
         updated_bridge = bridge_mesh.vertices.copy()
@@ -216,13 +219,15 @@ class BridgeDeformer(BaseDeformer):
         bridge_vertices[:, 0] -= bridge_vertices[:, 0].mean()
         bridge_mesh.vertices = bridge_vertices
 
-        frame_mesh = context.vertex_group_meshes("frame")[0]
-        frame_vertices = frame_mesh.vertices.copy()
-        region = selection.frame_indices
-        if len(region) > 0:
-            region_center = frame_vertices[region, 0].mean()
-            frame_vertices[region, 0] -= region_center
-        frame_mesh.vertices = frame_vertices
+        frame_meshes = context.vertex_group_meshes("frame")
+        if frame_meshes:
+            frame_mesh = frame_meshes[0]
+            frame_vertices = frame_mesh.vertices.copy()
+            region = selection.frame_indices
+            if len(region) > 0:
+                region_center = frame_vertices[region, 0].mean()
+                frame_vertices[region, 0] -= region_center
+            frame_mesh.vertices = frame_vertices
 
     def _validate_constraints(
         self,
