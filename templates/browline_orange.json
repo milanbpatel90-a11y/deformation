@@ -1,0 +1,33 @@
+{
+  "name": "browline_orange",
+  "shape": "browline",
+  "material": "plastic",
+  "glb_file": "browline_orange.glb",
+  "dimensions": {
+    "frame_width": 140.36,
+    "lens_width": 50.71,
+    "lens_height": 36.8,
+    "bridge_width": 15.63,
+    "temple_length": 136.94,
+    "rim_thickness": 2.7,
+    "temple_curve_angle": 8.0,
+    "nose_pad_distance": 20.49,
+    "nose_pad_angle": 15.0,
+    "nose_pad_height": 9.61
+  },
+  "parts": [
+    "LeftLens", "RightLens", "Bridge", "LeftRim", "RightRim",
+    "LeftTemple", "RightTemple", "LeftHinge", "RightHinge",
+    "LeftNosePad", "RightNosePad"
+  ],
+  "rim_pull_strength": 0.2,
+  "toolkit_style": "browline",
+  "units": "millimeters",
+  "source": "low_poly_orange_sunglasses.glb; aggregate Frame geometry intentionally omitted to avoid duplicate overlapping surfaces.",
+  "repair_notes": [
+    "Independent named component meshes are authoritative; no aggregate Frame mesh is present.",
+    "bridge_width is the clear gap between the inner edges of LeftRim and RightRim.",
+    "The Bridge mesh X envelope is wider because it overlaps the rim components.",
+    "rim_thickness, temple_curve_angle, and nose-pad angles are inherited assumptions pending source-CAD confirmation."
+  ]
+}
