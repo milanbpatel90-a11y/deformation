@@ -47,15 +47,15 @@ class RimDeformer(BaseDeformer):
                 continue
 
             rim_mesh = context.mesh(rim_parts[0])
+            # A template may contain independent LeftRim/RightRim meshes without
+            # a duplicated aggregate Frame mesh. Deform each rim as the source of
+            # truth; propagate only when a real aggregate mesh is present.
             frame_meshes = context.vertex_group_meshes("frame")
-            if not frame_meshes:
-                continue
-            frame_mesh = frame_meshes[0]
-
             before = rim_mesh.vertices.copy()
             target_contour = self._target_contour(context, side, contour)
             self._deform_rim_mesh(rim_mesh, side, target_contour, context.measurements.rim_thickness)
-            self._propagate_to_frame(frame_mesh, before, rim_mesh.vertices)
+            if frame_meshes:
+                self._propagate_to_frame(frame_meshes[0], before, rim_mesh.vertices)
 
             bounds_before = np.ptp(before[:, :2], axis=0)
             bounds_after = np.ptp(rim_mesh.vertices[:, :2], axis=0)
