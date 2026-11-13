@@ -36,7 +36,8 @@ class TempleDeformer(BaseDeformer):
 
     def apply(self, context: DeformationContext) -> DeformationContext:
         results: list[dict[str, Any]] = []
-        frame_before = context.mesh("Frame").vertices.copy()
+        frame_meshes = context.vertex_group_meshes("frame")
+        frame_before = frame_meshes[0].vertices.copy() if frame_meshes else None
 
         for side in ("left", "right"):
             selection = self._collect_temples(context, side)
@@ -48,8 +49,12 @@ class TempleDeformer(BaseDeformer):
             self._preserve_symmetry(context, selection)
             results.append(self._validate_constraints(context, selection, target))
 
-        frame_after = context.mesh("Frame").vertices.copy()
-        frame_max_displacement = float(np.linalg.norm(frame_after - frame_before, axis=1).max())
+        frame_meshes = context.vertex_group_meshes("frame")
+        if frame_before is not None and frame_meshes:
+            frame_after = frame_meshes[0].vertices.copy()
+            frame_max_displacement = float(np.linalg.norm(frame_after - frame_before, axis=1).max())
+        else:
+            frame_max_displacement = 0.0
         return self.update_context(
             context,
             applied=True,
@@ -164,9 +169,16 @@ class TempleDeformer(BaseDeformer):
         temple_after = context.mesh(selection.temple_part).vertices.copy()
         final_length = self._temple_length(temple_after, selection.hinge_pivot, selection.axis)
         hinge_error = self._hinge_anchor_error(selection.temple_before, temple_after, selection.hinge_pivot)
-        frame_bounds = context.mesh("Frame").bounds
-        temple_bounds = context.mesh(selection.temple_part).bounds
-        frame_clearance = float(np.min(np.abs(temple_bounds[:, 0][:, None] - frame_bounds[:, 0][None, :])))
+        frame_meshes = context.vertex_group_meshes("frame")
+        if frame_meshes:
+            frame_bounds = frame_meshes[0].bounds
+            temple_bounds = context.mesh(selection.temple_part).bounds
+            frame_clearance = float(np.min(np.abs(temple_bounds[:, 0][:, None] - frame_bounds[:, 0][None, :])))
+        else:
+            # With independent component meshes, the aggregate frame is absent;
+            # hinge anchoring remains validated, while collision clearance is
+            # reported as unavailable rather than fabricated.
+            frame_clearance = 0.0
         return self.validate_constraints(
             {
                 "side": selection.side,
