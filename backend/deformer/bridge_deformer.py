@@ -98,8 +98,17 @@ class BridgeDeformer(BaseDeformer):
         min_thickness = float(constraints.get("minimum_wall_thickness", 0.8))
         target_depth = float(max(current_depth, min_thickness))
 
+        # Scale relative to the template's *declared* bridge width when it has one, so asking
+        # for the template's own width is the identity even when the Bridge mesh extends into
+        # the rim lugs (mesh X extent != nose-bridge span). Falls back to the mesh extent.
+        dims = getattr(context.template_info, "dimensions", None)
+        declared = float(getattr(dims, "bridge_width", 0.0) or 0.0)
+        reference_width = declared if declared > 1e-6 else current_width
+
         return {
             "current_width": current_width,
+            "reference_width": reference_width,
+            "width_scale": target_width / max(reference_width, 1e-6),
             "target_width": target_width,
             "requested_width": requested_width,
             "current_height": current_height,
@@ -120,7 +129,7 @@ class BridgeDeformer(BaseDeformer):
         vertices = bridge_mesh.vertices.copy()
         center = vertices.mean(axis=0)
 
-        width_scale = target["target_width"] / max(target["current_width"], 1e-6)
+        width_scale = target["width_scale"]
         height_scale = target["target_height"] / max(target["current_height"], 1e-6)
         depth_scale = target["target_depth"] / max(selection.bridge_bounds[1, 2] - selection.bridge_bounds[0, 2], 1e-6)
 
@@ -184,7 +193,7 @@ class BridgeDeformer(BaseDeformer):
         influence = self._bridge_region_influence(frame_vertices, bridge_center, current_half_width, half_height)
         
         # Scale factors
-        width_scale = target["target_width"] / max(target["current_width"], 1e-6)
+        width_scale = target["width_scale"]
         height_scale = target["target_height"] / max(target["current_height"], 1e-6)
         depth_scale = target["target_depth"] / max(selection.bridge_bounds[1, 2] - selection.bridge_bounds[0, 2], 1e-6)
 
@@ -194,8 +203,9 @@ class BridgeDeformer(BaseDeformer):
         frame_vertices[:, 2] += (frame_vertices[:, 2] - bridge_center[2]) * (depth_scale - 1.0) * influence
 
         # 3. Smooth expansion/translation if bridge is wider
-        if target_half_width > current_half_width:
-            expansion = target_half_width - current_half_width
+        reference_half_width = target["reference_width"] * 0.5
+        if target_half_width > reference_half_width:
+            expansion = target_half_width - reference_half_width
             x_offsets = np.sign(frame_vertices[:, 0]) * expansion
             frame_vertices[:, 0] += x_offsets * influence * 0.18
 

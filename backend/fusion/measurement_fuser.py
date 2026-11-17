@@ -33,26 +33,35 @@ class MeasurementFuser:
         base_ms = front_ms[0] if front_ms else any_ms[0]
 
         def weighted_avg(attr: str, preferred: list[str] | None = None) -> float | None:
-            pairs: list[tuple[float, float]] = []
-            for vtype, ms_list in by_view.items():
-                w = self.VIEW_WEIGHTS.get(vtype, 0.4)
-                if preferred and vtype not in preferred:
-                    w *= 0.35
-                for m in ms_list:
-                    val = getattr(m, attr, None)
-                    if val is None:
+            def collect(only: list[str] | None) -> list[tuple[float, float]]:
+                pairs: list[tuple[float, float]] = []
+                for vtype, ms_list in by_view.items():
+                    if only is not None and vtype not in only:
                         continue
-                    try:
-                        pairs.append((float(val), w))
-                    except (TypeError, ValueError):
-                        continue
+                    w = self.VIEW_WEIGHTS.get(vtype, 0.4)
+                    for m in ms_list:
+                        val = getattr(m, attr, None)
+                        if val is None:
+                            continue
+                        try:
+                            pairs.append((float(val), w))
+                        except (TypeError, ValueError):
+                            continue
+                return pairs
+
+            # Views that can actually see the quantity are authoritative: pool them first and
+            # only fall back to every view when none of them reported it.
+            pairs = collect(preferred) if preferred else []
+            if not pairs:
+                pairs = collect(None)
             if not pairs:
                 return None
             values = np.array([p[0] for p in pairs], dtype=float)
             weights = np.array([p[1] for p in pairs], dtype=float)
             if len(values) >= 3:
                 median = float(np.median(values))
-                mad = float(np.median(np.abs(values - median))) or 1.0
+                mad = float(np.median(np.abs(values - median)))
+                mad = max(mad, 0.02 * abs(median), 1e-6)
                 keep = np.abs(values - median) <= 3.0 * mad
                 values, weights = values[keep], weights[keep]
             if len(values) == 0:

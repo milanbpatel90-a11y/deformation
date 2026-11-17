@@ -39,16 +39,17 @@ class ViewClassifier:
         
         # Classify based on aspect ratio, size, and symmetry
         # Fixed thresholds (2024-11-10) to improve classification accuracy
-        # - Side view: more lenient (2.5 instead of 4.0)
+        # - Side view: a temple-on silhouette is very elongated (aspect >= 4); a front-on pair
+        #   of glasses is typically 2-3.5 wide-to-tall, so 2.5 mislabelled real front shots
         # - Top view: much stricter (0.95 instead of 1.3)
         # - Front view: explicit detection range
         # - Perspective: based on asymmetry
         
-        if aspect_ratio >= 2.5:
+        if aspect_ratio >= 4.0:
             return "side"
         elif aspect_ratio < 0.95:
             return "top"
-        elif 1.5 <= aspect_ratio < 2.5 and symmetry >= 0.72:
+        elif 1.5 <= aspect_ratio < 4.0 and symmetry >= 0.72:
             return "front"
         elif symmetry < 0.68:
             return "perspective"
