@@ -1,0 +1,35 @@
+{
+  "name": "browline_orange",
+  "shape": "browline",
+  "material": "plastic",
+  "glb_file": "browline_orange.glb",
+  "dimensions": {
+    "frame_width": 140.4,
+    "lens_width": 50.7,
+    "lens_height": 36.8,
+    "bridge_width": 15.63,
+    "temple_length": 137.3,
+    "rim_thickness": 2.7,
+    "temple_curve_angle": 8.0,
+    "nose_pad_distance": 20.4,
+    "nose_pad_angle": 15.0,
+    "nose_pad_height": 9.6
+  },
+  "parts": [
+    "Frame",
+    "LeftLens",
+    "RightLens",
+    "Bridge",
+    "LeftRim",
+    "RightRim",
+    "LeftTemple",
+    "RightTemple",
+    "LeftHinge",
+    "RightHinge",
+    "LeftNosePad",
+    "RightNosePad"
+  ],
+  "rim_pull_strength": 0.2,
+  "toolkit_style": "browline",
+  "source": "low_poly_orange_sunglasses.glb (48 fused components split & mapped; units m->mm; lens plane XY, depth Z, Left=-X). nose_pad_angle/temple_curve_angle are assumptions, not measured."
+}

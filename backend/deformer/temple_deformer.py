@@ -80,7 +80,11 @@ class TempleDeformer(BaseDeformer):
 
         requested_wrap = float(context.measurements.temple_curve_angle - context.template_info.dimensions.temple_curve_angle)
         target_wrap = float(np.clip(requested_wrap, -self.max_wrap_angle, self.max_wrap_angle))
-        ear_bend = float(np.clip(8.0 + max(target_length - current_length, 0.0) * 0.12, 4.0, self.max_ear_bend))
+        # Scale against the template's declared temple length (identity when the request equals
+        # it); the mesh-from-pivot length is only a fallback when no declared value exists.
+        declared = float(getattr(context.template_info.dimensions, "temple_length", 0.0) or 0.0)
+        reference_length = declared if declared > 1e-6 else current_length
+        ear_bend = float(np.clip(max(target_length - reference_length, 0.0) * 0.12, 0.0, self.max_ear_bend))
         thickness_scale = float(
             np.clip(
                 context.measurements.rim_thickness / max(context.template_info.dimensions.rim_thickness, 1e-6),
@@ -90,6 +94,7 @@ class TempleDeformer(BaseDeformer):
         )
         return {
             "current_length": current_length,
+            "reference_length": reference_length,
             "target_length": target_length,
             "requested_length": requested_length,
             "wrap_angle": target_wrap,
@@ -111,7 +116,7 @@ class TempleDeformer(BaseDeformer):
             mesh.vertices = vertices * (1.0 - weights[:, None]) + rotated * weights[:, None]
 
     def _extend_length(self, context: DeformationContext, selection: TempleSelection, target: dict[str, Any]) -> None:
-        length_scale = target["target_length"] / max(target["current_length"], 1e-6)
+        length_scale = target["target_length"] / max(target["reference_length"], 1e-6)
         for part in filter(None, [selection.temple_part, selection.tip_part]):
             mesh = context.mesh(part)
             vertices = mesh.vertices.copy()
@@ -146,19 +151,20 @@ class TempleDeformer(BaseDeformer):
             mesh.vertices = vertices
 
     def _preserve_symmetry(self, context: DeformationContext, selection: TempleSelection) -> None:
+        """Keep each temple on its own side of the hinge.
+
+        Only a temple that ended up on the wrong side of the hinge is mirrored back (whole
+        part, rigidly). A correctly placed temple is never folded, so unchanged templates
+        stay unchanged and a temple's own splay is preserved.
+        """
         sign = -1.0 if selection.side == "left" else 1.0
-        mesh = context.mesh(selection.temple_part)
-        vertices = mesh.vertices.copy()
-        axial = np.dot(vertices - selection.hinge_pivot, selection.axis)
-        positive = np.maximum(axial, 0.0)
-        vertices[:, 0] = selection.hinge_pivot[0] + sign * np.abs(vertices[:, 0] - selection.hinge_pivot[0])
-        vertices[:, 0] = np.where(positive <= 1e-6, selection.hinge_pivot[0], vertices[:, 0])
-        mesh.vertices = vertices
-        if selection.tip_part:
-            tip_mesh = context.mesh(selection.tip_part)
-            tip_vertices = tip_mesh.vertices.copy()
-            tip_vertices[:, 0] = selection.hinge_pivot[0] + sign * np.abs(tip_vertices[:, 0] - selection.hinge_pivot[0])
-            tip_mesh.vertices = tip_vertices
+        pivot_x = float(selection.hinge_pivot[0])
+        for part in filter(None, [selection.temple_part, selection.tip_part]):
+            mesh = context.mesh(part)
+            vertices = mesh.vertices.copy()
+            if sign * (float(vertices[:, 0].mean()) - pivot_x) < -1e-6:
+                vertices[:, 0] = pivot_x + sign * np.abs(vertices[:, 0] - pivot_x)
+                mesh.vertices = vertices
 
     def _validate_constraints(self, context: DeformationContext, selection: TempleSelection, target: dict[str, Any]) -> dict[str, Any]:
         temple_after = context.mesh(selection.temple_part).vertices.copy()

@@ -36,12 +36,27 @@ class LensDeformer(BaseDeformer):
         results: list[dict[str, Any]] = []
         for side in ("left", "right"):
             selection = self._collect_lenses(context, side)
-            rim_boundary = self._extract_rim_boundary(context, selection)
-            target_boundary = self._generate_target_boundary(context, selection, rim_boundary)
-            fit_scale = self._fit_lens_to_rim(context, selection, target_boundary)
+            warp = context.rim_warps.get(side)
+            if warp is not None:
+                # The rim stage already defined how this side's outline moved: carry the lens
+                # through the same warp (identity when the rim is unchanged), keeping it
+                # inside the rim by construction.
+                target_boundary, fit_scale = self._follow_rim_warp(context, selection, warp)
+            else:
+                rim_boundary = self._extract_rim_boundary(context, selection)
+                target_boundary = self._generate_target_boundary(context, selection, rim_boundary)
+                fit_scale = self._fit_lens_to_rim(context, selection, target_boundary)
             self._preserve_uvs(context, selection)
-            self._preserve_thickness(context, selection, fit_scale)
-            self._preserve_curvature(context, selection, fit_scale)
+            if warp is None:
+                # The rim-following warp is in-plane only, so thickness and curvature (Z) are
+                # already exactly preserved; these passes only matter after a TPS re-fit.
+                self._preserve_thickness(context, selection, fit_scale)
+                self._preserve_curvature(context, selection, fit_scale)
+            if warp is not None:
+                # Validate against the lens's own front-surface outline (what _validate measures).
+                final = context.mesh(selection.lens_part).vertices
+                hull = self._hull_boundary(final[self._surface_indices(final, front=True)][:, :2])
+                target_boundary = hull[self._loop_order(hull)]
             results.append(self._validate(context, selection, target_boundary))
         return self.update_context(context, applied=True, sides=results)
 
@@ -55,6 +70,18 @@ class LensDeformer(BaseDeformer):
             lens_before=context.mesh(lens_part).vertices.copy(),
             rim_before=context.mesh(rim_part).vertices.copy(),
         )
+
+    def _follow_rim_warp(self, context: DeformationContext, selection: LensSelection, warp):
+        lens_mesh = context.mesh(selection.lens_part)
+        before = lens_mesh.vertices.copy()
+        after = np.asarray(warp(before), dtype=np.float64)
+        lens_mesh.vertices = after
+        hull_before = self._hull_boundary(before[:, :2])
+        hull_after = self._hull_boundary(after[:, :2])
+        span_before = max(float(np.ptp(hull_before[:, 0])), 1e-6)
+        scale = float(np.ptp(hull_after[:, 0])) / span_before
+        target_boundary = hull_after[self._loop_order(hull_after)]
+        return target_boundary, scale
 
     def _extract_rim_boundary(self, context: DeformationContext, selection: LensSelection) -> np.ndarray:
         rim_mesh = context.mesh(selection.rim_part)

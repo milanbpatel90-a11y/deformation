@@ -62,14 +62,34 @@ class MeshSmoother(BaseDeformer):
         for region in target_regions:
             try:
                 mesh = context.mesh(region)
-                smoothed_count = self._smooth_mesh(mesh)
+                original = context.original_vertices.get(region)
+                smoothed_count = self._smooth_mesh(mesh, original)
                 report.smoothed_vertices += smoothed_count
+                self._sync_frame(context, region, original, mesh)
             except KeyError:
                 pass
 
         return self.update_context(context, **report.to_dict())
 
-    def _smooth_mesh(self, mesh: trimesh.Trimesh) -> int:
+    @staticmethod
+    def _sync_frame(context, region: str, original, mesh: trimesh.Trimesh) -> None:
+        """Keep the aggregate Frame's copies of this part's vertices identical to the part."""
+        if original is None or region == "Frame" or "Frame" not in context.meshes:
+            return
+        from scipy.spatial import cKDTree
+
+        frame = context.meshes["Frame"]
+        frame_orig = context.original_vertices.get("Frame")
+        if frame_orig is None or len(frame_orig) != len(frame.vertices) or len(original) != len(mesh.vertices):
+            return
+        dist, idx = cKDTree(frame_orig).query(original)
+        hit = dist < 1e-5
+        if hit.any():
+            verts = frame.vertices.copy()
+            verts[idx[hit]] = mesh.vertices[hit]
+            frame.vertices = verts
+
+    def _smooth_mesh(self, mesh: trimesh.Trimesh, original=None) -> int:
         """Apply Taubin smoothing to boundary vertices — fully vectorised."""
         vertices = mesh.vertices.copy()
         bounds = mesh.bounds
@@ -79,6 +99,10 @@ class MeshSmoother(BaseDeformer):
         # Only smooth outer 20% of bounding box (junction regions)
         dist = np.abs(vertices - center) / (extents / 2.0 + 1e-6)
         mask = np.max(dist, axis=1) > 0.8
+        if original is not None and len(original) == len(vertices):
+            # Only touch vertices a deformation stage actually moved: an unchanged template
+            # must come through untouched (smoothing open scan meshes shrinks them).
+            mask &= np.linalg.norm(vertices - original, axis=1) > 0.05
         if not np.any(mask):
             return 0
 
@@ -102,6 +126,13 @@ class MeshSmoother(BaseDeformer):
             lap = self._compute_laplacian_vectorised(vertices, mesh.vertex_neighbors, neighbor_counts)
             vertices[mask_idx] += self.mu * lap[mask_idx]
 
+        # Smoothing is cosmetic (seam polish). On open/fragmented scan meshes the umbrella
+        # Laplacian can drag vertices several mm, so cap the net motion per vertex.
+        start = mesh.vertices
+        step = vertices - start
+        norm = np.linalg.norm(step, axis=1, keepdims=True)
+        limit = 0.3
+        vertices = start + step * np.minimum(1.0, limit / np.maximum(norm, 1e-12))
         mesh.vertices = vertices
         return int(np.sum(mask))
 
