@@ -42,11 +42,12 @@ def infer_temple_hinge(
     if span < 1e-6:
         raise ValueError("Temple mesh has no measurable longitudinal extent")
 
-    # Keep the pivot close to the actual end-cap plane. A wide band (e.g. 6%)
-    # moves the pivot several millimetres into a densely tessellated temple and
-    # leaves that root segment unscaled. A 0.5% band averages nearby end-cap
-    # rows while retaining the real hinge location.
-    band = max(span * 0.005, 1e-5)
+    # The root of this GLB is a short multi-shell hinge connector, not a single
+    # flat end cap. Use a wider root band so the pivot lands near the connector's
+    # centre/rotation point instead of on its rear-most surface. This also keeps
+    # the requested temple length measured from the hinge assembly, not from an
+    # arbitrary extreme vertex.
+    band = max(span * 0.06, 1e-5)
     low_vertices = vertices[projection <= lower + band]
     high_vertices = vertices[projection >= upper - band]
     if len(low_vertices) == 0 or len(high_vertices) == 0:
