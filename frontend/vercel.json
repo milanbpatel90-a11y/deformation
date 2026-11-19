@@ -1,0 +1,33 @@
+{
+  "version": 2,
+  "rewrites": [
+    {
+      "source": "/api",
+      "destination": "https://deformation-production.up.railway.app/api"
+    },
+    {
+      "source": "/api/:path*",
+      "destination": "https://deformation-production.up.railway.app/api/:path*"
+    },
+    {
+      "source": "/login",
+      "destination": "/login.html"
+    },
+    {
+      "source": "/viewer",
+      "destination": "/viewer/index.html"
+    },
+    {
+      "source": "/viewer/",
+      "destination": "/viewer/index.html"
+    },
+    {
+      "source": "/admin",
+      "destination": "/admin.html"
+    },
+    {
+      "source": "/admin/",
+      "destination": "/admin.html"
+    }
+  ]
+}
