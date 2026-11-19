@@ -1,0 +1,292 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>User management · Defirmation</title>
+  <style>
+    :root{font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#eef0fb;background:#101226}
+    *{box-sizing:border-box}
+    body{margin:0;min-height:100vh;background:radial-gradient(ellipse at 5% 0,#252750 0,transparent 35%),#101226}
+    header{height:72px;padding:0 max(24px,calc((100vw - 1100px)/2));display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid #30334e;background:#151832}
+    .brand{font-weight:800;letter-spacing:-.03em}.brand span{color:#8be9fd}
+    a{color:#8be9fd;text-decoration:none;font-size:13px}
+    main{width:min(1100px,calc(100% - 36px));margin:38px auto 70px}
+    .heading{display:flex;justify-content:space-between;align-items:flex-end;gap:20px;margin-bottom:24px}
+    .eyebrow{margin:0 0 7px;color:#8be9fd;font-size:10px;letter-spacing:.16em;text-transform:uppercase;font-weight:800}
+    h1{margin:0;font-size:29px;letter-spacing:-.04em} .sub{color:#a6aac8;font-size:13px;margin:8px 0 0}
+    .owner{padding:7px 11px;border:1px solid #40506c;border-radius:20px;color:#a9e9fa;font-size:11px;white-space:nowrap}
+    .grid{display:grid;grid-template-columns:340px 1fr;gap:18px;align-items:start}
+    .card{padding:22px;border:1px solid #333653;border-radius:15px;background:#171931;box-shadow:0 15px 45px #0003}
+    h2{margin:0 0 8px;font-size:17px}.hint{margin:0 0 18px;color:#a6aac8;font-size:12px;line-height:1.55}
+    label{display:block;margin:14px 0 6px;color:#c8cbe0;font-size:12px;font-weight:650}
+    input,select{width:100%;height:40px;padding:0 11px;border:1px solid #3a3d5f;border-radius:8px;background:#11142b;color:#fff;font-size:13px}
+    input:focus,select:focus{outline:none;border-color:#8be9fd}
+    button{border:0;border-radius:8px;padding:10px 13px;background:#8be9fd;color:#101226;font-size:12px;font-weight:800;cursor:pointer}
+    button:disabled{opacity:.55;cursor:wait}
+    .primary{width:100%;height:43px;margin-top:18px}
+    .message{display:none;margin:13px 0 0;padding:10px;border-radius:8px;background:#351e2c;color:#ffb4c9;font-size:12px;line-height:1.5}
+    .message.ok{background:#17342f;color:#a6f4d6}
+    .table-wrap{overflow-x:auto}
+    table{width:100%;border-collapse:collapse;min-width:510px;font-size:12px}
+    th{text-align:left;color:#9096b9;font-size:10px;letter-spacing:.09em;text-transform:uppercase;padding:10px 9px;border-bottom:1px solid #383b5a}
+    td{padding:13px 9px;border-bottom:1px solid #2b2e49;vertical-align:middle}
+    .name{font-weight:750;color:#f6f7ff}.username{display:block;margin-top:4px;color:#9399bb;font-size:10px}
+    .role-select{min-width:115px}.status{font-size:10px;font-weight:800}.active{color:#91ebbd}.inactive{color:#ff9fb5}
+    .save{background:#303757;color:#dfe6ff;padding:8px 10px}.locked{color:#8be9fd;font-size:10px}
+    .empty{padding:22px;text-align:center;color:#9ca2c5}
+    .footer{margin-top:17px;color:#777e9f;font-size:11px;line-height:1.6}
+    @media(max-width:780px){.grid{grid-template-columns:1fr}.heading{align-items:flex-start;flex-direction:column}header{padding:0 18px}main{margin-top:25px}}
+  </style>
+</head>
+<body>
+  <header>
+    <div class="brand">DEFIRMATION <span>· OWNER</span></div>
+    <a href="/viewer/">← Back to 3D workspace</a>
+  </header>
+  <main>
+    <section class="heading">
+      <div>
+        <p class="eyebrow">Access control</p>
+        <h1>User management</h1>
+        <p class="sub">Create accounts and control which parts of the eyewear workspace each person can use.</p>
+      </div>
+      <div class="owner">OWNER · FULL ACCESS</div>
+    </section>
+
+    <section class="grid">
+      <form class="card" id="create-form">
+        <h2>Create a user</h2>
+        <p class="hint">Only the Owner can create or change accounts. New users cannot register themselves or grant themselves higher permissions.</p>
+        <label for="display-name">Full name</label>
+        <input id="display-name" required maxlength="80" autocomplete="name">
+        <label for="username">Username</label>
+        <input id="username" required minlength="3" maxlength="50" pattern="[A-Za-z0-9][A-Za-z0-9._-]{2,49}" autocomplete="off">
+        <label for="role">Access level</label>
+        <select id="role">
+          <option value="editor">Editor – generation + rim calibration</option>
+          <option value="operator">Operator – upload + generate models</option>
+          <option value="viewer">Viewer – view/download only</option>
+        </select>
+        <label for="password">Temporary password (12+ characters)</label>
+        <input id="password" type="password" required minlength="12" maxlength="256" autocomplete="new-password">
+        <button class="primary" id="create-button" type="submit">Create account</button>
+        <div id="create-message" class="message" role="status" aria-live="polite"></div>
+        <p class="footer">Share the username and temporary password privately. Ask each user to change their password after their first sign-in.</p>
+      </form>
+
+      <section class="card">
+        <h2>Workspace accounts</h2>
+        <p class="hint">The Owner account is protected and cannot be demoted, deactivated, or modified from this page. You can change the access level or deactivate other accounts at any time.</p>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Account</th><th>Access</th><th>Status</th><th>Manage</th></tr></thead>
+            <tbody id="users-body"><tr><td colspan="4" class="empty">Loading accounts…</td></tr></tbody>
+          </table>
+        </div>
+        <div id="list-message" class="message" role="alert"></div>
+        <p class="footer">Role permissions: Editor can use rim calibration. Operator can generate models but cannot use rim calibration. Viewer has read-only model access. All signed-in roles can use the 3D viewer.</p>
+      </section>
+    </section>
+  </main>
+
+  <script>
+    function cookie(name) {
+      const prefix = name + '=';
+      const item = document.cookie.split('; ').find(part => part.startsWith(prefix));
+      return item ? decodeURIComponent(item.slice(prefix.length)) : '';
+    }
+
+    async function api(path, options = {}) {
+      const method = (options.method || 'GET').toUpperCase();
+      const headers = new Headers(options.headers || {});
+      if (!['GET', 'HEAD', 'OPTIONS'].includes(method)) {
+        headers.set('X-CSRF-Token', cookie('defirmation_csrf'));
+      }
+      const response = await fetch(path, {
+        ...options,
+        method,
+        headers,
+        credentials: 'same-origin'
+      });
+      const data = await response.json().catch(() => ({}));
+      if (response.status === 401) {
+        window.location.replace('/login');
+        throw new Error('Your session has expired.');
+      }
+      if (!response.ok) throw new Error(data.detail || 'Request failed.');
+      return data;
+    }
+
+    function setMessage(element, message, success = false) {
+      element.textContent = message;
+      element.className = success ? 'message ok' : 'message';
+      element.style.display = 'block';
+    }
+
+    async function loadUsers() {
+      const body = document.getElementById('users-body');
+      try {
+        const data = await api('/api/admin/users');
+        body.replaceChildren();
+        if (!data.users.length) {
+          const tr = document.createElement('tr');
+          const td = document.createElement('td');
+          td.colSpan = 4;
+          td.className = 'empty';
+          td.textContent = 'No users found.';
+          tr.appendChild(td);
+          body.appendChild(tr);
+          return;
+        }
+        for (const user of data.users) {
+          const tr = document.createElement('tr');
+          const account = document.createElement('td');
+          const display = document.createElement('span');
+          display.className = 'name';
+          display.textContent = user.display_name;
+          const username = document.createElement('span');
+          username.className = 'username';
+          username.textContent = '@' + user.username;
+          account.append(display, username);
+
+          const access = document.createElement('td');
+          if (user.role === 'owner') {
+            const locked = document.createElement('span');
+            locked.className = 'locked';
+            locked.textContent = 'OWNER · LOCKED';
+            access.appendChild(locked);
+          } else {
+            const select = document.createElement('select');
+            select.className = 'role-select';
+            for (const [value, label] of [
+              ['editor', 'Editor'], ['operator', 'Operator'], ['viewer', 'Viewer']
+            ]) {
+              const option = document.createElement('option');
+              option.value = value;
+              option.textContent = label;
+              select.appendChild(option);
+            }
+            select.value = user.role;
+            access.appendChild(select);
+            tr.dataset.role = user.role;
+            tr.dataset.userId = user.id;
+            tr._roleSelect = select;
+          }
+
+          const status = document.createElement('td');
+          const statusLabel = document.createElement('span');
+          statusLabel.className = user.is_active ? 'status active' : 'status inactive';
+          statusLabel.textContent = user.is_active ? 'ACTIVE' : 'INACTIVE';
+          status.appendChild(statusLabel);
+
+          const actions = document.createElement('td');
+          if (user.role === 'owner') {
+            actions.textContent = '—';
+          } else {
+            const save = document.createElement('button');
+            save.className = 'save';
+            save.textContent = 'Save';
+            save.addEventListener('click', async () => {
+              save.disabled = true;
+              try {
+                await api('/api/admin/users/' + encodeURIComponent(user.id), {
+                  method: 'PATCH',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ role: tr._roleSelect.value })
+                });
+                await loadUsers();
+                setMessage(document.getElementById('list-message'), 'Access level updated.', true);
+              } catch (error) {
+                setMessage(document.getElementById('list-message'), error.message);
+              } finally {
+                save.disabled = false;
+              }
+            });
+            const toggle = document.createElement('button');
+            toggle.className = 'save';
+            toggle.style.marginLeft = '5px';
+            toggle.textContent = user.is_active ? 'Disable' : 'Enable';
+            toggle.addEventListener('click', async () => {
+              toggle.disabled = true;
+              try {
+                await api('/api/admin/users/' + encodeURIComponent(user.id), {
+                  method: 'PATCH',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ is_active: !user.is_active })
+                });
+                await loadUsers();
+                setMessage(document.getElementById('list-message'), user.is_active ? 'Account deactivated.' : 'Account reactivated.', true);
+              } catch (error) {
+                setMessage(document.getElementById('list-message'), error.message);
+              } finally {
+                toggle.disabled = false;
+              }
+            });
+            const reset = document.createElement('button');
+            reset.className = 'save';
+            reset.style.marginLeft = '5px';
+            reset.textContent = 'Reset PW';
+            reset.addEventListener('click', async () => {
+              const newPassword = window.prompt('Enter a new temporary password (at least 12 characters) for ' + user.username + ':');
+              if (newPassword === null) return;
+              if (newPassword.length < 12) {
+                setMessage(document.getElementById('list-message'), 'Password must contain at least 12 characters.');
+                return;
+              }
+              reset.disabled = true;
+              try {
+                await api('/api/admin/users/' + encodeURIComponent(user.id), {
+                  method: 'PATCH',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ password: newPassword })
+                });
+                setMessage(document.getElementById('list-message'), 'Password reset. Share the new temporary password privately.', true);
+              } catch (error) {
+                setMessage(document.getElementById('list-message'), error.message);
+              } finally {
+                reset.disabled = false;
+              }
+            });
+            actions.append(save, toggle, reset);
+          }
+
+          tr.append(account, access, status, actions);
+          body.appendChild(tr);
+        }
+      } catch (error) {
+        setMessage(document.getElementById('list-message'), error.message);
+      }
+    }
+
+    document.getElementById('create-form').addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const button = document.getElementById('create-button');
+      button.disabled = true;
+      const message = document.getElementById('create-message');
+      try {
+        const data = await api('/api/admin/users', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            display_name: document.getElementById('display-name').value,
+            username: document.getElementById('username').value,
+            role: document.getElementById('role').value,
+            password: document.getElementById('password').value
+          })
+        });
+        event.target.reset();
+        setMessage(message, 'Account created for ' + data.user.username + '.', true);
+        await loadUsers();
+      } catch (error) {
+        setMessage(message, error.message);
+      } finally {
+        button.disabled = false;
+      }
+    });
+
+    loadUsers();
+  </script>
+</body>
+</html>
