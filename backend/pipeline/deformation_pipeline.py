@@ -221,6 +221,7 @@ class DeformationPipeline:
         # Try to load descriptor, fall back to simple deformation if template not properly prepared
         try:
             descriptor = self.descriptor_loader.load(template_name, measurements=measurements, template_info=template_info)
+            self._inject_aliases_into_scene(scene, descriptor)
             ctx = DeformationContext(
                 template_info=template_info,
                 template_scene=scene,
