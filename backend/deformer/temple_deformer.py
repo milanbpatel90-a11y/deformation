@@ -1,4 +1,4 @@
-"""Hinge-driven temple deformation for length, wrap, ear bend, and thickness."""
+"""Hinge-driven temple deformation for length, wrap, and ear bend."""
 
 from __future__ import annotations
 
@@ -42,9 +42,8 @@ class TempleDeformer(BaseDeformer):
         for side in ("left", "right"):
             selection = self._collect_temples(context, side)
             target = self._compute_target(context, selection)
-            self._rotate_about_hinge(context, selection, target)
-            self._extend_length(context, selection, target)
             self._apply_wrap(context, selection, target)
+            self._extend_length(context, selection, target)
             self._apply_ear_bend(context, selection, target)
             self._preserve_symmetry(context, selection)
             results.append(self._validate_constraints(context, selection, target))
@@ -117,17 +116,21 @@ class TempleDeformer(BaseDeformer):
             mesh.vertices = vertices * (1.0 - weights[:, None]) + rotated * weights[:, None]
 
     def _extend_length(self, context: DeformationContext, selection: TempleSelection, target: dict[str, Any]) -> None:
-        # The measured GLB geometry is authoritative. Metadata describes the
-        # intended template size, but may be stale or disagree with the mesh.
-        length_scale = target["target_length"] / max(target["current_length"], 1e-6)
+        # Measure after wrap, since wrap may rotate the arm away from its
+        # template axis. Scale against the current mesh, never stale metadata.
+        temple_mesh = context.mesh(selection.temple_part)
+        axis = self._axis_from_vertices(temple_mesh.vertices, selection.hinge_pivot, selection.axis)
+        current_length = self._temple_length(temple_mesh.vertices, selection.hinge_pivot, axis)
+        length_scale = target["target_length"] / max(current_length, 1e-6)
+
         for part in filter(None, [selection.temple_part, selection.tip_part]):
             mesh = context.mesh(part)
             vertices = mesh.vertices.copy()
-            axial = np.dot(vertices - selection.hinge_pivot, selection.axis)
+            axial = np.dot(vertices - selection.hinge_pivot, axis)
             positive = np.maximum(axial, 0.0)
-            weights = self._progress_along_axis(vertices, selection.hinge_pivot, selection.axis)
+            weights = self._progress_along_axis(vertices, selection.hinge_pivot, axis)
             extension = positive * (length_scale - 1.0) * weights
-            vertices += selection.axis * extension[:, None]
+            vertices += axis * extension[:, None]
             mesh.vertices = vertices
 
     def _apply_wrap(self, context: DeformationContext, selection: TempleSelection, target: dict[str, Any]) -> None:
@@ -148,30 +151,32 @@ class TempleDeformer(BaseDeformer):
             return
 
         # Bend the final 40% of the arm about a cross-section axis. Never scale
-        # global Z here: Z may be the temple's longitudinal axis in this GLB.
+        # a global coordinate: any axis may be the temple's longitudinal axis.
+        temple_mesh = context.mesh(selection.temple_part)
+        axis = self._axis_from_vertices(temple_mesh.vertices, selection.hinge_pivot, selection.axis)
         down = np.array([0.0, -1.0, 0.0], dtype=np.float64)
-        down -= float(np.dot(down, selection.axis)) * selection.axis
+        down -= float(np.dot(down, axis)) * axis
         down_norm = float(np.linalg.norm(down))
         if down_norm < 1e-8:
             down = np.array([0.0, 0.0, -1.0], dtype=np.float64)
-            down -= float(np.dot(down, selection.axis)) * selection.axis
+            down -= float(np.dot(down, axis)) * axis
             down_norm = float(np.linalg.norm(down))
         if down_norm < 1e-8:
             return
         down /= down_norm
 
-        bend_axis = np.cross(selection.axis, down)
+        bend_axis = np.cross(axis, down)
         bend_axis /= max(float(np.linalg.norm(bend_axis)), 1e-9)
         rotation = Rotation.from_rotvec(bend_axis * np.deg2rad(angle))
 
         for part in filter(None, [selection.temple_part, selection.tip_part]):
             mesh = context.mesh(part)
             vertices = mesh.vertices.copy()
-            axial = np.dot(vertices - selection.hinge_pivot, selection.axis)
+            axial = np.dot(vertices - selection.hinge_pivot, axis)
             max_axial = max(float(np.maximum(axial, 0.0).max()), 1e-6)
             progress = np.clip(np.maximum(axial, 0.0) / max_axial, 0.0, 1.0)
             bend_zone = self.apply_falloff(np.clip((progress - 0.6) / 0.4, 0.0, 1.0))
-            bend_origin = selection.hinge_pivot + selection.axis * (max_axial * 0.6)
+            bend_origin = selection.hinge_pivot + axis * (max_axial * 0.6)
             rotated = np.array([
                 bend_origin + rotation.apply(vertex - bend_origin)
                 for vertex in vertices
@@ -196,7 +201,8 @@ class TempleDeformer(BaseDeformer):
 
     def _validate_constraints(self, context: DeformationContext, selection: TempleSelection, target: dict[str, Any]) -> dict[str, Any]:
         temple_after = context.mesh(selection.temple_part).vertices.copy()
-        final_length = self._temple_length(temple_after, selection.hinge_pivot, selection.axis)
+        final_axis = self._axis_from_vertices(temple_after, selection.hinge_pivot, selection.axis)
+        final_length = self._temple_length(temple_after, selection.hinge_pivot, final_axis)
         hinge_error = self._hinge_anchor_error(selection.temple_before, temple_after, selection.hinge_pivot)
         frame_bounds = context.mesh("Frame").bounds
         temple_bounds = context.mesh(selection.temple_part).bounds
@@ -232,6 +238,23 @@ class TempleDeformer(BaseDeformer):
         positive = np.maximum(axial, 0.0)
         max_positive = max(float(positive.max()), 1e-6)
         return BaseDeformer.apply_falloff(np.clip(positive / max_positive, 0.0, 1.0))
+
+    @staticmethod
+    def _axis_from_vertices(vertices: np.ndarray, pivot: np.ndarray, fallback: np.ndarray) -> np.ndarray:
+        """Fit the current longitudinal axis and orient it outward from the hinge."""
+        centred = np.asarray(vertices, dtype=np.float64) - np.mean(vertices, axis=0)
+        if len(centred) < 3:
+            return fallback.astype(np.float64)
+        covariance = centred.T @ centred / max(len(centred) - 1, 1)
+        eigenvalues, eigenvectors = np.linalg.eigh(covariance)
+        axis = eigenvectors[:, int(np.argmax(eigenvalues))]
+        norm = float(np.linalg.norm(axis))
+        if norm < 1e-9:
+            return fallback.astype(np.float64)
+        axis = axis / norm
+        if float(np.dot(np.mean(vertices, axis=0) - pivot, axis)) < 0:
+            axis = -axis
+        return axis
 
     @staticmethod
     def _temple_length(vertices: np.ndarray, pivot: np.ndarray, axis: np.ndarray) -> float:
