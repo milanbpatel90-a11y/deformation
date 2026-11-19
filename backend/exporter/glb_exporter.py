@@ -9,6 +9,7 @@ import numpy as np
 import trimesh
 
 from backend.models import ExportMetadata, Measurements
+from backend.deformer.temple_geometry import infer_temple_hinge
 
 
 # Standard VTO anchor points (nose bridge, temple hinges)
@@ -48,8 +49,9 @@ class GLBExporter:
     def _compute_anchors(
         self, scene: trimesh.Scene, measurements: Measurements
     ) -> dict[str, list[float]]:
-        """Compute VTO attachment points from deformed geometry."""
+        """Compute nose and hinge anchors from the final, deformed geometry."""
         bridge = scene.geometry.get("Bridge") or scene.geometry.get("Frame")
+        frame = scene.geometry.get("Frame")
         left_temple = scene.geometry.get("LeftTemple")
         right_temple = scene.geometry.get("RightTemple")
 
@@ -59,12 +61,12 @@ class GLBExporter:
             nose = np.array([0.0, 0.0, 0.0])
 
         left_hinge = (
-            left_temple.vertices[left_temple.vertices[:, 0].argmin()]
+            infer_temple_hinge(left_temple, frame, "left")[0]
             if left_temple is not None and len(left_temple.vertices) > 0
             else np.array([-measurements.frame_width / 2, 0.0, 0.0])
         )
         right_hinge = (
-            right_temple.vertices[right_temple.vertices[:, 0].argmax()]
+            infer_temple_hinge(right_temple, frame, "right")[0]
             if right_temple is not None and len(right_temple.vertices) > 0
             else np.array([measurements.frame_width / 2, 0.0, 0.0])
         )
