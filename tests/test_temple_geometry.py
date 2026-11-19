@@ -16,54 +16,59 @@ class _MeshContext:
 
 
 class TempleGeometryTests(unittest.TestCase):
-    def _z_axis_temple(self, side):
-        """Build a multi-row temple similar to the uploaded GLB's geometry."""
-        x = -57.45 if side == "left" else 57.45
-        z_start = -14.187
-        z_end = 157.323
-
-        # Dense rows at the hinge end emulate a real tessellated temple. This
-        # catches pivot estimators that average a large 6%-length band.
-        offsets = [0.0, 0.15, 0.35, 0.60, 0.90, 1.20]
-        offsets.extend(np.linspace(3.0, z_end - z_start, 54).tolist())
-        offsets = sorted(set(float(v) for v in offsets if v <= z_end - z_start))
-
+    def _temple_with_hinge_assembly(self, side):
+        """Make a temple with a multi-shell hinge, main arm, and ear tip."""
+        x0 = -57.8 if side == "left" else 57.8
         vertices = []
-        for offset in offsets:
-            z = z_start + offset
-            y = -1.50 - 0.071 * offset
-            for angle in np.linspace(0.0, 2.0 * np.pi, 24, endpoint=False):
-                vertices.append([
-                    x + 1.30 * np.cos(angle),
-                    y + 7.37 * np.sin(angle),
-                    z,
-                ])
+
+        # Hinge connector: the pivot should sit near the centre of this short
+        # assembly, not on its back-most end-cap.
+        for z in np.linspace(-14.187, -7.436, 10):
+            y = -1.3 - 0.02 * (z + 11.0)
+            for angle in np.linspace(0.0, 2.0 * np.pi, 16, endpoint=False):
+                vertices.append([x0 + 1.1 * np.cos(angle), y + 1.25 * np.sin(angle), z])
+
+        # Main temple arm, extending away from the hinge.
+        for z in np.linspace(-7.484, 98.87, 12):
+            y = -1.3 - 0.02 * (z + 7.4)
+            for x_offset, y_offset in (
+                (-0.8, -0.8), (0.8, -0.8), (0.8, 0.8), (-0.8, 0.8),
+                (-0.5, 0.0), (0.5, 0.0), (0.0, -0.5), (0.0, 0.5),
+            ):
+                vertices.append([x0 + x_offset, y + y_offset, z])
+
+        # Ear tip: the final section bends down progressively.
+        for z in np.linspace(98.379, 157.323, 8):
+            progress = (z - 98.379) / (157.323 - 98.379)
+            y = -3.0 - 10.0 * progress
+            for x_offset, y_offset in ((-0.8, -1.0), (0.8, -1.0), (0.8, 1.0), (-0.8, 1.0)):
+                vertices.append([x0 + x_offset, y + y_offset, z])
 
         temple = trimesh.Trimesh(vertices=np.asarray(vertices), faces=[], process=False)
         frame = trimesh.creation.box(extents=[123.7, 54.6, 5.2])
         return temple, frame
 
-    def test_hinge_inference_uses_long_axis_and_frame_proximity_for_both_sides(self):
+    def test_hinge_inference_uses_long_axis_and_connector_centre_for_both_sides(self):
         for side in ("left", "right"):
             with self.subTest(side=side):
-                temple, frame = self._z_axis_temple(side)
+                temple, frame = self._temple_with_hinge_assembly(side)
                 pivot, axis = infer_temple_hinge(temple, frame, side)
 
                 self.assertGreater(abs(float(axis[2])), 0.99)
                 self.assertGreater(float(axis[2]), 0.0)
-                expected_x = -57.45 if side == "left" else 57.45
+                expected_x = -57.8 if side == "left" else 57.8
                 self.assertAlmostEqual(float(pivot[0]), expected_x, delta=0.2)
-                self.assertAlmostEqual(float(pivot[1]), -1.50, delta=0.35)
-                self.assertAlmostEqual(float(pivot[2]), -14.187, delta=0.45)
+                self.assertAlmostEqual(float(pivot[1]), -1.3, delta=0.3)
+                self.assertAlmostEqual(float(pivot[2]), -10.4, delta=0.8)
 
     def test_wrap_and_length_change_preserve_hinge_and_target_150_units(self):
         for side in ("left", "right"):
             with self.subTest(side=side):
-                temple, frame = self._z_axis_temple(side)
+                temple, frame = self._temple_with_hinge_assembly(side)
                 pivot, axis = infer_temple_hinge(temple, frame, side)
                 before = temple.vertices.copy()
                 initial_length = TempleDeformer._temple_length(before, pivot, axis)
-                self.assertGreater(initial_length, 170.0)
+                self.assertGreater(initial_length, 165.0)
 
                 selection = TempleSelection(
                     side=side,
