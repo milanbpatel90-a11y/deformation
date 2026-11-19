@@ -100,21 +100,6 @@ class TempleDeformer(BaseDeformer):
             "length_clamped": not np.isclose(requested_length, target_length),
         }
 
-    def _rotate_about_hinge(self, context: DeformationContext, selection: TempleSelection, target: dict[str, Any]) -> None:
-        sign = -1.0 if selection.side == "left" else 1.0
-        base_angle = sign * min(target["wrap_angle"] * 0.35, self.max_wrap_angle * 0.35)
-        rotation = Rotation.from_rotvec(selection.wrap_axis * np.deg2rad(base_angle))
-
-        for part in filter(None, [selection.temple_part, selection.tip_part]):
-            mesh = context.mesh(part)
-            vertices = mesh.vertices.copy()
-            weights = self._progress_along_axis(vertices, selection.hinge_pivot, selection.axis)
-            rotated = np.array([
-                selection.hinge_pivot + rotation.apply(vertex - selection.hinge_pivot)
-                for vertex in vertices
-            ])
-            mesh.vertices = vertices * (1.0 - weights[:, None]) + rotated * weights[:, None]
-
     def _extend_length(self, context: DeformationContext, selection: TempleSelection, target: dict[str, Any]) -> None:
         # Measure after wrap, since wrap may rotate the arm away from its
         # template axis. Scale against the current mesh, never stale metadata.
