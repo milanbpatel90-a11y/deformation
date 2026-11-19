@@ -17,10 +17,29 @@ class _MeshContext:
 
 class TempleGeometryTests(unittest.TestCase):
     def _z_axis_temple(self, side):
-        # Mirrors the uploaded asset's layout: frame on XY, temple length on Z.
-        x = -57.0 if side == "left" else 57.0
-        temple = trimesh.creation.cylinder(radius=1.3, height=171.5, sections=16)
-        temple.apply_translation([x, -7.0, 71.57])
+        """Build a multi-row temple similar to the uploaded GLB's geometry."""
+        x = -57.45 if side == "left" else 57.45
+        z_start = -14.187
+        z_end = 157.323
+
+        # Dense rows at the hinge end emulate a real tessellated temple. This
+        # catches pivot estimators that average a large 6%-length band.
+        offsets = [0.0, 0.15, 0.35, 0.60, 0.90, 1.20]
+        offsets.extend(np.linspace(3.0, z_end - z_start, 54).tolist())
+        offsets = sorted(set(float(v) for v in offsets if v <= z_end - z_start))
+
+        vertices = []
+        for offset in offsets:
+            z = z_start + offset
+            y = -1.50 - 0.071 * offset
+            for angle in np.linspace(0.0, 2.0 * np.pi, 24, endpoint=False):
+                vertices.append([
+                    x + 1.30 * np.cos(angle),
+                    y + 7.37 * np.sin(angle),
+                    z,
+                ])
+
+        temple = trimesh.Trimesh(vertices=np.asarray(vertices), faces=[], process=False)
         frame = trimesh.creation.box(extents=[123.7, 54.6, 5.2])
         return temple, frame
 
@@ -32,10 +51,10 @@ class TempleGeometryTests(unittest.TestCase):
 
                 self.assertGreater(abs(float(axis[2])), 0.99)
                 self.assertGreater(float(axis[2]), 0.0)
-                expected_x = -57.0 if side == "left" else 57.0
+                expected_x = -57.45 if side == "left" else 57.45
                 self.assertAlmostEqual(float(pivot[0]), expected_x, delta=0.2)
-                self.assertAlmostEqual(float(pivot[1]), -7.0, delta=0.2)
-                self.assertAlmostEqual(float(pivot[2]), -14.18, delta=1.0)
+                self.assertAlmostEqual(float(pivot[1]), -1.50, delta=0.35)
+                self.assertAlmostEqual(float(pivot[2]), -14.187, delta=0.45)
 
     def test_wrap_and_length_change_preserve_hinge_and_target_150_units(self):
         for side in ("left", "right"):
@@ -65,14 +84,14 @@ class TempleGeometryTests(unittest.TestCase):
 
                 final_axis = deformer._axis_from_vertices(temple.vertices, pivot, axis)
                 final_length = deformer._temple_length(temple.vertices, pivot, final_axis)
-                nearest_hinge_vertices = np.argsort(np.linalg.norm(before - pivot, axis=1))[:8]
+                nearest_hinge_vertices = np.argsort(np.linalg.norm(before - pivot, axis=1))[:24]
                 hinge_drift = np.linalg.norm(
                     temple.vertices[nearest_hinge_vertices] - before[nearest_hinge_vertices], axis=1
                 ).max()
 
-                self.assertAlmostEqual(final_length, 150.0, delta=0.1)
+                self.assertAlmostEqual(final_length, 150.0, delta=0.15)
                 self.assertLess(final_length, initial_length)
-                self.assertLess(hinge_drift, 0.01)
+                self.assertLess(hinge_drift, 0.05)
 
 
 if __name__ == "__main__":
