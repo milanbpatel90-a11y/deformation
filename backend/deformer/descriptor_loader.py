@@ -264,11 +264,14 @@ class DescriptorLoader:
                 if pivot.shape != (3,) or not np.isfinite(pivot).all():
                     raise ValueError(f"Descriptor hinge pivot for '{side}' must be a finite 3D vector")
 
-            inferred_pivot, inferred_axis = infer_temple_hinge(geom, frame_mesh, side)
-            if pivot is None:
-                pivot = inferred_pivot
-
             axis_payload = payload.get("axis")
+            if pivot is None or axis_payload is None:
+                inferred_pivot, inferred_axis = infer_temple_hinge(geom, frame_mesh, side)
+                if pivot is None:
+                    pivot = inferred_pivot
+            else:
+                inferred_axis = np.asarray(axis_payload, dtype=np.float64)
+
             axis = np.asarray(axis_payload, dtype=np.float64) if axis_payload is not None else inferred_axis
             if axis.shape != (3,) or not np.isfinite(axis).all():
                 raise ValueError(f"Descriptor hinge axis for '{side}' must be a finite 3D vector")
