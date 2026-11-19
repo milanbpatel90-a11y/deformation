@@ -10,6 +10,8 @@ from typing import Any
 import numpy as np
 import trimesh
 
+from backend.deformer.temple_geometry import infer_temple_hinge
+
 from backend.models import Measurements, TemplateDimensions, TemplateInfo
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -123,9 +125,7 @@ class DescriptorLoader:
         self._validate_payload(payload, resolved_descriptor)
 
         scene = trimesh.load(resolved_template, force="scene")
-        raw_geometry = {
-            name: mesh for name, mesh in scene.geometry.items() if isinstance(mesh, trimesh.Trimesh) and len(mesh.vertices) > 0
-        }
+        raw_geometry = self._world_geometry(scene)
         if not raw_geometry:
             raise ValueError(f"No mesh geometry found in template scene: {resolved_template}")
 
@@ -176,6 +176,25 @@ class DescriptorLoader:
             deformation_regions=dict(payload.get("deformation_regions", {})),
             raw=payload,
         )
+
+    @staticmethod
+    def _world_geometry(scene: trimesh.Scene) -> dict[str, trimesh.Trimesh]:
+        """Return independent mesh copies with each GLB node transform baked in."""
+        transforms: dict[str, list[np.ndarray]] = {}
+        for node_name in scene.graph.nodes_geometry:
+            transform, geometry_name = scene.graph[node_name]
+            transforms.setdefault(geometry_name, []).append(np.asarray(transform, dtype=np.float64))
+
+        result: dict[str, trimesh.Trimesh] = {}
+        for name, mesh in scene.geometry.items():
+            if not isinstance(mesh, trimesh.Trimesh) or len(mesh.vertices) == 0:
+                continue
+            world_mesh = mesh.copy()
+            node_transforms = transforms.get(name, [])
+            if node_transforms and not np.allclose(node_transforms[0], np.eye(4)):
+                world_mesh.apply_transform(node_transforms[0])
+            result[name] = world_mesh
+        return result
 
     def _resolve_template_path(self, template_name: str, template_info: TemplateInfo | None) -> Path:
         if template_info is not None:
@@ -230,20 +249,37 @@ class DescriptorLoader:
         empty_anchors: dict[str, np.ndarray],
     ) -> dict[str, HingeDescriptor]:
         hinges: dict[str, HingeDescriptor] = {}
+        frame_mesh = geometry.get("Frame")
         for side in ("left", "right"):
             payload = hinge_payload.get(side)
             if not isinstance(payload, dict):
                 raise ValueError(f"Descriptor hinge entry missing for side '{side}'")
             part = str(payload.get("part") or ("LeftTemple" if side == "left" else "RightTemple"))
             geom = self._get_geometry(geometry, part, f"hinge:{side}")
+
             empty_name = payload.get("empty")
             pivot = empty_anchors.get(str(empty_name)) if empty_name else None
+            if pivot is None and payload.get("pivot") is not None:
+                pivot = np.asarray(payload["pivot"], dtype=np.float64)
+                if pivot.shape != (3,) or not np.isfinite(pivot).all():
+                    raise ValueError(f"Descriptor hinge pivot for '{side}' must be a finite 3D vector")
+
+            inferred_pivot, inferred_axis = infer_temple_hinge(geom, frame_mesh, side)
             if pivot is None:
-                pivot = self._infer_hinge_pivot(geom, side)
-            axis = self._infer_temple_axis(geom, pivot, side)
+                pivot = inferred_pivot
+
+            axis_payload = payload.get("axis")
+            axis = np.asarray(axis_payload, dtype=np.float64) if axis_payload is not None else inferred_axis
+            if axis.shape != (3,) or not np.isfinite(axis).all():
+                raise ValueError(f"Descriptor hinge axis for '{side}' must be a finite 3D vector")
+            axis_norm = float(np.linalg.norm(axis))
+            if axis_norm < 1e-8:
+                raise ValueError(f"Descriptor hinge axis for '{side}' cannot be zero")
+            axis = axis / axis_norm
+
             hinges[side] = HingeDescriptor(
                 part=part,
-                pivot=pivot,
+                pivot=np.asarray(pivot, dtype=np.float64),
                 axis=axis,
                 confidence=float(payload.get("confidence", 1.0)),
             )
@@ -547,25 +583,20 @@ class DescriptorLoader:
         return geom
 
     @staticmethod
-    def _infer_hinge_pivot(mesh: trimesh.Trimesh, side: str) -> np.ndarray:
-        bounds = mesh.bounds
-        center = mesh.vertices.mean(axis=0)
-        pivot_x = bounds[1][0] if side == "left" else bounds[0][0]
-        return np.array([pivot_x, center[1], center[2]], dtype=np.float64)
+    def _infer_hinge_pivot(
+        mesh: trimesh.Trimesh, side: str, frame_mesh: trimesh.Trimesh | None = None
+    ) -> np.ndarray:
+        """Compatibility wrapper using principal-axis/frame-proximity inference."""
+        return infer_temple_hinge(mesh, frame_mesh, side)[0]
 
     @staticmethod
     def _infer_temple_axis(mesh: trimesh.Trimesh, pivot: np.ndarray, side: str) -> np.ndarray:
-        verts = mesh.vertices.astype(np.float64)
-        if side == "left":
-            candidates = verts[np.argsort(verts[:, 0])[: max(3, len(verts) // 10)]]
-        else:
-            candidates = verts[np.argsort(verts[:, 0])[-max(3, len(verts) // 10) :]]
-        direction = candidates.mean(axis=0) - pivot
-        norm = float(np.linalg.norm(direction))
-        if norm < 1e-6:
-            direction = np.array([-1.0, 0.0, 0.0] if side == "left" else [1.0, 0.0, 0.0], dtype=np.float64)
-            norm = 1.0
-        return direction / norm
+        """Infer the long axis and orient it away from the supplied hinge pivot."""
+        _, axis = infer_temple_hinge(mesh, None, side)
+        vertices = np.asarray(mesh.vertices, dtype=np.float64)
+        if float(np.dot(vertices.mean(axis=0) - pivot, axis)) < 0:
+            axis = -axis
+        return axis
 
     @staticmethod
     def _fit_plane_normal(vertices: np.ndarray) -> np.ndarray:
