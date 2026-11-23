@@ -209,6 +209,7 @@ class DeformationPipeline:
         measurements: Measurements,
         output_path: Path | str,
         template_name: str | None = None,
+        strict_validation: bool = False,
     ) -> dict:
         style = self._style_from_measurements(measurements)
         features = self.feature_extractor.from_measurements(measurements, style)
@@ -232,6 +233,10 @@ class DeformationPipeline:
             deformed_ctx, quality = deformer.deform(ctx)
             deformed = deformed_ctx.template_scene
         except (ValueError, KeyError) as e:
+            if strict_validation:
+                raise RuntimeError(
+                    f"Strict deformation rejected template {template_name}: descriptor/deformation failed: {e}"
+                ) from e
             # Fallback when the template has no usable descriptor. There is no
             # separate "simple" deformer left in this codebase -- MeshDeformer
             # is the only deformer, and its .deform() requires a

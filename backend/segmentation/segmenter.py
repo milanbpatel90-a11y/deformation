@@ -18,6 +18,7 @@ _PROJECT_ROOT = Path(__file__).resolve().parents[2]
 _MODEL_EXTENSIONS = {".pt", ".pth", ".onnx", ".engine", ".xml", ".mlpackage", ".tflite"}
 _CANDIDATE_PATHS = [
     os.environ.get("DEFIRM_YOLO_MODEL"),
+    _PROJECT_ROOT / "models" / "best.pt",
     _PROJECT_ROOT / "models" / "glasses_seg.pt",
     _PROJECT_ROOT / "yolov8n-seg.pt",
     _PROJECT_ROOT / "runs" / "segment" / "train" / "weights" / "best.pt",
@@ -64,6 +65,45 @@ class GlassesSegmenter:
         if self._model is not None:
             return self._segment_yolo(image)
         return self._segment_opencv(image)
+
+
+    def segment_detailed(self, image: np.ndarray) -> dict:
+        """Return per-class instance masks and confidences for video extraction.
+
+        Class IDs are fixed to the repository eyewear dataset:
+        0 rim, 1 temple, 2 bridge, 3 left_lens, 4 right_lens, 5 nose_pad.
+        The legacy segment() method remains unchanged for existing callers.
+        """
+        if image is None or image.size == 0 or image.ndim != 3:
+            raise ValueError("segment_detailed expects a non-empty BGR image.")
+        if self._model is None:
+            return {"model_type": self.model_type, "masks": {}, "detections": [], "semantic_model_available": False}
+        names = {0: "rim", 1: "temple", 2: "bridge", 3: "left_lens", 4: "right_lens", 5: "nose_pad"}
+        height, width = image.shape[:2]
+        masks: dict[str, np.ndarray] = {}
+        detections: list[dict] = []
+        for result in self._model(image, verbose=False):
+            if result.masks is None or result.boxes is None:
+                continue
+            for index, box in enumerate(result.boxes):
+                class_id = int(box.cls[0].item())
+                class_name = names.get(class_id)
+                if class_name is None or index >= len(result.masks.data):
+                    continue
+                confidence = float(box.conf[0].item())
+                coords = box.xyxy[0].detach().cpu().numpy().tolist()
+                x1, y1, x2, y2 = [int(round(v)) for v in coords]
+                raw = result.masks.data[index].detach().cpu().numpy().astype(np.float32)
+                resized = cv2.resize(raw, (width, height), interpolation=cv2.INTER_LINEAR)
+                binary = (resized > 0.5).astype(np.uint8) * 255
+                if not binary.any():
+                    continue
+                masks[class_name] = cv2.bitwise_or(masks[class_name], binary) if class_name in masks else binary
+                detections.append({
+                    "class_id": class_id, "class_name": class_name, "confidence": confidence,
+                    "bbox": [max(0, x1), max(0, y1), min(width, x2), min(height, y2)],
+                })
+        return {"model_type": self.model_type, "masks": masks, "detections": detections, "semantic_model_available": True}
 
     def _segment_yolo(self, image: np.ndarray) -> dict[str, np.ndarray]:
         results = self._model(image, verbose=False)
