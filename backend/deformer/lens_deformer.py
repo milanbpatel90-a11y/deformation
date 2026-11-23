@@ -7,7 +7,7 @@ from typing import Any
 
 import numpy as np
 from scipy import interpolate
-from scipy.spatial import ConvexHull, QhullError
+from scipy.spatial import ConvexHull, QhullError, cKDTree
 
 from backend.deformer.base_deformer import BaseDeformer
 from backend.deformer.deformation_context import DeformationContext
@@ -110,27 +110,62 @@ class LensDeformer(BaseDeformer):
         front_idx = self._surface_indices(vertices, front=True)
         back_idx = self._surface_indices(vertices, front=False)
 
-        front_xy = vertices[front_idx][:, :2]
-        back_xy = vertices[back_idx][:, :2]
-
-        hull_xy = self._hull_boundary(front_xy)
-        hull_order = self._loop_order(hull_xy)
-        ordered_hull = hull_xy[hull_order]
-
-        resampled_target = self._resample_boundary(target_boundary, len(ordered_hull))
-        resampled_target = self._align_boundary(ordered_hull, resampled_target)
-
-        hull_center = ordered_hull.mean(axis=0)
-        target_center = resampled_target.mean(axis=0)
-        hull_radius = float(np.linalg.norm(ordered_hull - hull_center, axis=1).mean())
-        target_radius = float(np.linalg.norm(resampled_target - target_center, axis=1).mean())
-        scale = target_radius / max(hull_radius, 1e-6)
-
-        warp = self._tps_warp(ordered_hull, resampled_target)
-        vertices[front_idx, :2] = warp(front_xy)
-        vertices[back_idx, :2] = warp(back_xy)
+        # Use one bounded radial mapping for front, back, and side vertices.
+        # Unlike a front-only thin-plate spline, every ray is scaled only
+        # between the source and target boundaries, so filled-lens interiors
+        # cannot shoot outside the rim or collapse onto a plane.
+        hull_xy = self._hull_boundary(vertices[:, :2])
+        source_boundary = hull_xy[self._loop_order(hull_xy)]
+        source_center = source_boundary.mean(axis=0)
+        target_center = target_boundary.mean(axis=0)
+        relative = vertices[:, :2] - source_center
+        source_radius = self._boundary_radii(source_boundary, source_center, relative)
+        target_radius = self._boundary_radii(target_boundary, target_center, relative)
+        ratio = np.clip(target_radius / np.maximum(source_radius, 1e-9), 0.05, 20.0)
+        vertices[:, :2] = target_center + relative * ratio[:, None]
         lens_mesh.vertices = vertices
-        return scale
+
+        boundary_relative = source_boundary - source_center
+        boundary_source_radius = self._boundary_radii(source_boundary, source_center, boundary_relative)
+        boundary_target_radius = self._boundary_radii(target_boundary, target_center, boundary_relative)
+        return float(np.median(boundary_target_radius / np.maximum(boundary_source_radius, 1e-9)))
+
+    @staticmethod
+    def _boundary_radii(
+        boundary: np.ndarray, center: np.ndarray, relative: np.ndarray
+    ) -> np.ndarray:
+        """Return ray/loop intersections for vectors expressed from ``center``."""
+        directions = np.asarray(relative, dtype=np.float64).copy()
+        lengths = np.linalg.norm(directions, axis=1)
+        nonzero = lengths > 1e-12
+        directions[nonzero] /= lengths[nonzero, None]
+        radii = np.full(len(directions), np.inf, dtype=np.float64)
+
+        for start, end in zip(boundary, np.roll(boundary, -1, axis=0)):
+            offset = start - center
+            segment = end - start
+            denominator = directions[:, 0] * segment[1] - directions[:, 1] * segment[0]
+            valid = np.abs(denominator) > 1e-12
+            safe_denominator = np.where(valid, denominator, 1.0)
+            distance = (
+                offset[0] * segment[1] - offset[1] * segment[0]
+            ) / safe_denominator
+            segment_fraction = (
+                offset[0] * directions[:, 1] - offset[1] * directions[:, 0]
+            ) / safe_denominator
+            hits = (
+                valid
+                & (distance > 1e-9)
+                & (segment_fraction >= -1e-9)
+                & (segment_fraction <= 1.0 + 1e-9)
+            )
+            radii[hits] = np.minimum(radii[hits], distance[hits])
+
+        missing = ~np.isfinite(radii)
+        if np.any(missing):
+            raise ValueError("Lens boundary is not star-shaped around its center")
+        radii[~nonzero] = 1.0
+        return radii
 
     @staticmethod
     def _tps_warp(source_points: np.ndarray, target_points: np.ndarray):
@@ -222,15 +257,21 @@ class LensDeformer(BaseDeformer):
         rim_vertices = rim_mesh.vertices.copy()
         front_idx = self._surface_indices(lens_vertices, front=True)
         back_idx = self._surface_indices(lens_vertices, front=False)
-        # Use the outer hull, not every front vertex, for the same reason as
-        # _fit_lens_to_rim: a solid/filled lens has interior vertices whose mean
-        # distance-from-center is not the lens's actual radius, which previously
-        # made "inside_rim" compare the wrong quantity against the rim boundary.
-        front_hull = self._hull_boundary(lens_vertices[front_idx][:, :2])
-        lens_boundary = front_hull[self._loop_order(front_hull)]
-        fitted_target = self._resample_boundary(target_boundary, len(lens_boundary))
-        fitted_target = self._align_boundary(lens_boundary, fitted_target)
-        fit_error = float(np.mean(np.linalg.norm(lens_boundary - fitted_target, axis=1)))
+        # Validate the complete solid silhouette (front, back, and edge
+        # vertices). On a curved lens the optical front surface does not
+        # contain every silhouette extreme, so a front-only hull reports a
+        # smaller boundary than the physical lens even when the fit is exact.
+        lens_hull = self._hull_boundary(lens_vertices[:, :2])
+        lens_boundary = lens_hull[self._loop_order(lens_hull)]
+        # Compare geometry, not cyclic vertex indices. Independently tessellated
+        # loops can describe the same outline with different start points and
+        # sample density; index-aligned distances falsely report several mm of
+        # error for that case. Symmetric Chamfer distance is start/order
+        # invariant and penalizes both missing and excess lens coverage.
+        lens_to_target = cKDTree(target_boundary).query(lens_boundary, k=1)[0]
+        target_to_lens = cKDTree(lens_boundary).query(target_boundary, k=1)[0]
+        fit_error = float(0.5 * (lens_to_target.mean() + target_to_lens.mean()))
+        max_fit_error = float(max(lens_to_target.max(), target_to_lens.max()))
         rim_front = rim_vertices[self._surface_indices(rim_vertices, front=True)][:, :2]
         rim_boundary = self._hull_boundary(rim_front)
         rim_center = rim_boundary.mean(axis=0)
@@ -250,6 +291,7 @@ class LensDeformer(BaseDeformer):
                 "vertex_count": int(len(lens_vertices)),
                 "uv_count": uv_count,
                 "fit_error_mm": round(fit_error, 6),
+                "max_fit_error_mm": round(max_fit_error, 6),
                 "thickness_mm": round(thickness, 6),
                 "curvature_delta": round(float(np.std(lens_vertices[:, 2]) - np.std(selection.lens_before[:, 2])), 6),
                 "inside_rim": bool(lens_radius < rim_radius),

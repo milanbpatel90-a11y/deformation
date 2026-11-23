@@ -218,18 +218,21 @@ class RimDeformer(BaseDeformer):
 
     def _fallback_contour(self, context: DeformationContext, side: str) -> np.ndarray:
         plane = context.descriptor.lens_planes[side]
-        width = context.measurements.lens_width
-        height = context.measurements.lens_height
+        # The fallback is the rim's outer envelope, not an oversized 1.44x
+        # lens contour. Keep its bounds physical and leave room for the lens
+        # plus the requested rim thickness on each side.
+        width = context.measurements.lens_width + 2.0 * context.measurements.rim_thickness
+        height = context.measurements.lens_height + 2.0 * context.measurements.rim_thickness
         cx, cy = plane.origin[0], plane.origin[1]
         base = np.array(
             [
                 [-0.5, 0.5],
-                [-0.72, 0.22],
-                [-0.72, -0.22],
+                [-0.36, 0.22],
+                [-0.36, -0.22],
                 [-0.5, -0.5],
                 [0.5, -0.5],
-                [0.72, -0.22],
-                [0.72, 0.22],
+                [0.36, -0.22],
+                [0.36, 0.22],
                 [0.5, 0.5],
             ],
             dtype=np.float64,

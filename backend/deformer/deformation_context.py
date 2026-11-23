@@ -29,6 +29,11 @@ class DeformationContext:
     def __post_init__(self) -> None:
         self.template_scene = deepcopy(self.template_scene)
         self.meshes = self._world_space_geometry(self.template_scene)
+        # Keep an immutable world-space reference for final physical calibration.
+        # Some stages deliberately reshape parts; the source snapshot lets the
+        # calibration stage restore stable assembly geometry without reading the
+        # original scene graph, whose transforms may no longer match the meshes.
+        self.source_meshes = {name: mesh.copy() for name, mesh in self.meshes.items()}
         if not self.materials:
             self.materials = {
                 name: getattr(mesh.visual, "material", None)
@@ -36,6 +41,7 @@ class DeformationContext:
             }
 
     meshes: dict[str, trimesh.Trimesh] = field(init=False, default_factory=dict)
+    source_meshes: dict[str, trimesh.Trimesh] = field(init=False, default_factory=dict)
 
     @staticmethod
     def _world_space_geometry(scene: trimesh.Scene) -> dict[str, trimesh.Trimesh]:
@@ -88,6 +94,45 @@ class DeformationContext:
     def vertex_group_meshes(self, group_name: str) -> list[trimesh.Trimesh]:
         parts = self.descriptor.vertex_groups.get(group_name, [])
         return [self.mesh(part) for part in parts]
+
+    def sync_scene_from_meshes(self) -> trimesh.Scene:
+        """Rebuild the export scene from the current world-space part meshes.
+
+        Deformers mutate ``context.meshes`` rather than the source scene graph.
+        Exporting the old graph therefore serializes the original template.
+        Logical parts are exported once with identity transforms; source meshes
+        that were copied under aliases are excluded to avoid duplicate geometry.
+        """
+        logical_parts: list[str] = []
+        seen: set[str] = set()
+        for parts in self.descriptor.vertex_groups.values():
+            for name in parts:
+                if name not in seen:
+                    logical_parts.append(name)
+                    seen.add(name)
+
+        raw_aliases = self.descriptor.raw.get("mesh_aliases", {})
+        aliased_sources = set(raw_aliases.values()) if isinstance(raw_aliases, dict) else set()
+        export_names = list(logical_parts)
+        export_names.extend(
+            name for name in self.meshes
+            if name not in seen and name not in aliased_sources
+        )
+
+        export_scene = trimesh.Scene()
+        for name in export_names:
+            mesh = self.meshes.get(name)
+            if not isinstance(mesh, trimesh.Trimesh) or len(mesh.vertices) < 3 or len(mesh.faces) < 1:
+                continue
+            export_scene.add_geometry(mesh.copy(), geom_name=name, node_name=name)
+
+        if not export_scene.geometry:
+            raise ValueError(
+                f"Template '{self.descriptor.template_name}' has no exportable logical part meshes."
+            )
+        export_scene.metadata = deepcopy(self.template_scene.metadata or {})
+        self.template_scene = export_scene
+        return self.template_scene
 
     def update_metadata(self, **values: Any) -> None:
         self.metadata.update(values)

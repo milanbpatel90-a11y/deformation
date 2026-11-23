@@ -19,6 +19,7 @@ from backend.deformer.rim_deformer import RimDeformer
 from backend.deformer.temple_deformer import TempleDeformer
 from backend.deformer.symmetry import SymmetrySolver
 from backend.deformer.smoother import MeshSmoother
+from backend.deformer.dimension_calibrator import DimensionCalibrator
 from backend.deformer.quality_checker import QualityChecker, QualityReport
 from backend.deformer.deformation_context import DeformationContext
 
@@ -44,6 +45,7 @@ class MeshDeformer:
             ConstraintSolver(),
             SymmetrySolver(),
             MeshSmoother(lam=0.5, mu=-0.53, iterations=12),
+            DimensionCalibrator(),
         ]
         self.quality_checker = QualityChecker()
 
@@ -60,6 +62,8 @@ class MeshDeformer:
                     context = stage.apply(context)
 
         self._refresh_normals(context)
+        # Serialize the edited world-space meshes, not the original scene graph.
+        context.sync_scene_from_meshes()
         quality = self.quality_checker.evaluate(context)
         return context, quality
 

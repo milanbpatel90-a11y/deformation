@@ -13,6 +13,11 @@ class ViewClassifier:
         Classify the view angle based on image dimensions and mask shape properties.
         
         Returns: 'front', 'side', 'top', or 'perspective'
+        
+        Improved heuristics (2026-10-31):
+        - More lenient side view detection (aspect >= 2.5, was 4.0)
+        - Stricter top view detection (aspect < 0.95, was 1.3)
+        - Better front view detection (wide + symmetric)
         """
         contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         if not contours:
@@ -37,12 +42,25 @@ class ViewClassifier:
         max_area = max(left_area, right_area, 1.0)
         symmetry = min(left_area, right_area) / max_area
         
-        # Classify based on aspect ratio, size, and symmetry
+        # Extremely wide masks are side views. In the moderately wide range,
+        # symmetry distinguishes a front product shot from a temple-heavy side
+        # shot; aspect ratio alone incorrectly rejects a symmetric 3:1 front.
         if aspect_ratio >= 4.0:
             return "side"
-        elif aspect_ratio < 1.3:
+        if aspect_ratio >= 2.5 and symmetry < 0.72:
+            return "side"
+
+        # Top view: taller than wide or nearly square.
+        if aspect_ratio < 0.95:
             return "top"
-        elif symmetry < 0.65:
-            return "perspective"
-        else:
+
+        # Front view: wide and horizontally symmetric.
+        if aspect_ratio >= 1.5 and symmetry >= 0.72:
             return "front"
+        
+        # 4. Perspective/angle: asymmetric or moderate aspect
+        if symmetry < 0.68:  # Slightly stricter (was 0.65)
+            return "perspective"
+        
+        # 5. Default to front for ambiguous cases (square-ish, symmetric)
+        return "front"

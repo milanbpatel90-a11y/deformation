@@ -33,12 +33,23 @@ class MeasurementFuser:
         base_ms = front_ms[0] if front_ms else any_ms[0]
 
         def weighted_avg(attr: str, preferred: list[str] | None = None) -> float | None:
+            # A preferred view is authoritative when it actually contains the
+            # attribute. Otherwise its smaller weight is overwhelmed by two
+            # other views and median filtering can even discard the preferred
+            # value as an outlier. Fall back to all views only when necessary.
+            source_views = list(by_view)
+            if preferred:
+                preferred_views = [
+                    vtype for vtype in preferred
+                    if any(getattr(m, attr, None) is not None for m in by_view.get(vtype, []))
+                ]
+                if preferred_views:
+                    source_views = preferred_views
+
             pairs: list[tuple[float, float]] = []
-            for vtype, ms_list in by_view.items():
+            for vtype in source_views:
                 w = self.VIEW_WEIGHTS.get(vtype, 0.4)
-                if preferred and vtype not in preferred:
-                    w *= 0.35
-                for m in ms_list:
+                for m in by_view[vtype]:
                     val = getattr(m, attr, None)
                     if val is None:
                         continue
