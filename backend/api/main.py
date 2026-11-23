@@ -22,7 +22,7 @@ from backend.auth import (
 from backend.models import FrameMaterial, FrameShape, Measurements
 from backend.pipeline import DeformationPipeline
 from backend.template_library.loader import TemplateLibrary
-from backend.api import rim_detection_routes
+from backend.api import rim_detection_routes, video_extraction_routes
 
 
 app = FastAPI(
@@ -85,6 +85,7 @@ viewer_dir = Path(__file__).resolve().parents[2] / "viewer"
 app.include_router(auth_router)
 app.include_router(admin_router)
 app.include_router(rim_detection_routes.router)
+app.include_router(video_extraction_routes.router)
 
 
 def _pick_active_template(available: list[str]) -> str | None:
@@ -139,6 +140,7 @@ def api_info():
             "templates": "GET /api/templates",
             "download": "GET /api/output/{filename}",
             "rim_detection": "/api/rim-detection/* (Owner/Editor)",
+            "video_extraction": "/api/video-extraction/* (upload a glasses video to auto-extract reference images)",
             "viewer": "GET /viewer/",
         },
     }
