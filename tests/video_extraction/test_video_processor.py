@@ -62,10 +62,13 @@ def test_magic_bytes_accepts_iso_bmff_header():
 
 def test_safe_temp_video_name_ignores_user_filename():
     # Regardless of what a malicious filename says, the generated on-disk
-    # name is always derived from the job id + a validated extension only.
+    # name is always derived from a validated extension only, under the
+    # task brief's own "original/" subfolder -- never anything influenced
+    # by the user-supplied filename, and never a path that can escape it.
     name = safe_temp_video_name("abc123", ".mp4")
-    assert name == "original.mp4"
-    assert "/" not in name and ".." not in name
+    assert name == "original/source_video.mp4"
+    assert ".." not in name
+    assert name.count("/") == 1 and name.startswith("original/")
 
 
 def test_probe_video_rejects_corrupt_file(tmp_path):

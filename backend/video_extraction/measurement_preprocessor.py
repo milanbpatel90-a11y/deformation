@@ -35,9 +35,11 @@ _VIDEO_VIEW_TO_FUSION_VIEW = {
     ViewLabel.FRONT: "front",
     ViewLabel.FRONT_LEFT_45: "three_quarter",
     ViewLabel.FRONT_RIGHT_45: "three_quarter",
-    ViewLabel.SIDE_LEFT: "side",
-    ViewLabel.SIDE_RIGHT: "side",
+    ViewLabel.LEFT_SIDE: "side",
+    ViewLabel.RIGHT_SIDE: "side",
     ViewLabel.TOP: "top",
+    ViewLabel.BOTTOM: "top",
+    ViewLabel.REAR_INSIDE: "side",
     ViewLabel.UNKNOWN: "unknown",
 }
 

@@ -10,7 +10,7 @@ from __future__ import annotations
 import cv2
 import numpy as np
 
-from backend.video_extraction.glasses_detector import GlassesFrameDetector
+from backend.video_extraction.glasses_detector import EXPECTED_COMPONENTS, GlassesFrameDetector
 from backend.video_extraction.schemas import DetectionResult, SelectedFrame, ViewLabel
 from backend.video_extraction.storage import VideoExtractionStorage
 
@@ -56,20 +56,29 @@ def persist_selected_frame(
     timestamp_sec: float,
     view_confidence: float,
     composite_score: float,
+    duplicate_score: int = 0,
+    is_additional: bool = False,
+    manually_replaced: bool = False,
 ) -> SelectedFrame:
     """Encode and save every asset for one selected frame and return the
     `SelectedFrame` record (with storage-relative paths, not local
-    filesystem paths -- those never need to reach the client)."""
-    base = f"{view.value}_{index_in_view}"
+    filesystem paths -- those never need to reach the client).
 
-    image_rel = f"extracted/{base}.png"
+    Folder layout matches the task brief's structure: ``selected/`` for the
+    chosen reference images, ``crops/`` for the transparent eyewear-only
+    cutout, ``masks/`` and ``overlays/`` as before. 1-indexed, zero-padded
+    filenames (``front_01.png``) per the brief's example tree.
+    """
+    base = f"{view.value}_{index_in_view + 1:02d}"
+
+    image_rel = f"selected/{base}.png"
     storage.save(job_id, image_rel, _encode_png(frame))
 
     overlay_rel = f"overlays/{base}.png"
     storage.save(job_id, overlay_rel, _encode_png(build_overlay(frame, combined_mask)))
 
-    cutout_rel = f"cutouts/{base}.png"
-    storage.save(job_id, cutout_rel, _encode_png(build_cutout(frame, combined_mask)))
+    crop_rel = f"crops/{base}.png"
+    storage.save(job_id, crop_rel, _encode_png(build_cutout(frame, combined_mask)))
 
     mask_paths: dict[str, str] = {}
     for class_name, class_mask in per_class_masks.items():
@@ -81,6 +90,8 @@ def persist_selected_frame(
         storage.save(job_id, rel, _encode_png(combined_mask))
         mask_paths["combined"] = rel
 
+    component_visibility = {name: name in per_class_masks for name in EXPECTED_COMPONENTS}
+
     return SelectedFrame(
         frame_index=frame_index,
         timestamp_sec=timestamp_sec,
@@ -89,7 +100,11 @@ def persist_selected_frame(
         composite_score=composite_score,
         image_path=image_rel,
         overlay_path=overlay_rel,
-        cutout_path=cutout_rel,
+        cutout_path=crop_rel,
         mask_paths=mask_paths,
         detection=detection,
+        duplicate_score=duplicate_score,
+        is_additional=is_additional,
+        manually_replaced=manually_replaced,
+        component_visibility=component_visibility,
     )

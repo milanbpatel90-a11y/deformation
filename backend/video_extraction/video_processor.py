@@ -189,6 +189,29 @@ def iter_sampled_frames(
 
 
 def safe_temp_video_name(job_id: str, extension: str) -> str:
-    """Build a storage-relative filename that never trusts the user's own filename."""
+    """Build a storage-relative filename that never trusts the user's own
+    filename. Lives under ``original/`` to match the task brief's output
+    tree (``original/source_video.mp4``)."""
     ext = extension if extension.startswith(".") else f".{extension}"
-    return f"original{ext}"
+    return f"original/source_video{ext}"
+
+
+def grab_frame_at_index(path: Path, frame_index: int) -> np.ndarray:
+    """Best-effort random-access read of one frame by index, used ONLY for
+    re-deriving a replacement frame from the still-stored original video
+    when its candidate JPEG (see `extraction_pipeline._persist_candidates`)
+    is unavailable for some reason. `CAP_PROP_POS_FRAMES` seeking is
+    documented upstream (see this module's top docstring) as unreliable on
+    some consumer MP4/MOV encodings -- callers should prefer the persisted
+    `candidates/candidate_<frame_index>.jpg` file when it exists."""
+    cap = cv2.VideoCapture(str(path))
+    try:
+        if not cap.isOpened():
+            raise InvalidVideoError("Could not reopen the stored video to re-extract a frame.")
+        cap.set(cv2.CAP_PROP_POS_FRAMES, float(frame_index))
+        ok, frame = cap.read()
+        if not ok or frame is None:
+            raise InvalidVideoError(f"Could not read frame {frame_index} from the stored video.")
+        return frame
+    finally:
+        cap.release()

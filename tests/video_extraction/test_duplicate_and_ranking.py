@@ -5,7 +5,13 @@ import numpy as np
 from backend.video_extraction.config import get_settings
 from backend.video_extraction.duplicate_filter import compute_phash, filter_duplicates, hamming_distance
 from backend.video_extraction.frame_ranker import composite_score, select_best_per_view
-from backend.video_extraction.schemas import DetectionResult, FrameCandidate, QualityMetrics, ViewLabel
+from backend.video_extraction.schemas import (
+    TARGET_VIEW_COUNTS,
+    DetectionResult,
+    FrameCandidate,
+    QualityMetrics,
+    ViewLabel,
+)
 
 
 def _solid_frame(value: int) -> np.ndarray:
@@ -37,9 +43,12 @@ def test_filter_duplicates_keeps_best_scoring_member_of_each_cluster():
     assert 2 in kept
 
 
+_next_frame_index = iter(range(1_000_000))
+
+
 def _candidate(view, score, confidence=0.9, view_confidence=0.9) -> FrameCandidate:
     return FrameCandidate(
-        frame_index=0,
+        frame_index=next(_next_frame_index),
         timestamp_sec=0.0,
         view=view,
         view_confidence=view_confidence,
@@ -57,15 +66,19 @@ def _candidate(view, score, confidence=0.9, view_confidence=0.9) -> FrameCandida
     )
 
 
-def test_select_best_per_view_caps_at_configured_max_and_is_diversity_aware():
+def test_select_best_per_view_caps_at_the_views_own_target_quota():
     settings = get_settings()
     candidates = [_candidate(ViewLabel.FRONT, s) for s in (10, 90, 50, 70)]
-    candidates += [_candidate(ViewLabel.SIDE_LEFT, 60)]
+    candidates += [_candidate(ViewLabel.LEFT_SIDE, 60)]
 
-    selected = select_best_per_view(candidates, settings)
+    selected, additional_indices = select_best_per_view(candidates, settings)
 
-    assert ViewLabel.SIDE_LEFT in selected  # a single side frame isn't crowded out
-    assert len(selected[ViewLabel.FRONT]) <= settings.max_selected_per_view
+    assert ViewLabel.LEFT_SIDE in selected  # a single side frame isn't crowded out
+    # FRONT's own target quota (TARGET_VIEW_COUNTS) caps everything EXCEPT
+    # whichever single frame (if any) landed there via the one shared
+    # "best additional angle" slot, which is accounted for separately.
+    front_non_additional = [c for c in selected[ViewLabel.FRONT] if c.frame_index not in additional_indices]
+    assert len(front_non_additional) <= TARGET_VIEW_COUNTS[ViewLabel.FRONT.value]
     # Highest-quality front frame ranks first.
     assert selected[ViewLabel.FRONT][0].quality.overall_quality == 90
 
@@ -75,9 +88,39 @@ def test_select_best_per_view_drops_rejected_candidates():
     good = _candidate(ViewLabel.FRONT, 90)
     bad = _candidate(ViewLabel.FRONT, 95)
     bad.rejected = True
-    selected = select_best_per_view([good, bad], settings)
+    selected, _additional = select_best_per_view([good, bad], settings)
     assert len(selected[ViewLabel.FRONT]) == 1
     assert selected[ViewLabel.FRONT][0].quality.overall_quality == 90
+
+
+def test_select_best_per_view_fills_one_additional_slot_from_leftovers():
+    """Beyond every named view's own quota, one "best additional angle" slot
+    is filled from the highest-scoring leftover frame (task brief §2/§3G) --
+    never fabricated, never padded past what real candidates support."""
+    settings = get_settings()
+    # Fill FRONT's quota (2) plus one extra FRONT candidate that can only be
+    # picked up by the "additional" slot, since FRONT itself is already full.
+    candidates = [_candidate(ViewLabel.FRONT, s) for s in (95, 90, 80)]
+
+    selected, additional_indices = select_best_per_view(candidates, settings)
+
+    assert len(selected[ViewLabel.FRONT]) == TARGET_VIEW_COUNTS[ViewLabel.FRONT.value] + 1
+    assert len(additional_indices) == 1
+    # The third-best (80) is the only one left over to fill that slot.
+    additional = [c for c in selected[ViewLabel.FRONT] if c.frame_index in additional_indices][0]
+    assert additional.quality.overall_quality == 80
+
+
+def test_select_best_per_view_never_exceeds_max_total_selected():
+    settings = get_settings()
+    candidates = []
+    for view in (ViewLabel.FRONT, ViewLabel.LEFT_SIDE, ViewLabel.RIGHT_SIDE, ViewLabel.TOP, ViewLabel.BOTTOM):
+        candidates += [_candidate(view, s) for s in (90, 85, 80, 75)]
+
+    selected, _additional = select_best_per_view(candidates, settings)
+
+    total = sum(len(items) for items in selected.values())
+    assert total <= settings.max_total_selected
 
 
 def test_composite_score_rewards_quality_detection_and_view_confidence():

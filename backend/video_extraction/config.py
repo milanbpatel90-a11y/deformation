@@ -95,7 +95,10 @@ class VideoExtractionSettings:
 
     # ---- Duplicate filtering / ranking --------------------------------------
     duplicate_hash_threshold: int = field(default_factory=lambda: _env_int("VIDEOX_DUPLICATE_HASH_THRESHOLD", 6))
+    # Superseded by the per-view target-count table in schemas.TARGET_VIEW_COUNTS
+    # (see frame_ranker.py); kept only so an old override doesn't hard-fail.
     max_selected_per_view: int = field(default_factory=lambda: _env_int("VIDEOX_MAX_SELECTED_PER_VIEW", 2))
+    max_total_selected: int = field(default_factory=lambda: _env_int("VIDEOX_MAX_TOTAL_SELECTED", 12))
 
     # ---- Background job execution --------------------------------------------
     worker_pool_size: int = field(default_factory=lambda: _env_int("VIDEOX_WORKER_POOL_SIZE", 2))

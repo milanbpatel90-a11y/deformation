@@ -2,11 +2,14 @@
 
 Lets a merchant upload a video of a physical pair of glasses instead of
 individually-framed product photos. The backend extracts, filters, and
-classifies candidate frames, lets the merchant review/approve the best
-reference images per viewing angle, and then hands those approved images to
-the existing, **unmodified** `DeformationPipeline.run_from_multiple_images`
-to generate and validate a GLB — exactly the same code path the manual
-multi-image upload (`POST /api/deform/multi-view`) already uses.
+classifies candidate frames, selects a diverse set of **10–12 reference
+images** (never fabricated — a video that doesn't cover a view simply
+yields fewer than 12, reported honestly as a missing view), lets the
+merchant review, replace, correct, or reject individual images, and then
+hands the approved set to the existing, **unmodified**
+`DeformationPipeline.run_from_multiple_images` to generate and validate a
+GLB — exactly the same code path the manual multi-image upload
+(`POST /api/deform/multi-view`) already uses.
 
 This package does **not** attempt full 3D reconstruction from video
 (no COLMAP, no NeRF/Gaussian-splatting, no paid APIs). It is a smarter
@@ -26,19 +29,41 @@ glasses_detector  -- reuses backend.segmentation.segmenter.GlassesSegmenter,
 quality_analyzer  -- resolution-normalized sharpness (Laplacian variance),
                       exposure histogram, mask-localized glare
 view_classifier   -- heuristic view bucket from mask aspect ratio / L-R
-                      symmetry (NOT a calibrated pose estimator)
+                      symmetry (NOT a calibrated pose estimator): front,
+                      front_left_45, front_right_45, left_side, right_side,
+                      top, unknown, plus a narrow, evidence-gated `bottom`
+                      rule (nose-pad-to-rim area ratio on an otherwise
+                      top-like silhouette). `rear_inside` is never emitted
+                      automatically -- nothing in this model's 6 classes
+                      distinguishes "outside of the temples" from "inside
+                      of the temples" -- and is reachable only through the
+                      merchant's manual view-correction endpoint.
 duplicate_filter  -- perceptual hash (imagehash.phash) dedup within a view
-frame_ranker      -- diversity-aware: best N per view bucket, not globally
-                      top-scoring (so one dominant angle can't starve the
-                      others the deformation pipeline actually needs)
-segmentation_processor -- persists original/overlay/cutout/per-class-mask
-                      images for every selected frame via storage.py
+frame_ranker      -- diversity-aware: fills each named view's own target
+                      quota from `schemas.TARGET_VIEW_COUNTS` (front: 2,
+                      front_left_45: 1, front_right_45: 1, left_side: 2,
+                      right_side: 2, top: 1, bottom: 1, rear_inside: 1),
+                      highest composite-score frame first, then fills one
+                      "best additional angle" slot from the highest-scoring
+                      leftover frame, for a target of up to 12 total
+                      (`VIDEOX_MAX_TOTAL_SELECTED`) -- never padded past
+                      what real candidates support (10 is the "good"
+                      floor; fewer is reported honestly, not padded)
+segmentation_processor -- persists selected/overlay/crop/per-class-mask
+                      images for every selected frame via storage.py, plus
+                      full-resolution `candidates/candidate_<idx>.jpg` for
+                      every accepted (non-rejected) sampled frame, so the
+                      merchant can later swap a selected image for a
+                      different candidate without re-decoding the video
 measurement_preprocessor -- reuses ShapeClassifier + MeasurementExtractor +
                       MeasurementFuser (unchanged) to fuse selected frames
                       into provenance-tagged measurements
-extraction_pipeline -- orchestrates the above into one job run, writes
-                      extraction_report.json / quality_report.json /
-                      measurements.json
+extraction_pipeline -- orchestrates the above into one job run, writes the
+                      five metadata/*.json reports: extraction_report.json,
+                      view_classification.json (per-candidate + per-selected
+                      classification detail), measurements.json,
+                      quality_report.json, segmentation_report.json
+                      (per-frame component visibility/confidences)
 jobs.py           -- bounded ThreadPoolExecutor background runner (no
                       Celery/Redis in this repo; see "Known limitations")
 db.py             -- SQLite job-state table (same pattern as backend/auth.py)
@@ -55,7 +80,34 @@ That flag (additive, defaults to `False` so the two pre-existing
 raise instead of exporting when the already-computed `QualityChecker`
 result's `passed` is `False` — so a GLB is only ever written after its own
 geometry quality validation succeeds, and the failure reason reaches the
-merchant instead of a silently-exported bad mesh.
+merchant instead of a silently-exported bad mesh. A `metadata/qc_report.json`
+is written alongside the model confirming the approved frame set, the
+template used, the quality verdict, and that no second GLB generator was
+introduced — the existing exporter's own semantic node names/pivots
+(Frame/LeftRim/RightRim/Bridge/LeftTemple/RightTemple/LeftLens/RightLens/
+LeftNosePad/RightNosePad) are untouched by this feature.
+
+## Per-job storage layout
+
+```
+{job_id}/
+  original/source_video.mp4
+  candidates/candidate_0001.jpg, candidate_0002.jpg, ...   (every accepted, non-rejected sampled frame)
+  selected/front_01.png, front_left_45_01.png, left_side_01.png, ...
+  crops/<same basenames>.png                                (transparent eyewear-only cutout)
+  masks/<same basenames>__<component>.png, ..._combined.png
+  overlays/<same basenames>.png                              (segmentation overlay for visual review)
+  metadata/extraction_report.json
+  metadata/view_classification.json
+  metadata/measurements.json
+  metadata/quality_report.json
+  metadata/segmentation_report.json
+  metadata/qc_report.json                                    (written after approval/deformation)
+  model.glb / model.metadata.json                             (written after approval)
+```
+
+Only views that actually had a usable frame get a file — nothing here is
+fabricated or padded to fill the example tree.
 
 ## API endpoints
 
@@ -73,8 +125,11 @@ read-only access to their own jobs.
 | `GET /api/video-extraction/{job_id}/status` | Poll job status/progress. |
 | `GET /api/video-extraction/{job_id}/results` | Report + measurements + selected frames (once past processing). |
 | `GET /api/video-extraction/{job_id}/frames` | Just the selected frames. |
-| `GET /api/video-extraction/{job_id}/files/{path}` | Serve one stored asset (image/mask/overlay/cutout/report JSON). |
-| `POST /api/video-extraction/{job_id}/approve` | Merchant approves a set of `frame_index` values -> runs the real deformation pipeline -> GLB. |
+| `GET /api/video-extraction/{job_id}/candidates` | Every accepted (non-rejected) sampled frame, for picking a replacement. |
+| `GET /api/video-extraction/{job_id}/files/{path}` | Serve one stored asset (image/mask/overlay/crop/report JSON). |
+| `POST /api/video-extraction/{job_id}/frames/{frame_index}/replace` | Swap a selected image for a different stored candidate (re-runs detection/segmentation on the replacement; marks `manually_replaced`). |
+| `POST /api/video-extraction/{job_id}/frames/{frame_index}/correct-view` | Correct a mislabeled view, including setting `rear_inside` (never emitted automatically). |
+| `POST /api/video-extraction/{job_id}/approve` | Merchant approves a set of `frame_index` values -> runs the real deformation pipeline -> GLB + `qc_report.json`. |
 | `POST /api/video-extraction/{job_id}/regenerate` | Re-run extraction from the stored video (e.g. after changing calibration). |
 | `DELETE /api/video-extraction/{job_id}` | Delete a job and its files. |
 | `GET /api/video-extraction` | List the caller's own jobs. |
@@ -90,7 +145,8 @@ documented list (prefix `VIDEOX_`), e.g.:
 - `VIDEOX_MIN_DURATION_SEC` / `VIDEOX_MAX_DURATION_SEC` (default `1.5` / `120`)
 - `VIDEOX_MIN_RESOLUTION` / `VIDEOX_MAX_RESOLUTION` (default `180` / `4096` px)
 - `VIDEOX_SHARPNESS_MIN` (default `45.0`, Laplacian-variance units at an 800px-wide reference frame)
-- `VIDEOX_MAX_SELECTED_PER_VIEW` (default `2`)
+- `VIDEOX_MAX_SELECTED_PER_VIEW` (superseded by the per-view target-count table in `schemas.TARGET_VIEW_COUNTS`; kept only so an old override doesn't hard-fail)
+- `VIDEOX_MAX_TOTAL_SELECTED` (default `12`; `schemas.MIN_USEFUL_IMAGE_COUNT` = `10` is the "below target, but still usable" floor reported in warnings, never silently padded to)
 - `VIDEOX_WORKER_POOL_SIZE` / `VIDEOX_MAX_JOBS_PER_USER` (default `2` / `3`)
 - `DEFIRM_YOLO_MODEL` — explicit override for which segmentation weights to use (defaults to `models/best.pt` for this feature specifically; does not change what `/api/deform*` resolves to).
 
@@ -145,6 +201,13 @@ and completed jobs are lost on redeploy (see "Known limitations").
 - **View classification is a heuristic**, not a calibrated pose estimator
   (mask aspect ratio + left/right symmetry). Low-confidence frames are
   labeled `unknown` and still shown to the merchant rather than guessed.
+  `bottom` fires only on a narrow, documented component-evidence rule;
+  `rear_inside` is never emitted automatically at all — both are reachable
+  through the merchant's `correct-view` endpoint, not invented by the model.
+- **No per-view target is ever fabricated.** A video that doesn't cover a
+  view (e.g. no top/bottom footage) simply yields 0 images for that view,
+  reported in `missing_views`; the pipeline never pads with duplicate or
+  low-quality frames to reach the 10–12 target.
 - **No reference-marker/calibration-object detector.** Only manual
   `known_frame_width_mm` entry is supported; without it, measurements are
   tagged `calibration_status=estimated`, never silently relabeled as exact
