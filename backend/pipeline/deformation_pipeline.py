@@ -447,6 +447,7 @@ class DeformationPipeline:
         output_path: Path | str | None = None,
         color: str = "#d9a7a2",
         template_override: str | None = None,
+        return_quality: bool = False,
     ) -> dict:
         """
         Run the full pipeline on 4-6 images:
@@ -551,6 +552,18 @@ class DeformationPipeline:
         deformer = MeshDeformer(scene, template_info.dimensions, rim_pull_strength=rim_pull)
         deformed_ctx, quality = deformer.deform(ctx, front_lens_contour)
         deformed = deformed_ctx.template_scene
+
+        # `return_quality=True` is additive and opt-in: it does not change the
+        # export/behavior for either existing `/api/deform*` caller (which both
+        # leave it at the default False). It exists so a new caller -- the
+        # video-extraction approval flow -- can require `quality.passed` before
+        # accepting a GLB, instead of exporting unconditionally the way the
+        # original image-upload endpoints always have.
+        if return_quality and not quality.passed:
+            raise ValueError(
+                "Deformed geometry failed quality validation "
+                f"(score={quality.score:.1f}): {'; '.join(quality.warnings) or 'see breakdown for details'}"
+            )
         s3.finish(
             t,
             rim_pull_strength=rim_pull,
@@ -601,7 +614,7 @@ class DeformationPipeline:
         self.exporter.export_metadata_json(metadata, anchors, meta_path)
         s6.finish(t, output=str(out), size_kb=round(out.stat().st_size / 1024, 1))
 
-        return {
+        result = {
             "output_glb": str(out),
             "metadata_json": str(meta_path),
             "measurements": fused_measurements.model_dump(),
@@ -611,6 +624,9 @@ class DeformationPipeline:
             "lens_contour": front_lens_contour.model_dump(),
             "pipeline": report.to_dict(),
         }
+        if return_quality:
+            result["quality"] = quality.to_dict()
+        return result
 
     def _scale_summary(self, m: Measurements, t) -> dict:
         return {

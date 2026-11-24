@@ -88,6 +88,39 @@
     .divider { border: none; border-top: 1px solid #2a2a4a; margin: 8px 0; }
     #glb-url { width: 100%; padding: 7px 10px; border-radius: 4px; border: 1px solid #3a3a5a; background: #1e1e3a; color: #eee; font-size: 12px; }
     #glb-file { width: 100%; padding: 6px; border-radius: 4px; border: 1px solid #3a3a5a; background: #1e1e3a; color: #aaa; font-size: 12px; margin-top: 6px; }
+
+    /* ── Video-to-reference extraction ── */
+    #video-dropzone {
+      background: #1e1e3a; border: 1px dashed #3a3a5a; border-radius: 6px;
+      padding: 14px; cursor: pointer; text-align: center; transition: border-color .2s, background-color .2s;
+    }
+    #video-dropzone:hover, #video-dropzone.dragover { border-color: #8be9fd; background-color: #2a2a4a; }
+    #video-dropzone input[type=file] { display: none; }
+    #video-dropzone .placeholder { font-size: 11px; color: #888; }
+    #video-progress-outer { display: none; height: 6px; border-radius: 3px; background: #2a2a4a; overflow: hidden; margin-top: 6px; }
+    #video-progress-inner { height: 100%; width: 0%; background: #8be9fd; transition: width .2s; }
+    #video-status { font-size: 11px; color: #8888aa; margin-top: 6px; min-height: 14px; }
+    #video-calibration { margin-top: 8px; }
+    #video-frame-gallery {
+      display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px; margin-top: 10px; max-height: 320px; overflow-y: auto;
+    }
+    .vframe-card {
+      background: #1e1e3a; border: 2px solid #2a2a4a; border-radius: 6px; padding: 6px; cursor: pointer;
+    }
+    .vframe-card.approved { border-color: #50fa7b; }
+    .vframe-card img { width: 100%; height: 70px; object-fit: cover; border-radius: 4px; background: #12122a; }
+    .vframe-card .vf-meta { font-size: 9px; color: #8888aa; margin-top: 4px; display: flex; justify-content: space-between; }
+    .vframe-card .vf-view { color: #8be9fd; font-weight: 700; text-transform: uppercase; }
+    #video-missing-views { font-size: 10px; color: #ffb86c; margin-top: 6px; }
+    #video-approve-btn {
+      width: 100%; padding: 8px; border-radius: 6px; border: none; margin-top: 8px;
+      background: #2a6a4a; color: #eee; font-size: 12px; font-weight: 700; cursor: pointer;
+    }
+    #video-approve-btn:disabled { background: #555; cursor: not-allowed; opacity: .6; }
+    #video-regenerate-btn {
+      width: 100%; padding: 7px; border-radius: 6px; border: 1px solid #3a3a5a; margin-top: 6px;
+      background: transparent; color: #aaa; font-size: 11px; cursor: pointer;
+    }
     #load-btn {
       width: 100%; padding: 8px; border-radius: 6px; border: none;
       background: #2a3a6a; color: #eee; font-size: 13px; cursor: pointer; margin-top: 6px; font-weight: 600;
@@ -146,6 +179,28 @@
       <div class="placeholder" id="ph-multi">Click to choose multiple files</div>
       <div id="multi-preview-list" style="display: flex; gap: 4px; flex-wrap: wrap; margin-top: 6px;"></div>
     </div>
+  </div>
+
+  <!-- Video-to-reference extraction -->
+  <div class="section" id="section-video">
+    <div class="section-title">Upload Video (auto-extract references)</div>
+    <div id="video-dropzone" onclick="document.getElementById('video-input').click()">
+      <input type="file" id="video-input" accept="video/mp4,video/quicktime,.mp4,.mov,.m4v" />
+      <div class="placeholder" id="video-placeholder">Drag &amp; drop or click to choose an MP4/MOV of the physical glasses</div>
+    </div>
+    <div id="video-progress-outer"><div id="video-progress-inner"></div></div>
+    <div id="video-status"></div>
+
+    <div id="video-calibration" style="display:none;">
+      <label class="field">Known frame width (mm) — optional, for calibrated measurements</label>
+      <input type="text" id="video-calibration-mm" placeholder="e.g. 140" />
+      <button id="video-process-btn" style="width:100%;padding:7px;border-radius:6px;border:none;margin-top:6px;background:#2a3a6a;color:#eee;font-size:12px;font-weight:700;cursor:pointer;">Extract Reference Frames</button>
+    </div>
+
+    <div id="video-missing-views"></div>
+    <div id="video-frame-gallery"></div>
+    <button id="video-approve-btn" disabled>Approve Selected &amp; Generate 3D Model</button>
+    <button id="video-regenerate-btn" style="display:none;">Re-run extraction</button>
   </div>
 
   <!-- Options -->
@@ -285,7 +340,7 @@ document.getElementById('sidebar').insertBefore(accountBar, document.getElementB
 // Read-only users can browse models and use the try-on viewer, but cannot submit generation jobs.
 if (!profileData.permissions.includes('generate_models')) {
   document.querySelectorAll('.section').forEach(section => {
-    if (section.querySelector('.img-card') || section.querySelector('#color-pick')) {
+    if (section.querySelector('.img-card') || section.querySelector('#color-pick') || section.id === 'section-video') {
       section.style.display = 'none';
     }
   });
@@ -716,6 +771,218 @@ document.getElementById('tryon-btn').addEventListener('click', () => {
 
 const params = new URLSearchParams(window.location.search);
 if (params.get('glb')) loadGLB(params.get('glb'));
+
+// ── Video-to-reference extraction ─────────────────────────────────────────────
+(function setupVideoExtraction() {
+  const dropzone = document.getElementById('video-dropzone');
+  const input = document.getElementById('video-input');
+  const placeholder = document.getElementById('video-placeholder');
+  const progressOuter = document.getElementById('video-progress-outer');
+  const progressInner = document.getElementById('video-progress-inner');
+  const statusEl = document.getElementById('video-status');
+  const calibrationBox = document.getElementById('video-calibration');
+  const calibrationInput = document.getElementById('video-calibration-mm');
+  const processBtn = document.getElementById('video-process-btn');
+  const missingViewsEl = document.getElementById('video-missing-views');
+  const gallery = document.getElementById('video-frame-gallery');
+  const approveBtn = document.getElementById('video-approve-btn');
+  const regenerateBtn = document.getElementById('video-regenerate-btn');
+
+  let currentJobId = null;
+  let currentFrames = [];
+  let pollTimer = null;
+
+  function setStatus(message, isError) {
+    statusEl.textContent = message || '';
+    statusEl.style.color = isError ? '#ff6b9d' : '#8888aa';
+  }
+
+  ['dragenter', 'dragover'].forEach(evt =>
+    dropzone.addEventListener(evt, e => { e.preventDefault(); dropzone.classList.add('dragover'); })
+  );
+  ['dragleave', 'drop'].forEach(evt =>
+    dropzone.addEventListener(evt, e => { e.preventDefault(); dropzone.classList.remove('dragover'); })
+  );
+  dropzone.addEventListener('drop', e => {
+    const file = e.dataTransfer.files && e.dataTransfer.files[0];
+    if (file) uploadVideo(file);
+  });
+  input.addEventListener('change', () => {
+    if (input.files[0]) uploadVideo(input.files[0]);
+  });
+
+  async function uploadVideo(file) {
+    placeholder.textContent = file.name;
+    gallery.innerHTML = '';
+    missingViewsEl.textContent = '';
+    approveBtn.disabled = true;
+    regenerateBtn.style.display = 'none';
+    setStatus('Uploading...');
+    progressOuter.style.display = 'block';
+    progressInner.style.width = '15%';
+
+    const formData = new FormData();
+    formData.append('file', file);
+    try {
+      const response = await fetch('/api/video-extraction/upload', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'X-CSRF-Token': readCookie('defirmation_csrf') },
+        body: formData,
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail || 'Upload failed.');
+      currentJobId = data.job_id;
+      progressInner.style.width = '40%';
+      setStatus(`Uploaded. Job ${currentJobId.slice(0, 8)}... ready to process.`);
+      calibrationBox.style.display = 'block';
+    } catch (error) {
+      setStatus(error.message, true);
+      progressOuter.style.display = 'none';
+    }
+  }
+
+  processBtn.addEventListener('click', async () => {
+    if (!currentJobId) return;
+    const mm = calibrationInput.value.trim();
+    const formData = new FormData();
+    if (mm) formData.append('known_frame_width_mm', mm);
+    setStatus('Processing video (detecting, classifying, filtering frames)...');
+    progressInner.style.width = '55%';
+    try {
+      const response = await fetch(`/api/video-extraction/${currentJobId}/process`, {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'X-CSRF-Token': readCookie('defirmation_csrf') },
+        body: formData,
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail || 'Processing failed to start.');
+      pollJobStatus();
+    } catch (error) {
+      setStatus(error.message, true);
+    }
+  });
+
+  function pollJobStatus() {
+    if (pollTimer) clearInterval(pollTimer);
+    pollTimer = setInterval(async () => {
+      try {
+        const response = await fetch(`/api/video-extraction/${currentJobId}/status`, { credentials: 'same-origin' });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.detail || 'Status check failed.');
+        setStatus(data.progress_message || data.status);
+        if (data.status === 'awaiting_approval') {
+          clearInterval(pollTimer);
+          progressInner.style.width = '100%';
+          await loadFrames();
+        } else if (data.status === 'failed') {
+          clearInterval(pollTimer);
+          setStatus(data.error || 'Processing failed.', true);
+          regenerateBtn.style.display = 'block';
+        } else if (data.status === 'complete') {
+          clearInterval(pollTimer);
+          setStatus('Model generated — see results above.');
+        }
+      } catch (error) {
+        clearInterval(pollTimer);
+        setStatus(error.message, true);
+      }
+    }, 2000);
+  }
+
+  async function loadFrames() {
+    const response = await fetch(`/api/video-extraction/${currentJobId}/results`, { credentials: 'same-origin' });
+    const data = await response.json();
+    if (!response.ok) { setStatus(data.detail || 'Could not load results.', true); return; }
+
+    const report = data.report || {};
+    currentFrames = data.frames || [];
+    if ((report.missing_views || []).length) {
+      missingViewsEl.textContent = 'Missing views: ' + report.missing_views.join(', ') + ' — upload a steadier/longer video or approve what was found.';
+    } else {
+      missingViewsEl.textContent = '';
+    }
+    (report.warnings || []).forEach(w => setStatus(w));
+
+    gallery.innerHTML = '';
+    currentFrames.forEach(frame => {
+      // Nothing is pre-approved: the merchant must click each frame they
+      // want to use before "Approve Selected" is enabled, matching the
+      // brief's "do not automatically approve poor-quality frames" rule.
+      const card = document.createElement('div');
+      card.className = 'vframe-card';
+      card.dataset.frameIndex = frame.frame_index;
+      card.innerHTML = `
+        <img src="${frame.overlay_url || frame.image_url}" loading="lazy" />
+        <div class="vf-meta">
+          <span class="vf-view">${frame.view}</span>
+          <span>q:${Math.round(frame.composite_score)}</span>
+        </div>`;
+      card.addEventListener('click', () => {
+        card.classList.toggle('approved');
+        approveBtn.disabled = gallery.querySelectorAll('.vframe-card.approved').length === 0;
+      });
+      gallery.appendChild(card);
+    });
+    approveBtn.disabled = true; // re-enabled only once the merchant selects at least one frame
+    regenerateBtn.style.display = 'block';
+    if (currentFrames.length === 0) {
+      setStatus('No usable frames were found. Try a brighter, steadier recording, then regenerate.', true);
+    }
+  }
+
+  approveBtn.addEventListener('click', async () => {
+    const approvedIndices = Array.from(gallery.querySelectorAll('.vframe-card.approved'))
+      .map(card => card.dataset.frameIndex);
+    if (!approvedIndices.length) {
+      setStatus('Select at least one frame to approve.', true);
+      return;
+    }
+    setStatus('Generating 3D model from approved frames...');
+    approveBtn.disabled = true;
+    const formData = new FormData();
+    formData.append('approved_frame_indices', approvedIndices.join(','));
+    formData.append('color', document.getElementById('color-pick').value);
+    try {
+      const response = await fetch(`/api/video-extraction/${currentJobId}/approve`, {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'X-CSRF-Token': readCookie('defirmation_csrf') },
+        body: formData,
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail || 'Model generation failed.');
+      setStatus('Model ready!');
+      if (data.result && data.result.download_url) {
+        loadGLB(data.result.download_url);
+      }
+    } catch (error) {
+      setStatus(error.message, true);
+      approveBtn.disabled = false;
+    }
+  });
+
+  regenerateBtn.addEventListener('click', async () => {
+    if (!currentJobId) return;
+    setStatus('Re-running extraction...');
+    regenerateBtn.style.display = 'none';
+    gallery.innerHTML = '';
+    approveBtn.disabled = true;
+    try {
+      const response = await fetch(`/api/video-extraction/${currentJobId}/regenerate`, {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'X-CSRF-Token': readCookie('defirmation_csrf') },
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail || 'Could not regenerate.');
+      pollJobStatus();
+    } catch (error) {
+      setStatus(error.message, true);
+    }
+  });
+})();
 </script>
 </body>
 </html>

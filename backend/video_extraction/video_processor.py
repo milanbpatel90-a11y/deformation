@@ -1,57 +1,194 @@
-"""Streaming video metadata inspection with ffprobe and OpenCV decode validation."""
-from __future__ import annotations
-import json, shutil, subprocess
-from pathlib import Path
-import cv2
-from .exceptions import VideoValidationError
-from .schemas import VideoLimits
+"""Video upload validation and frame streaming.
 
-ALLOWED_EXTENSIONS = {".mp4", ".mov"}
-def inspect_video(path: str | Path, supplied_name: str, limits: VideoLimits) -> dict:
-    file_path = Path(path)
-    suffix = Path(supplied_name or "").suffix.lower()
-    if suffix not in ALLOWED_EXTENSIONS:
-        raise VideoValidationError("Only MP4 and MOV video uploads are supported.")
-    if not file_path.is_file() or file_path.stat().st_size < 128:
-        raise VideoValidationError("Uploaded video is empty or invalid.")
-    if file_path.stat().st_size > limits.max_upload_bytes:
-        raise VideoValidationError("Video exceeds the configured upload size limit.")
-    probe = shutil.which("ffprobe")
-    if probe:
-        command = [probe, "-v", "error", "-show_entries", "format=duration,format_name:stream=codec_type,codec_name,width,height,avg_frame_rate", "-of", "json", str(file_path)]
-        try:
-            completed = subprocess.run(command, capture_output=True, text=True, timeout=20, check=True)
-            info = json.loads(completed.stdout)
-        except (subprocess.SubprocessError, json.JSONDecodeError) as exc:
-            raise VideoValidationError("Video container or codec could not be validated.") from exc
-        streams = [s for s in info.get("streams", []) if s.get("codec_type") == "video"]
-        if not streams:
-            raise VideoValidationError("The uploaded file contains no video stream.")
-        stream = streams[0]
-        duration = float(info.get("format", {}).get("duration") or 0)
-        width, height = int(stream.get("width", 0)), int(stream.get("height", 0))
-        rate = stream.get("avg_frame_rate", "0/1").split("/")
-        fps = float(rate[0]) / max(float(rate[1]), 1.0)
-        codec = stream.get("codec_name", "unknown")
-    else:
-        capture = cv2.VideoCapture(str(file_path))
-        if not capture.isOpened():
-            raise VideoValidationError("OpenCV cannot decode this video. Install FFmpeg for full MP4/MOV validation.")
-        width, height = int(capture.get(cv2.CAP_PROP_FRAME_WIDTH)), int(capture.get(cv2.CAP_PROP_FRAME_HEIGHT))
-        fps = float(capture.get(cv2.CAP_PROP_FPS) or 0)
-        count = float(capture.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
-        duration = count / fps if fps > 0 else 0
-        ok, frame = capture.read(); capture.release()
-        if not ok or frame is None:
-            raise VideoValidationError("Video has no decodable frames.")
-        codec = "opencv-validated"
-    if duration <= 0 or duration > limits.max_duration_seconds:
-        raise VideoValidationError(f"Video duration must be between 0 and {limits.max_duration_seconds:g} seconds.")
-    if width < limits.min_width or height < limits.min_height or width > limits.max_width or height > limits.max_height:
-        raise VideoValidationError("Video resolution is outside the configured supported range.")
-    if fps <= 0 or fps > limits.max_fps:
-        raise VideoValidationError("Video frame rate is invalid or exceeds the configured limit.")
-    cap = cv2.VideoCapture(str(file_path)); ok, frame = cap.read(); cap.release()
-    if not ok or frame is None:
-        raise VideoValidationError("Video stream cannot be decoded by OpenCV.")
-    return {"duration_seconds": round(duration, 3), "width": width, "height": height, "fps": round(fps, 3), "codec": codec, "container": suffix[1:], "size_bytes": file_path.stat().st_size}
+ADAPTATION NOTE on decoding: `ffmpeg` the CLI binary is available in this
+sandbox, but the OpenCV build already installed here (opencv-python-headless)
+was itself compiled with FFmpeg support (verified: `cv2.getBuildInformation()`
+reports `FFMPEG: YES`), so `cv2.VideoCapture` already decodes MP4/MOV through
+FFmpeg internally. Frame reading therefore goes through `cv2.VideoCapture`
+rather than shelling out to the `ffmpeg` binary per frame -- one dependency
+instead of two, same underlying decoder. If this is ever deployed to an
+environment whose OpenCV lacks FFmpeg support, `cv2.VideoCapture` will fail
+to open the file at all and `probe_video` raises `InvalidVideoError`
+immediately; there is no silent corrupt-frame fallback.
+"""
+
+from __future__ import annotations
+
+import os
+from pathlib import Path
+from typing import Iterator
+
+import cv2
+import numpy as np
+
+from backend.video_extraction.config import VideoExtractionSettings, get_settings
+from backend.video_extraction.exceptions import (
+    InvalidVideoError,
+    UnsupportedFormatError,
+    VideoDurationError,
+    VideoResolutionError,
+    VideoTooLargeError,
+)
+from backend.video_extraction.schemas import VideoMetadata
+
+# ISO base media file format (MP4/MOV/M4V) box type that must appear near
+# the start of a well-formed file. We never trust the filename/extension
+# alone -- this is the "actual file content / magic bytes" check.
+_ISO_BMFF_MAGIC = b"ftyp"
+_MAGIC_SEARCH_WINDOW = 64
+
+
+def validate_filename_extension(filename: str, settings: VideoExtractionSettings | None = None) -> str:
+    """Return the lowercase extension if allowed, else raise.
+
+    Never trusts the filename beyond its extension: the caller must
+    generate its own on-disk name (see `extraction_pipeline`/API routes).
+    """
+    settings = settings or get_settings()
+    suffix = Path(filename or "").suffix.lower()
+    if suffix not in settings.allowed_extensions:
+        raise UnsupportedFormatError(
+            f"Unsupported file extension '{suffix or '(none)'}'. "
+            f"Allowed: {', '.join(settings.allowed_extensions)}"
+        )
+    return suffix
+
+
+def validate_upload_size(num_bytes: int, settings: VideoExtractionSettings | None = None) -> None:
+    settings = settings or get_settings()
+    if num_bytes <= 0:
+        raise InvalidVideoError("Uploaded file is empty.")
+    if num_bytes > settings.max_upload_bytes:
+        raise VideoTooLargeError(
+            f"Upload is {num_bytes / (1024 * 1024):.1f} MB, which exceeds the "
+            f"{settings.max_upload_mb:.0f} MB limit."
+        )
+
+
+def validate_magic_bytes(header: bytes) -> None:
+    """Reject files whose content doesn't look like ISO-BMFF (mp4/mov/m4v),
+    regardless of what extension they were uploaded with."""
+    if _ISO_BMFF_MAGIC not in header[:_MAGIC_SEARCH_WINDOW]:
+        raise UnsupportedFormatError(
+            "File content does not look like a valid MP4/MOV video "
+            "(missing an 'ftyp' container box near the start of the file)."
+        )
+
+
+def probe_video(path: Path, settings: VideoExtractionSettings | None = None) -> VideoMetadata:
+    """Open the video and validate duration/resolution/fps bounds.
+
+    Raises InvalidVideoError (or a subclass) on any malformed or
+    out-of-bounds file; never silently accepts a broken capture.
+    """
+    settings = settings or get_settings()
+    cap = cv2.VideoCapture(str(path))
+    try:
+        if not cap.isOpened():
+            raise InvalidVideoError(
+                "Could not open the uploaded file as a video. It may be corrupt "
+                "or use an unsupported codec."
+            )
+        width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        fps = float(cap.get(cv2.CAP_PROP_FPS) or 0.0)
+        frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
+        fourcc_int = int(cap.get(cv2.CAP_PROP_FOURCC) or 0)
+        fourcc = "".join(chr((fourcc_int >> (8 * i)) & 0xFF) for i in range(4)).strip("\x00") or None
+
+        if width <= 0 or height <= 0:
+            raise InvalidVideoError("Video reports zero or invalid resolution; the file is likely corrupt.")
+
+        # A corrupt/truncated container can report fps=0 or an absurd frame
+        # count. Fall back to actually counting frames (bounded) only when
+        # the header looks implausible, so we never trust an unchecked
+        # metadata field for validation.
+        if fps <= 0 or frame_count <= 0:
+            ok, _ = cap.read()
+            if not ok:
+                raise InvalidVideoError("Video container is unreadable (no decodable frames found).")
+            raise InvalidVideoError(
+                "Video is missing valid duration/frame-rate metadata; re-export it with a "
+                "standard MP4/MOV container."
+            )
+
+        duration_sec = frame_count / fps
+
+        if max(width, height) > settings.max_resolution_px:
+            raise VideoResolutionError(
+                f"Resolution {width}x{height} exceeds the maximum of {settings.max_resolution_px}px "
+                "on the longer side."
+            )
+        if min(width, height) < settings.min_resolution_px:
+            raise VideoResolutionError(
+                f"Resolution {width}x{height} is below the minimum of {settings.min_resolution_px}px "
+                "on the shorter side."
+            )
+        if fps > settings.max_fps:
+            raise VideoResolutionError(f"Frame rate {fps:.1f} fps exceeds the maximum of {settings.max_fps:.1f} fps.")
+        if fps < settings.min_fps:
+            raise VideoResolutionError(f"Frame rate {fps:.1f} fps is below the minimum of {settings.min_fps:.1f} fps.")
+        if duration_sec > settings.max_duration_sec:
+            raise VideoDurationError(
+                f"Duration {duration_sec:.1f}s exceeds the maximum of {settings.max_duration_sec:.0f}s."
+            )
+        if duration_sec < settings.min_duration_sec:
+            raise VideoDurationError(
+                f"Duration {duration_sec:.1f}s is below the minimum of {settings.min_duration_sec:.1f}s."
+            )
+
+        return VideoMetadata(
+            width=width,
+            height=height,
+            fps=fps,
+            frame_count=frame_count,
+            duration_sec=duration_sec,
+            codec_fourcc=fourcc,
+        )
+    finally:
+        cap.release()
+
+
+def iter_sampled_frames(
+    path: Path,
+    metadata: VideoMetadata,
+    settings: VideoExtractionSettings | None = None,
+) -> Iterator[tuple[int, float, np.ndarray]]:
+    """Yield (frame_index, timestamp_sec, bgr_frame) at an adaptive stride.
+
+    Streams the video sequentially (one `VideoCapture`, grab-then-retrieve)
+    instead of loading it into memory or seeking randomly -- seeking by
+    frame index is unreliable on many consumer MP4/MOV encodings, so every
+    frame is `grab()`-ed (cheap) and only `retrieve()`-ed (decoded) on
+    frames that land on the sampling stride.
+    """
+    settings = settings or get_settings()
+    stride = max(1, round(metadata.fps / max(settings.sample_rate_fps, 0.1)))
+
+    cap = cv2.VideoCapture(str(path))
+    try:
+        if not cap.isOpened():
+            raise InvalidVideoError("Could not reopen video for frame extraction.")
+        frame_index = 0
+        yielded = 0
+        while True:
+            if yielded >= settings.max_candidate_frames:
+                break
+            ok = cap.grab()
+            if not ok:
+                break
+            if frame_index % stride == 0:
+                ok, frame = cap.retrieve()
+                if ok and frame is not None:
+                    timestamp = frame_index / metadata.fps
+                    yield frame_index, timestamp, frame
+                    yielded += 1
+            frame_index += 1
+    finally:
+        cap.release()
+
+
+def safe_temp_video_name(job_id: str, extension: str) -> str:
+    """Build a storage-relative filename that never trusts the user's own filename."""
+    ext = extension if extension.startswith(".") else f".{extension}"
+    return f"original{ext}"

@@ -1,51 +1,149 @@
-"""Pixel-only geometric measurements and explicit millimetre calibration."""
-from __future__ import annotations
-import cv2, numpy as np
+"""Turn approved/selected reference frames into fused, provenance-tagged
+measurements, reusing the existing measurement/fusion code rather than
+inventing a parallel estimator.
 
-def _bbox(mask):
-    if mask is None or not np.any(mask): return None
-    ys,xs=np.where(mask>0); return int(xs.min()),int(ys.min()),int(xs.max()+1),int(ys.max()+1)
-def _record(value,view,confidence,note=None): return {"value":round(float(value),3) if value is not None else None,"unit":"px","confidence":confidence,"source_view":view,"calibration_status":"uncalibrated","kind":"pixel_measurement","note":note}
-def extract_pixel_measurements(selected,mask_loader):
-    m={}; warnings=[]; front=selected.get("front")
-    if front:
-        boxes={p:_bbox(mask_loader(front,p)) for p in ("rim","left_lens","right_lens","bridge")}; rb,lb,rr,bb=boxes["rim"],boxes["left_lens"],boxes["right_lens"],boxes["bridge"]
-        if rb: m["frame_width"]=_record(rb[2]-rb[0],"front",.72)
-        if lb and rr: m["lens_width"]=_record(float(np.median([lb[2]-lb[0],rr[2]-rr[0]])),"front",.68); m["lens_height"]=_record(float(np.median([lb[3]-lb[1],rr[3]-rr[1]])),"front",.68)
-        if bb: m["bridge_width"]=_record(bb[2]-bb[0],"front",.68)
-        if rb:
-            mask=mask_loader(front,"rim"); contours,_=cv2.findContours(mask,cv2.RETR_EXTERNAL,cv2.CHAIN_APPROX_SIMPLE)
-            if contours:
-                perimeter=sum(cv2.arcLength(c,True) for c in contours); area=float(np.count_nonzero(mask))
-                if perimeter>0: m["rim_thickness"]=_record(2*area/perimeter,"front",.3,"rough estimate; merchant verification required")
-    else: warnings.append("Front reference missing; front-view measurements unavailable.")
-    side=selected.get("side_left") or selected.get("side_right")
-    if side:
-        box=_bbox(mask_loader(side,"temple"))
-        if box: m["temple_length"]=_record(max(box[2]-box[0],box[3]-box[1]),side.get("view","side"),.5,"projected length; view-specific scale required")
-    else: warnings.append("Side reference missing; temple length unavailable.")
-    for key,view in (("frame_width","front"),("lens_width","front"),("lens_height","front"),("bridge_width","front"),("temple_length","side"),("rim_thickness","front")): m.setdefault(key,_record(None,view,0,"required semantic mask/reference unavailable"))
-    return {"measurements":m,"warnings":warnings,"absolute_dimensions_available":False}
-def apply_calibration(pixel_report,calibration=None,physical_measurements=None):
-    import copy
-    report=copy.deepcopy(pixel_report); calibration=calibration or {}; physical_measurements=physical_measurements or {}
-    fields={"frame_width":"frame_width_mm","lens_width":"lens_width_mm","lens_height":"lens_height_mm","bridge_width":"bridge_width_mm","temple_length":"temple_length_mm","rim_thickness":"rim_thickness_mm"}
-    for key,field in fields.items():
-        if physical_measurements.get(field) is not None:
-            value=float(physical_measurements[field])
-            if value<=0: raise ValueError(field+" must be positive")
-            report["measurements"][key]={"value":value,"unit":"mm","confidence":1.0,"source_view":"merchant_supplied","calibration_status":"merchant_supplied","kind":"physical_measurement"}
-    for item in report["measurements"].values():
-        if item["unit"]!="px" or item["value"] is None: continue
-        ref=calibration.get(item["source_view"])
-        if ref:
-            mm=float(ref.get("reference_length_mm",0)); px=float(ref.get("measured_length_px",0))
-            if mm>0 and px>0: item.update(value=round(item["value"]*mm/px,3),unit="mm",confidence=min(item["confidence"],.78),calibration_status="calibrated_from_reference",kind="calibrated_estimate")
-    missing=[k for k in fields if report["measurements"][k]["unit"]!="mm" or report["measurements"][k]["value"] is None]
-    report["missing_physical_measurements"]=missing; report["absolute_dimensions_available"]=not missing
-    if missing: report["warnings"].append("Physical dimensions missing calibration: "+", ".join(missing))
-    return report
-def to_deformation_measurements(report):
-    missing=report.get("missing_physical_measurements",[])
-    if missing: raise ValueError("Millimetre calibration is incomplete for: "+", ".join(missing))
-    return {k:float(report["measurements"][k]["value"]) for k in ("frame_width","lens_width","lens_height","bridge_width","temple_length","rim_thickness")}
+Calibration: a video alone has no absolute scale reference. This module
+supports the manual-entry calibration path in full (a merchant-supplied
+known total frame width in mm rescales every linear measurement). A
+reference-object/marker detector (the brief's stretch goal) is NOT
+implemented -- see the package README's "Known limitations" section and
+the `CalibrationInput` docstring. Without manual calibration, measurements
+fall back to the existing `MeasurementExtractor`/`MeasurementFuser`
+heuristic estimate (same one `DeformationPipeline.run_from_multiple_images`
+already relies on for ordinary photo uploads) and are tagged
+`calibration_status=estimated`, never silently relabeled as exact mm.
+"""
+
+from __future__ import annotations
+
+import numpy as np
+
+from backend.classifier.shape_classifier import ShapeClassifier
+from backend.fusion.measurement_fuser import MeasurementFuser
+from backend.measurement.extractor import MeasurementExtractor
+from backend.models import Measurements
+from backend.video_extraction.schemas import (
+    CalibrationInput,
+    CalibrationStatus,
+    MeasurementsBundle,
+    MeasurementValue,
+    SelectedFrame,
+    ViewLabel,
+)
+
+_VIDEO_VIEW_TO_FUSION_VIEW = {
+    ViewLabel.FRONT: "front",
+    ViewLabel.FRONT_LEFT_45: "three_quarter",
+    ViewLabel.FRONT_RIGHT_45: "three_quarter",
+    ViewLabel.SIDE_LEFT: "side",
+    ViewLabel.SIDE_RIGHT: "side",
+    ViewLabel.TOP: "top",
+    ViewLabel.UNKNOWN: "unknown",
+}
+
+_LINEAR_FIELDS = ("frame_width", "lens_width", "lens_height", "bridge_width", "temple_length", "rim_thickness")
+
+
+class MeasurementPreprocessor:
+    def __init__(self):
+        self.classifier = ShapeClassifier()
+        self.measurer = MeasurementExtractor()
+        self.fuser = MeasurementFuser()
+
+    def build(
+        self,
+        frames_with_masks: list[tuple[SelectedFrame, np.ndarray, np.ndarray]],
+        calibration: CalibrationInput | None = None,
+    ) -> MeasurementsBundle:
+        """``frames_with_masks``: (SelectedFrame record, decoded BGR image,
+        combined binary mask) for every approved frame, in any order."""
+        warnings: list[str] = []
+        if not frames_with_masks:
+            return MeasurementsBundle(
+                fused=None,
+                per_measurement=[],
+                calibration_status=CalibrationStatus.ESTIMATED,
+                warnings=["No approved frames were available to derive measurements from."],
+                sufficient_for_deformation=False,
+            )
+
+        per_view_measurements: list[tuple[str, Measurements]] = []
+        per_measurement: list[MeasurementValue] = []
+
+        for selected, image, mask in frames_with_masks:
+            style = self.classifier.classify_style(image, mask)
+            measurements, _contour = self.measurer.extract_from_images(
+                image,
+                side=None,
+                mask=mask,
+                shape=style.shape,
+                material=style.material,
+                nose_pads=style.nose_pads,
+                color=measurements_color_default(),
+            )
+            fusion_view = _VIDEO_VIEW_TO_FUSION_VIEW.get(selected.view, "unknown")
+            per_view_measurements.append((fusion_view, measurements))
+
+            confidence = round(min(1.0, selected.composite_score / 100.0) * (0.6 + 0.4 * selected.detection.confidence), 3)
+            for field in _LINEAR_FIELDS:
+                per_measurement.append(
+                    MeasurementValue(
+                        name=field,
+                        value=float(getattr(measurements, field)),
+                        unit="mm",
+                        confidence=confidence,
+                        source_view=selected.view.value,
+                        calibration_status=CalibrationStatus.ESTIMATED,
+                    )
+                )
+
+        try:
+            fused = self.fuser.fuse(per_view_measurements)
+        except ValueError as exc:
+            return MeasurementsBundle(
+                fused=None,
+                per_measurement=per_measurement,
+                calibration_status=CalibrationStatus.ESTIMATED,
+                warnings=[f"Could not fuse measurements: {exc}"],
+                sufficient_for_deformation=False,
+            )
+
+        calibration_status = CalibrationStatus.ESTIMATED
+        calibration_reference_mm = None
+        if calibration and calibration.known_frame_width_mm:
+            measured_width = float(fused.frame_width) or 1.0
+            scale = calibration.known_frame_width_mm / measured_width
+            fused = fused.model_copy(
+                update={field: round(getattr(fused, field) * scale, 2) for field in _LINEAR_FIELDS}
+            )
+            calibration_status = CalibrationStatus.CALIBRATED
+            calibration_reference_mm = calibration.known_frame_width_mm
+            for item in per_measurement:
+                item.calibration_status = CalibrationStatus.CALIBRATED
+        else:
+            warnings.append(
+                "No calibration reference supplied: measurements are heuristic estimates "
+                "(typical-product-photo framing assumption), not metrology-grade millimetres. "
+                "Provide `known_frame_width_mm` for a calibrated result."
+            )
+
+        views_present = {v for v, _ in per_view_measurements}
+        if "front" not in views_present:
+            warnings.append("No clean front view was selected; frame/lens/bridge width estimates are less reliable.")
+        if "side" not in views_present:
+            warnings.append("No side view was selected; temple length/curvature fell back to a frame-width heuristic.")
+        if "top" not in views_present:
+            warnings.append("No top view was selected; rim thickness fell back to a frame-width heuristic.")
+
+        return MeasurementsBundle(
+            fused=fused.model_dump(),
+            per_measurement=per_measurement,
+            calibration_status=calibration_status,
+            calibration_reference_mm=calibration_reference_mm,
+            warnings=warnings,
+            sufficient_for_deformation=True,
+        )
+
+
+def measurements_color_default() -> str:
+    return "#d9a7a2"

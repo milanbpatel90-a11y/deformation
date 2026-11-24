@@ -1,3 +1,4 @@
-"""Private eyewear video-to-reference extraction subsystem."""
-from .schemas import VideoLimits
-__all__ = ["VideoLimits"]
+"""Video-to-reference extraction: upload a glasses video, extract curated
+reference images, and feed them into the existing template deformation
+pipeline. See backend/video_extraction/README.md for full documentation.
+"""
