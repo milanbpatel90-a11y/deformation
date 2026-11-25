@@ -112,11 +112,20 @@ class VideoExtractionPipeline:
         settings: VideoExtractionSettings | None = None,
         calibration: CalibrationInput | None = None,
         progress_cb=None,
+        cancel_check=None,
     ) -> ExtractionResult:
+        """``cancel_check``, when given, is a zero-arg callable returning True
+        once this job should stop (e.g. a wall-clock deadline from
+        `jobs.py`). It is polled cooperatively between stages and inside the
+        per-frame analysis loop -- Python threads cannot be force-killed, so
+        this is how a timeout actually interrupts long-running work instead
+        of only marking the job failed while the stray thread keeps running."""
         settings = settings or get_settings()
 
         def progress(message: str) -> None:
             logger.info("job %s: %s", job_id, message)
+            if cancel_check and cancel_check():
+                raise ProcessingError("Processing timed out and was cancelled.")
             if progress_cb:
                 progress_cb(message)
 
@@ -129,7 +138,7 @@ class VideoExtractionPipeline:
             raise ProcessingError("No usable frames could be sampled from this video.")
 
         progress(f"Analyzing {len(raw_frames)} candidate frames")
-        candidates, frame_lookup = self._analyze_candidates(raw_frames, settings)
+        candidates, frame_lookup = self._analyze_candidates(raw_frames, settings, cancel_check=cancel_check)
 
         accepted = [c for c in candidates if not c.rejected]
         if not accepted:
@@ -207,12 +216,14 @@ class VideoExtractionPipeline:
     # ------------------------------------------------------------------
 
     def _analyze_candidates(
-        self, raw_frames: list[RawFrame], settings: VideoExtractionSettings
+        self, raw_frames: list[RawFrame], settings: VideoExtractionSettings, cancel_check=None
     ) -> tuple[list[FrameCandidate], dict[int, tuple[np.ndarray, np.ndarray, dict[str, np.ndarray]]]]:
         candidates: list[FrameCandidate] = []
         frame_lookup: dict[int, tuple[np.ndarray, np.ndarray, dict[str, np.ndarray]]] = {}
 
-        for raw in raw_frames:
+        for i, raw in enumerate(raw_frames):
+            if cancel_check and i % 10 == 0 and cancel_check():
+                raise ProcessingError("Processing timed out and was cancelled.")
             detection, combined_mask, per_class_masks = self.detector.detect(raw.image, settings)
             quality = analyze_frame(raw.image, combined_mask if detection.detected else None, settings)
 

@@ -118,11 +118,17 @@ class GlassesFrameDetector:
         area_fraction = float(np.count_nonzero(combined)) / frame_area
         bbox = self._mask_bbox(combined)
         missing = [c for c in EXPECTED_COMPONENTS if c not in per_class_masks]
-        confidence = float(np.mean(list(class_confidences.values()))) if class_confidences else 0.0
+        confs = list(class_confidences.values())
+        # Detection (presence) confidence = the single strongest component hit;
+        # segmentation (per-component reliability) confidence = the mean across
+        # every component actually found. Kept distinct per the task brief.
+        confidence = max(confs) if confs else 0.0
+        segmentation_confidence = float(np.mean(confs)) if confs else 0.0
 
         result = DetectionResult(
             detected=detected and settings.min_glasses_area_fraction <= area_fraction <= settings.max_glasses_area_fraction,
             confidence=round(confidence, 4),
+            segmentation_confidence=round(segmentation_confidence, 4),
             bbox=bbox,
             area_fraction=round(area_fraction, 5),
             class_confidences={k: round(v, 4) for k, v in class_confidences.items()},

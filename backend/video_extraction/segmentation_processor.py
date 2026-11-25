@@ -43,6 +43,38 @@ def build_cutout(frame: np.ndarray, mask: np.ndarray) -> np.ndarray:
     return bgra
 
 
+def build_yolo_annotation(per_class_masks: dict[str, np.ndarray], image_shape: tuple[int, int]) -> str | None:
+    """Return a YOLO-format label file body (one line per detected component:
+    ``<class_id> <cx> <cy> <w> <h>``, all normalized 0-1), or None when there
+    is nothing to derive it from (the OpenCV fallback mode produces no
+    per-class masks). Class ids are fixed to `EXPECTED_COMPONENTS`'s own
+    order so they match the model actually used
+    (``backend/segmentation/segmenter.py``'s 6-class mapping), not a
+    fabricated or renumbered scheme. A box is derived from the real mask's
+    own bounding rectangle -- never invented for a component that wasn't
+    actually segmented.
+    """
+    if not per_class_masks:
+        return None
+    h, w = image_shape[:2]
+    if h <= 0 or w <= 0:
+        return None
+    lines: list[str] = []
+    for class_id, class_name in enumerate(EXPECTED_COMPONENTS):
+        mask = per_class_masks.get(class_name)
+        if mask is None or not np.any(mask):
+            continue
+        ys, xs = np.where(mask > 0)
+        x0, x1 = int(xs.min()), int(xs.max())
+        y0, y1 = int(ys.min()), int(ys.max())
+        box_w, box_h = (x1 - x0 + 1), (y1 - y0 + 1)
+        cx, cy = x0 + box_w / 2.0, y0 + box_h / 2.0
+        lines.append(f"{class_id} {cx / w:.6f} {cy / h:.6f} {box_w / w:.6f} {box_h / h:.6f}")
+    if not lines:
+        return None
+    return "\n".join(lines) + "\n"
+
+
 def persist_selected_frame(
     storage: VideoExtractionStorage,
     job_id: str,
@@ -92,6 +124,12 @@ def persist_selected_frame(
 
     component_visibility = {name: name in per_class_masks for name in EXPECTED_COMPONENTS}
 
+    annotation_rel: str | None = None
+    annotation_body = build_yolo_annotation(per_class_masks, frame.shape)
+    if annotation_body:
+        annotation_rel = f"annotations/{base}.txt"
+        storage.save(job_id, annotation_rel, annotation_body.encode("utf-8"))
+
     return SelectedFrame(
         frame_index=frame_index,
         timestamp_sec=timestamp_sec,
@@ -107,4 +145,5 @@ def persist_selected_frame(
         is_additional=is_additional,
         manually_replaced=manually_replaced,
         component_visibility=component_visibility,
+        annotation_path=annotation_rel,
     )

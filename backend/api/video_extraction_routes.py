@@ -144,6 +144,8 @@ def _public_frame(job_id: str, frame: dict) -> dict:
         "overlay_url": storage.local_url(job_id, frame["overlay_path"]) if frame.get("overlay_path") else None,
         "cutout_url": storage.local_url(job_id, frame["cutout_path"]) if frame.get("cutout_path") else None,
         "mask_urls": {k: storage.local_url(job_id, v) for k, v in frame.get("mask_paths", {}).items()},
+        "annotation_url": storage.local_url(job_id, frame["annotation_path"]) if frame.get("annotation_path") else None,
+        "measurement_refs": frame.get("measurement_refs", []),
     }
 
 

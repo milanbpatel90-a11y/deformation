@@ -108,10 +108,22 @@ class QualityMetrics(BaseModel):
 
 
 class DetectionResult(BaseModel):
-    """Glasses detection/segmentation summary for one frame."""
+    """Glasses detection/segmentation summary for one frame.
+
+    `confidence` and `segmentation_confidence` are kept separately per the
+    task brief ("Keep detection confidence and segmentation confidence
+    separately"): `confidence` is the highest per-class confidence found
+    (an "is there a glasses object here" presence signal), while
+    `segmentation_confidence` is the mean per-class confidence across every
+    detected component (a "how reliable is the per-component segmentation"
+    signal). In the OpenCV fallback mode there is no per-class segmentation
+    at all, so `segmentation_confidence` is honestly 0.0, not a duplicate of
+    `confidence`.
+    """
 
     detected: bool
     confidence: float = 0.0
+    segmentation_confidence: float = 0.0
     bbox: tuple[int, int, int, int] | None = None  # x, y, w, h in pixels
     area_fraction: float = 0.0
     class_confidences: dict[str, float] = Field(default_factory=dict)
@@ -162,6 +174,15 @@ class SelectedFrame(BaseModel):
     approval_status: str = Field(
         default="pending", description="One of: pending, approved, rejected -- set once the merchant reviews the set."
     )
+    annotation_path: str | None = Field(
+        default=None,
+        description="YOLO-format label .txt for this frame (class-id + normalized bbox per detected component), "
+        "when the segmenter ran in YOLO mode. None in the OpenCV fallback mode, where no per-class boxes exist.",
+    )
+    measurement_refs: list[str] = Field(
+        default_factory=list,
+        description="Names of the measurements (from MeasurementValue.name) that were derived from this frame.",
+    )
 
 
 class MeasurementValue(BaseModel):
@@ -173,6 +194,9 @@ class MeasurementValue(BaseModel):
     confidence: float
     source_view: str
     calibration_status: CalibrationStatus
+    source_frame_index: int | None = Field(
+        default=None, description="frame_index of the SelectedFrame this measurement was derived from."
+    )
 
 
 class MeasurementsBundle(BaseModel):

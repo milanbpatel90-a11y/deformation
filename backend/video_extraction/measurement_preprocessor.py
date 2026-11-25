@@ -87,6 +87,7 @@ class MeasurementPreprocessor:
             per_view_measurements.append((fusion_view, measurements))
 
             confidence = round(min(1.0, selected.composite_score / 100.0) * (0.6 + 0.4 * selected.detection.confidence), 3)
+            frame_measurement_names: list[str] = []
             for field in _LINEAR_FIELDS:
                 per_measurement.append(
                     MeasurementValue(
@@ -96,8 +97,14 @@ class MeasurementPreprocessor:
                         confidence=confidence,
                         source_view=selected.view.value,
                         calibration_status=CalibrationStatus.ESTIMATED,
+                        source_frame_index=selected.frame_index,
                     )
                 )
+                frame_measurement_names.append(field)
+            # Record, on the frame itself, which measurements it fed -- this is
+            # the "measurement references" the brief asks each selected image
+            # to carry (section 7's per-image field list).
+            selected.measurement_refs = frame_measurement_names
 
         try:
             fused = self.fuser.fuse(per_view_measurements)
