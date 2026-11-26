@@ -1,0 +1,2 @@
+# Minimal dependency for mask-dimension checks and apply_reviewed_masks.py
+opencv-python>=4.8,<5
