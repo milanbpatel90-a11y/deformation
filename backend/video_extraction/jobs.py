@@ -44,17 +44,33 @@ class JobRunner:
             future = self._inflight.get(job_id)
             return future is not None and not future.done()
 
-    def submit(self, job_id: str, fn: Callable[[], None]) -> bool:
-        """Submit work for job_id. Returns False if already running."""
+    def submit(
+        self,
+        job_id: str,
+        fn: Callable[[Callable[[], bool]], None],
+        timeout_seconds: float | None = None,
+    ) -> bool:
+        """Submit work for job_id. Returns False if already running.
+
+        ``fn`` is called with one argument, ``cancel_check``: a zero-arg
+        callable that returns True once ``timeout_seconds`` has elapsed since
+        this call. ``fn`` is expected to poll it cooperatively (threads can't
+        be force-killed) and raise rather than keep running past it.
+        """
         with self._lock:
             existing = self._inflight.get(job_id)
             if existing is not None and not existing.done():
                 return False
 
+            deadline = (time.monotonic() + timeout_seconds) if timeout_seconds else None
+            cancel_check: Callable[[], bool] = (
+                (lambda: time.monotonic() > deadline) if deadline is not None else (lambda: False)
+            )
+
             def _run() -> None:
                 started = time.perf_counter()
                 try:
-                    fn()
+                    fn(cancel_check)
                 except Exception as exc:  # noqa: BLE001 - never swallow, record it
                     logger.exception("Video extraction job %s failed", job_id)
                     db.update_job(

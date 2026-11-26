@@ -34,8 +34,10 @@ class _SynchronousJobRunner:
     def is_running(self, job_id):
         return False
 
-    def submit(self, job_id, fn):
-        fn()
+    def submit(self, job_id, fn, timeout_seconds=None):
+        # No real timeout enforcement needed for synchronous test execution;
+        # the cancel_check just always reports "not cancelled".
+        fn(lambda: False)
         return True
 
 

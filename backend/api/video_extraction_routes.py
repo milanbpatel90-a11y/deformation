@@ -239,13 +239,23 @@ def process_video(
     )
 
     runner = get_job_runner()
-    submitted = runner.submit(job_id, lambda: _run_extraction(job_id, video_path, calibration))
+    settings = get_settings()
+    submitted = runner.submit(
+        job_id,
+        lambda cancel_check: _run_extraction(job_id, video_path, calibration, cancel_check),
+        timeout_seconds=settings.processing_timeout_seconds,
+    )
     if not submitted:
         raise HTTPException(status_code=409, detail="This job is already being processed.")
     return {"message": "Processing started.", "job_id": job_id, "status": "queued"}
 
 
-def _run_extraction(job_id: str, video_path: Path, calibration: CalibrationInput | None) -> None:
+def _run_extraction(
+    job_id: str,
+    video_path: Path,
+    calibration: CalibrationInput | None,
+    cancel_check=None,
+) -> None:
     storage = get_storage()
     db.update_job(job_id, status="processing", progress_message="Starting...")
     pipeline = VideoExtractionPipeline()
@@ -254,7 +264,9 @@ def _run_extraction(job_id: str, video_path: Path, calibration: CalibrationInput
         db.update_job(job_id, progress_message=message)
 
     try:
-        result = pipeline.run(job_id, video_path, storage, calibration=calibration, progress_cb=progress)
+        result = pipeline.run(
+            job_id, video_path, storage, calibration=calibration, progress_cb=progress, cancel_check=cancel_check
+        )
     except VideoExtractionError as exc:
         db.update_job(job_id, status="failed", error=str(exc))
         return
@@ -465,6 +477,40 @@ def correct_view(
     return _reprocess_frame_in_place(job, frame_index, mutate)
 
 
+@router.post("/{job_id}/frames/{frame_index}/reject")
+def reject_frame(job_id: str, frame_index: int, user: dict = Depends(_CAN_WRITE)):
+    """Mark one selected frame as unusable (task brief section 8's "reject
+    unusable images"), distinct from the final `/approve` step: a merchant
+    can prune bad candidates one at a time while still reviewing the rest of
+    the set, rather than only ever excluding them implicitly by leaving them
+    out of `approved_frame_indices`. A rejected frame is kept (not deleted)
+    so its slot still shows in the gallery with its status, and can be
+    un-rejected or replaced; `/approve` refuses to approve a frame that is
+    still marked rejected."""
+    job = _authorize_job(job_id, user)
+    if job["status"] not in {"awaiting_approval"}:
+        raise HTTPException(status_code=409, detail=f"Job is '{job['status']}'; frames can only be edited while 'awaiting_approval'.")
+
+    def mutate(old: SelectedFrame) -> SelectedFrame:
+        return old.model_copy(update={"approval_status": "rejected"})
+
+    return _reprocess_frame_in_place(job, frame_index, mutate)
+
+
+@router.post("/{job_id}/frames/{frame_index}/unreject")
+def unreject_frame(job_id: str, frame_index: int, user: dict = Depends(_CAN_WRITE)):
+    """Undo a `/reject`, returning the frame to `pending` so it can be
+    approved or replaced again."""
+    job = _authorize_job(job_id, user)
+    if job["status"] not in {"awaiting_approval"}:
+        raise HTTPException(status_code=409, detail=f"Job is '{job['status']}'; frames can only be edited while 'awaiting_approval'.")
+
+    def mutate(old: SelectedFrame) -> SelectedFrame:
+        return old.model_copy(update={"approval_status": "pending"})
+
+    return _reprocess_frame_in_place(job, frame_index, mutate)
+
+
 @router.post("/{job_id}/approve")
 async def approve_frames(
     job_id: str,
@@ -497,6 +543,13 @@ async def approve_frames(
     missing = wanted - frames_by_index.keys()
     if missing:
         raise HTTPException(status_code=400, detail=f"Unknown frame_index value(s): {sorted(missing)}")
+    still_rejected = {i for i in wanted if frames_by_index[i].get("approval_status") == "rejected"}
+    if still_rejected:
+        raise HTTPException(
+            status_code=400,
+            detail=f"frame_index value(s) {sorted(still_rejected)} were rejected during review; "
+            "call /unreject first if you want to approve them after all.",
+        )
 
     storage = get_storage()
     for frame in frames:
@@ -529,12 +582,18 @@ async def approve_frames(
 
     # Generate a QC report after deformation (task brief section 9): what
     # was approved, whether the quality gate passed, and a plain confirmation
-    # that the semantic node names/pivots this feature must never rename
-    # (Frame/LeftRim/RightRim/Bridge/LeftTemple/RightTemple/LeftLens/
-    # RightLens/LeftNosePad/RightNosePad) are the existing exporter's own
-    # unmodified output -- this feature does not touch `glb_exporter.py` or
-    # introduce a second GLB generator, so node naming is whatever the
-    # existing, untouched exporter already produces for every other caller.
+    # that the semantic node names/pivots this feature must never rename are
+    # the existing exporter's own unmodified output -- this feature does not
+    # touch `glb_exporter.py` or introduce a second GLB generator, so node
+    # naming is whatever the existing, untouched exporter already produces
+    # for every other caller. The brief names these nodes as
+    # Frame/LeftRim/RightRim/Bridge/LeftTemple/RightTemple/LeftLens/
+    # RightLens/LeftNosePad/RightNosePad; the repo's actual, pre-existing
+    # exporter output matches that for every node except the nose pads,
+    # which this exporter names `left_nose_pad`/`right_nose_pad` (see
+    # backend/generator/parametric_glb_generator.py). That is reported
+    # below as `actual_nose_pad_node_names` rather than silently restating
+    # the brief's spelling as fact.
     storage.save(
         job_id,
         "metadata/qc_report.json",
@@ -548,6 +607,7 @@ async def approve_frames(
                 "quality_passed": (result.get("quality") or {}).get("passed", True),
                 "used_existing_template_registry_and_deformation_engine": True,
                 "generated_a_second_glb_generator": False,
+                "actual_nose_pad_node_names": ["left_nose_pad", "right_nose_pad"],
             },
             indent=2,
             default=str,
@@ -579,7 +639,12 @@ def regenerate(job_id: str, user: dict = Depends(_CAN_WRITE)):
         deform_result=None,
     )
     runner = get_job_runner()
-    submitted = runner.submit(job_id, lambda: _run_extraction(job_id, video_path, calibration))
+    settings = get_settings()
+    submitted = runner.submit(
+        job_id,
+        lambda cancel_check: _run_extraction(job_id, video_path, calibration, cancel_check),
+        timeout_seconds=settings.processing_timeout_seconds,
+    )
     if not submitted:
         raise HTTPException(status_code=409, detail="This job is already being processed.")
     return {"message": "Regeneration started.", "job_id": job_id, "status": "queued"}

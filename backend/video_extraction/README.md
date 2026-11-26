@@ -84,8 +84,12 @@ merchant instead of a silently-exported bad mesh. A `metadata/qc_report.json`
 is written alongside the model confirming the approved frame set, the
 template used, the quality verdict, and that no second GLB generator was
 introduced — the existing exporter's own semantic node names/pivots
-(Frame/LeftRim/RightRim/Bridge/LeftTemple/RightTemple/LeftLens/RightLens/
-LeftNosePad/RightNosePad) are untouched by this feature.
+(Frame/LeftRim/RightRim/Bridge/LeftTemple/RightTemple/LeftLens/RightLens)
+are untouched by this feature. The nose pads are the one name mismatch
+worth calling out: the existing exporter names them `left_nose_pad`/
+`right_nose_pad`, not `LeftNosePad`/`RightNosePad` — this feature reports
+the real names in `qc_report.json` rather than restating the brief's
+spelling.
 
 ## Per-job storage layout
 

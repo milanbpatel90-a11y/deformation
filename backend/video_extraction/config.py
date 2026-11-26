@@ -103,6 +103,11 @@ class VideoExtractionSettings:
     # ---- Background job execution --------------------------------------------
     worker_pool_size: int = field(default_factory=lambda: _env_int("VIDEOX_WORKER_POOL_SIZE", 2))
     max_jobs_per_user: int = field(default_factory=lambda: _env_int("VIDEOX_MAX_JOBS_PER_USER", 3))
+    # Wall-clock budget for one extraction run. Threads can't be force-killed in
+    # Python, so this is enforced cooperatively: jobs.py computes a deadline and
+    # hands the pipeline a cancel_check() it polls between frames; past the
+    # deadline the pipeline raises instead of running unboundedly.
+    processing_timeout_seconds: int = field(default_factory=lambda: _env_int("VIDEOX_PROCESSING_TIMEOUT_SECONDS", 600))
 
     @property
     def max_upload_bytes(self) -> int:
