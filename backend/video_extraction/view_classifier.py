@@ -4,8 +4,8 @@ IMPORTANT, stated plainly (see also the package README): this is a
 heuristic classifier built from mask geometry (bounding-box aspect ratio,
 left/right mask-area symmetry) layered on top of the YOLO segmentation.
 It is NOT a calibrated pose estimator and does not know the true camera
-rotation in degrees. "front_left_45" / "front_right_45" / "side_left" /
-"side_right" are approximate buckets chosen from aspect-ratio and
+rotation in degrees. "front_left_45" / "front_right_45" / "left_side" /
+"right_side" / "top" / "bottom" / "rear_inside" are approximate buckets chosen from aspect-ratio and
 asymmetry thresholds, not a geometric reconstruction of viewing angle.
 When confidence is low the frame is labeled `unknown` rather than guessed,
 and the dashboard lets a human confirm/correct it before approval.

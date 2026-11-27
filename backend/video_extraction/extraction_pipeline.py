@@ -19,11 +19,15 @@ kept here verbatim as the architecture record the task brief asked for):
           exposure, mask-localized glare.
        c. view_classifier -> heuristic view bucket + confidence, using
           mask aspect ratio / left-right symmetry (NOT a pose estimator).
-       d. duplicate_filter -> perceptual hash, for later de-duplication.
+       d. duplicate_filter -> whole-frame perceptual hash AND, when a
+          detection bbox exists, an eyewear-cropped perceptual hash, for
+          later de-duplication by either signal.
        Frames failing detection/quality gates are marked rejected with
        reasons, not silently dropped (they still appear in the report).
-    4. duplicate_filter + frame_ranker: drop near-duplicates by phash
-       within each view bucket, then keep the top-N highest composite-score
+    4. duplicate_filter + frame_ranker: drop near-duplicates (by whole-frame
+       phash OR, when both frames have one, cropped-eyewear phash -- a
+       changing background alone no longer hides a true duplicate) within
+       each view bucket, then keep the top-N highest composite-score
        candidates per view bucket (diversity-aware: every bucket gets a
        chance, not just globally-top-scoring frames).
     5. segmentation_processor: for the selected frames only, persist
@@ -57,7 +61,12 @@ import cv2
 import numpy as np
 
 from backend.video_extraction.config import VideoExtractionSettings, get_settings
-from backend.video_extraction.duplicate_filter import compute_phash, filter_duplicates, hamming_distance
+from backend.video_extraction.duplicate_filter import (
+    compute_crop_phash,
+    compute_phash,
+    filter_duplicates,
+    hamming_distance,
+)
 from backend.video_extraction.exceptions import ProcessingError
 from backend.video_extraction.frame_extractor import RawFrame, extract_candidate_frames
 from backend.video_extraction.frame_ranker import select_best_per_view
@@ -235,6 +244,7 @@ class VideoExtractionPipeline:
                 else (ViewLabel.UNKNOWN, 0.0)
             )
             phash = compute_phash(raw.image)
+            crop_phash = compute_crop_phash(raw.image, detection.bbox)
 
             candidate = FrameCandidate(
                 frame_index=raw.frame_index,
@@ -244,6 +254,7 @@ class VideoExtractionPipeline:
                 quality=quality,
                 detection=detection,
                 phash=phash,
+                crop_phash=crop_phash,
             )
 
             reasons: list[str] = []
@@ -273,7 +284,8 @@ class VideoExtractionPipeline:
         kept: list[FrameCandidate] = []
         for view, items in by_view.items():
             scored = [(c.phash or "", c.quality.overall_quality) for c in items]
-            keep_indices = set(filter_duplicates(scored))
+            crop_hashes = [c.crop_phash for c in items]
+            keep_indices = set(filter_duplicates(scored, crop_hashes=crop_hashes))
             kept.extend(items[i] for i in keep_indices)
         return kept
 

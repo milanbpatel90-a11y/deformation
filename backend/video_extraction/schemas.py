@@ -141,6 +141,7 @@ class FrameCandidate(BaseModel):
     quality: QualityMetrics
     detection: DetectionResult
     phash: str | None = None
+    crop_phash: str | None = None  # perceptual hash of just the detected eyewear bbox crop, when available
     composite_score: float = 0.0
     rejected: bool = False
     rejection_reasons: list[str] = Field(default_factory=list)
